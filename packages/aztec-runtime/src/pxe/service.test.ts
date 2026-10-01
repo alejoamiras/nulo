@@ -23,10 +23,10 @@ vi.mock("./note-schemas", () => ({
 	loadProductionNoteSchemas: async () => new Map<string, unknown>(),
 }))
 
-import type { PXE } from "@aztec/pxe/client/bundle"
-import type { AztecAddress } from "@aztec/stdlib/aztec-address"
-import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import type { PXE } from "@aztec-labs/pxe/client/bundle"
+import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import type { ContractInstanceWithAddress } from "@aztec-labs/stdlib/contract"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { ChainRuntime, type NetworkInfo, type PxeFactory } from "./chain-runtime"
 import { PxeService, type IProfileReader } from "./service"
@@ -352,5 +352,31 @@ describe("PxeService op-failure log classification", () => {
 		const { service, calls } = makeSpyLoggerService(factory)
 		await expect(service.getContractInstance(network, address)).rejects.toThrow("store exploded")
 		expect(errorCalls(calls).length).toBeGreaterThan(0)
+	})
+})
+
+describe("PxeService.getLatestBlockNumber", () => {
+	beforeEach(() => {
+		vi.stubGlobal("chrome", {
+			runtime: { onMessage: { addListener: () => {}, removeListener: () => {} }, sendMessage: () => Promise.resolve() },
+		})
+	})
+	afterEach(() => vi.unstubAllGlobals())
+
+	test("serves the node's untagged block number", async () => {
+		const tags: unknown[] = []
+		const factory: PxeFactory = {
+			createChainRuntime: async (n) => {
+				const node = {
+					getBlockNumber: async (...args: unknown[]) => {
+						tags.push(...args)
+						return 4242
+					},
+				} as unknown as AztecNode
+				return new ChainRuntime(n.chainId, node, {} as PXE, n.rpcUrl)
+			},
+		}
+		await expect(makeService(factory).getLatestBlockNumber(network)).resolves.toBe(4242)
+		expect(tags).toEqual([])
 	})
 })

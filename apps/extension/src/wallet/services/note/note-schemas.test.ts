@@ -15,9 +15,9 @@
  * bb.js here because it tends to fault under repeated unit-test calls.
  */
 import { describe, expect, test } from "vitest"
-import { loadContractArtifact } from "@aztec/stdlib/abi"
-import { NFTContractArtifact } from "@aztec/noir-contracts.js/NFT"
-import { TokenContractArtifact } from "@aztec/noir-contracts.js/Token"
+import { loadContractArtifact } from "@aztec-labs/stdlib/abi"
+import { NFTContractArtifact } from "@aztec-labs/noir-contracts.js/NFT"
+import { TokenContractArtifact } from "@aztec-labs/noir-contracts.js/Token"
 // @ts-expect-error — vite alias
 import WonderlandTokenJson from "@wonderland-token-artifact"
 // @ts-expect-error — vite alias

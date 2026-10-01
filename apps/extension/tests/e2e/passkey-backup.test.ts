@@ -12,9 +12,9 @@
  *   1. Export full backup as a passkey profile — modal appears, virtual
  *      authenticator completes, CTAs become available. Locks in the
  *      `usePasskeyCeremony` wiring on the export page.
- *   2. Export cancel UX — Escape during the modal returns the user to
- *      the agreement gate (`isAgreed = false`), NOT a dead form or a
- *      toast+bounce.
+ *   2. Export cancel UX — Escape during the modal is marked handled and
+ *      returns the user to the agreement gate (`isAgreed = false`), NOT a
+ *      dead form or a toast+bounce.
  *   3. (Commit 2) In-session import round-trip — register, build a
  *      synthetic passkey backup with the real credentialId, reset storage,
  *      drive the import flow, assert the same address comes back.
@@ -25,9 +25,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect } from "vitest"
 import type { Page } from "puppeteer"
-import { clickByTestId, openPopup, replaceInputValue, waitForHash, test, pickFileByTestId } from "./fixtures/extension"
+import { clickByTestId, expectNoNameField, openPopup, waitForHash, test, pickFileByTestId } from "./fixtures/extension"
 import { getActiveProfileName } from "./fixtures/helpers"
 import { setupPasskeyVirtualAuth, stallNextPasskeyCeremony } from "./fixtures/passkey"
+import { pressEscape } from "./helpers/pointer-probes"
 
 /** Reset the wallet via the in-app reset flow (settings → security → reset).
  *  Cascades through every service (NetworkService.onProfileDeleted, etc.) so
@@ -44,8 +45,8 @@ async function resetWallet(page: Page): Promise<void> {
 	await clickByTestId(page, "reset-checkbox-permanent")
 	await clickByTestId(page, "reset-checkbox-undone")
 	await clickByTestId(page, "reset-checkbox-sure")
-	// Profile name is user-typed (F1) — read it from the reset page's
-	// data-profile-name attribute rather than hardcoding.
+	// Read the profile name from the reset page's data-profile-name attribute rather than
+	// hardcoding it.
 	const activeProfileName = await getActiveProfileName(page)
 	await page.evaluate((expectedName: string) => {
 		const input = document.querySelector<HTMLInputElement>('[data-testid="reset-confirm-input"] input')
@@ -80,9 +81,8 @@ async function registerPasskeyProfile(page: Page): Promise<void> {
 	})
 	await clickByTestId(page, "register-create-btn")
 
-	// F1: name is required at submit time.
-	await page.waitForSelector('[data-testid="register-name-input"]', { visible: true, timeout: 10_000 })
-	await replaceInputValue(page, '[data-testid="register-name-input"]', "Test Profile")
+	// A fresh install's first profile has no name field; it is created as "Main".
+	await expectNoNameField(page, "register-page", "register-name-input")
 
 	await page.waitForSelector('[data-testid="register-method-passkey"]', { visible: true, timeout: 10_000 })
 	await clickByTestId(page, "register-method-passkey")
@@ -134,7 +134,7 @@ function buildSyntheticPasskeyBackup(credentialId: string, dekSealed: string, ac
 	const body = {
 		"wallet-version": "test",
 		"aztec-version": "test",
-		"compat-epoch": 4,
+		"compat-epoch": 5,
 		"backup-schema-version": 1,
 		// Passkey blobs carry the credentialId as master-key and NEVER an entropy field
 		// (the master re-derives from the passkey PRF at restore).
@@ -371,9 +371,8 @@ test("passkey full-backup export: Escape during modal resets agreement gate", as
 		// for the dialog first makes the Escape land deterministically.
 		await page.waitForSelector('[data-testid="passkey-ceremony-dialog"]', { visible: true, timeout: 15_000 })
 
-		// Press Escape via the dialog's window keydown handler. Wait for the
-		// modal to dismount and the agreement gate to return.
-		await page.keyboard.press("Escape")
+		// Chrome closes its toolbar popup, the whole wallet, on an Escape the page leaves unhandled.
+		expect(await pressEscape(page), "the dialog's Escape went unhandled; the toolbar popup would close").toBe(true)
 
 		await page.waitForFunction(
 			() => {

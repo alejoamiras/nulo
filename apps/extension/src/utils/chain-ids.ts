@@ -13,21 +13,21 @@ export function walletChainId(l1ChainId: number, rollupVersion: number): number 
 	return (l1ChainId ^ rollupVersion) >>> 0
 }
 
-/** Alpha mainnet identity (live-verified 2026-07-21 via node_getNodeInfo: nodeVersion 5.0.1). */
+/** Ethereum mainnet's L1 id: the trust root a stored `mainnet`-kind network row is checked against.
+ *  No mainnet network is seeded on the V6 line. */
 export const MAINNET_L1_CHAIN_ID = 1
-export const MAINNET_ROLLUP_VERSION = 4248422647
 
-/** V5 testnet identity — the L1/rollup pair behind CHAIN_IDS.TESTNET; the tools app's
- *  chain-constants.ts independently pins the same pair (release chain-guard). */
+/** V6 testnet identity (live-verified 2026-10-01 via node_getNodeInfo: nodeVersion 6.0.0-rc.1) —
+ *  the L1/rollup pair behind CHAIN_IDS.TESTNET. The bridge keeps its own copy; nothing checks that
+ *  the two agree. */
 export const TESTNET_L1_CHAIN_ID = 11155111
-export const TESTNET_ROLLUP_VERSION = 1821665230
+export const TESTNET_ROLLUP_VERSION = 2914217885
 
 /** Anvil's fixed default chain id — the seeded Local Network's L1 identity. Hardcoded (never
  *  probed at seed time) so profile creation stays offline-safe; key derivation consumes it. */
 export const LOCAL_L1_CHAIN_ID = 31337
 
 export const CHAIN_IDS = {
-	MAINNET: walletChainId(MAINNET_L1_CHAIN_ID, MAINNET_ROLLUP_VERSION), // 4248422646
-	TESTNET: walletChainId(TESTNET_L1_CHAIN_ID, TESTNET_ROLLUP_VERSION), // 1816023401 — V5 testnet
+	TESTNET: walletChainId(TESTNET_L1_CHAIN_ID, TESTNET_ROLLUP_VERSION), // 2904119610 — V6 testnet
 	SANDBOX: 0, // localhost:8080
 } as const

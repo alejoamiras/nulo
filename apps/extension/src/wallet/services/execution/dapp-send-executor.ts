@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 /**
  * `DappSendExecutor` — the dApp-initiated send flows (standard,
  * aztec.js, NO_FROM/DefaultEntrypoint) plus dApp fee estimation, moved
@@ -26,12 +27,12 @@
  *     not a defensible ceiling for simulation time.
  */
 
-import { CallAuthorizationRequest, computeAuthWitMessageHash } from "@aztec/aztec.js/authorization"
-import { type InteractionWaitOptions, type SendReturn, extractOffchainOutput } from "@aztec/aztec.js/contracts"
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import type { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { collectOffchainEffects } from "@aztec/stdlib/tx"
+import { CallAuthorizationRequest, computeAuthWitMessageHash } from "@aztec-labs/aztec.js/authorization"
+import { type InteractionWaitOptions, type SendReturn, extractOffchainOutput } from "@aztec-labs/aztec.js/contracts"
+import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { collectOffchainEffects } from "@aztec-labs/stdlib/tx"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import { type JobError, type JobProgress, JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { markFailedUnlessCancelled } from "./mark-failed-unless-cancelled"
@@ -44,13 +45,15 @@ import type { LocalTxOrigin, TransactionService } from "@/wallet/services/transa
 import type { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import type { Network } from "@/wallet/services/network/service"
 import type { FpcInfo } from "@/wallet/services/fpc/spec"
+import type { PublicStorageReader } from "@/wallet/utils/fee-juice-balance"
 import type { DiscoveryAwareEstimator } from "./discovery-aware-estimator"
-import { type ExecutionCoordinator, fenceChecks } from "./execution-coordinator"
+import { type ExecutionCoordinator, type ProveAndSendContext, fenceChecks } from "./execution-coordinator"
 import type { ExecutionMutexRelease } from "./execution-mutex"
 import type { OperationEstimateReuse, OperationEstimateReuseEntry } from "./operation-estimate-reuse"
 import { fingerprintNoFromInputs, fingerprintOperation, type OperationFingerprintInput } from "./operation-fingerprint"
 import { PREVIEW_FOREIGN_MESSAGE, type PreviewLookup, type PreviewSnapshots, assertWithinPreview } from "./preview-snapshots"
 import { toDiscoveredAuthwit } from "./discovered-authwit"
+import { probeSponsorFunding } from "./sponsor-funding"
 import { fingerprintBaseFee } from "./transfer-estimate-reuse"
 import { applyEmbeddedFpcGasCap } from "./fee/embedded-fpc-cap"
 import { type FeeEstimate, finalizeGasLimits, suggestGasLimits } from "./fee/fee-strategy"
@@ -116,6 +119,7 @@ export interface DappSendExecutorLane {
 		fence?: ExecutionFence,
 	): Promise<string | undefined>
 	markJournal(journalId: string | undefined, progress: JobProgress, error?: JobError | null): Promise<void>
+	commitJournal(journalId: string | undefined, progress: JobProgress): Promise<void>
 }
 
 type AddTransactionArgs = Parameters<DappSendExecutorDeps["addTransaction"]>
@@ -155,6 +159,8 @@ export interface DappSendExecutorDeps {
 	isFenceLive(fence: ExecutionFence): boolean
 	getNetwork(networkId: string): Promise<Network>
 	getNode(chainId: number): Promise<FeeEstimate["node"]>
+	/** The sponsor probe's read: bounded and silent, unlike the build's retrying `node`. */
+	readPublicStorageOnce: PublicStorageReader
 	getPXE(network: Network): FeeEstimate["pxe"]
 	getAccountContract(profileId: string, chainId: number, accountAddress: string): Promise<FeeEstimate["account"]>
 	getPendingForAccount(account: string): { hash: string }[]
@@ -222,6 +228,7 @@ export class DappSendExecutor {
 			journalId: string | undefined
 			checkCancelled: () => void
 			markJournal: (patch: JobProgress) => Promise<void>
+			commitSubmitting: ProveAndSendContext["commitSubmitting"]
 		}) => Promise<T>,
 	): Promise<T> {
 		const { release: releaseSlot, preController } = await this.deps.lane.acquireSlot(
@@ -254,6 +261,7 @@ export class DappSendExecutor {
 				journalId,
 				checkCancelled,
 				markJournal: (patch) => this.deps.lane.markJournal(journalId, patch),
+				commitSubmitting: (patch) => this.deps.lane.commitJournal(journalId, { stage: "submitting", ...patch }),
 			})
 		} catch (error) {
 			await markFailedUnlessCancelled(error, journalId, this.deps.lane)
@@ -322,6 +330,10 @@ export class DappSendExecutor {
 		)
 		const { txRequest } = built
 		checkCancelled()
+		const sponsorFunding = await probeSponsorFunding(built, this.deps.readPublicStorageOnce, (msg, data) =>
+			this.deps.logDebug(msg, data),
+		)
+		checkCancelled()
 
 		const identity = fingerprintInputFor(operation, feeSettings, detectedFee, preDiscoveryActions)
 		const discoveredHashes = discovered.map((d) => d.messageHash)
@@ -340,6 +352,7 @@ export class DappSendExecutor {
 			estimateId,
 			previewId,
 			...(bound ? { discoveredAuthwits: discovered } : {}),
+			...(sponsorFunding ? { sponsorFunding } : {}),
 		}
 	}
 
@@ -570,7 +583,7 @@ export class DappSendExecutor {
 				fence,
 				getCalls: () => (primaryMethod ? [{ method: primaryMethod }] : undefined),
 			},
-			async ({ checkCancelled, markJournal, journalId }) => {
+			async ({ checkCancelled, markJournal, commitSubmitting, journalId }) => {
 				// Enter `simulating` BEFORE the build/estimate work — fee
 				// strategies inside the build run real simulateTx calls (can be
 				// several seconds), and leaving the journal at `pending` would
@@ -602,6 +615,8 @@ export class DappSendExecutor {
 					checkCancelled,
 					...fenceChecks(this.deps, fence),
 					markJournal,
+					commitSubmitting,
+					submittedEndpointUrl: primaryEndpointUrl(network),
 					// grantPublicAuthwit routes here (kind: send_transaction), so this is where a granted
 					// authwit is recorded.
 					recordTransaction: this.sentTxRecorder({
@@ -667,7 +682,7 @@ export class DappSendExecutor {
 					return primaryMethod ? [{ method: primaryMethod }] : undefined
 				},
 			},
-			async ({ checkCancelled, markJournal, journalId }) => {
+			async ({ checkCancelled, markJournal, commitSubmitting, journalId }) => {
 				if (op.accountAddress !== op.opts?.from?.toString()) {
 					throw new Error("Invalid `opts.from`")
 				}
@@ -716,6 +731,8 @@ export class DappSendExecutor {
 					checkCancelled,
 					...fenceChecks(this.deps, fence),
 					markJournal,
+					commitSubmitting,
+					submittedEndpointUrl: primaryEndpointUrl(network),
 					wantOffchainOutput: (provedTx) => {
 						const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
 						return extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
@@ -862,7 +879,7 @@ export class DappSendExecutor {
 					return primaryMethod ? [{ method: primaryMethod }] : undefined
 				},
 			},
-			async ({ checkCancelled, markJournal, journalId }) => {
+			async ({ checkCancelled, markJournal, commitSubmitting, journalId }) => {
 				await markJournal({ stage: "simulating" })
 
 				const prepared = await this.prepareNoFrom(op, fence, parentTask)
@@ -879,6 +896,7 @@ export class DappSendExecutor {
 					parentTask,
 				)
 				await finalizeGasLimits(node, txRequest, simulatedTx, 1, undefined, feeOpts, 1, txsLimits)
+				const submittedEndpointUrl = primaryEndpointUrl(network)
 
 				// Prove with account in scope
 				const { txHash, offchainOutput } = await this.deps.coordinator.proveAndSend({
@@ -891,6 +909,8 @@ export class DappSendExecutor {
 					checkCancelled,
 					...fenceChecks(this.deps, fence),
 					markJournal,
+					commitSubmitting,
+					submittedEndpointUrl,
 					wantOffchainOutput: (provedTx) => {
 						const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
 						return extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
@@ -904,7 +924,7 @@ export class DappSendExecutor {
 							Fr.ZERO.toString(),
 							AccountFeePaymentMethodOptions.EXTERNAL,
 							hash,
-							primaryEndpointUrl(network),
+							submittedEndpointUrl,
 							getEstimatedFee(txRequest),
 							getGasDetails(txRequest),
 							fence,

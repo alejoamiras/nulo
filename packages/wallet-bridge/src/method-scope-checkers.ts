@@ -1,12 +1,9 @@
 /**
  * Per-method scope-check function bodies + their helpers.
  *
- * Leaf module: imports only capability types from `./capabilities`. Both the
- * `method-descriptors` registry (which references these checkers in its
- * `scopeCheck` fields) and `scope-enforcement` (which derives the
- * method→checker map and owns the F-005 `enforceScopeWithSession` wrapper)
- * depend on this module. Keeping the bodies here — depended on, never
- * depending back — is what breaks the registry↔scope-enforcement cycle.
+ * The method-descriptors registry and scope-enforcement both import these checkers, so at runtime
+ * this module imports only leaves (`./field-address`, `./scope-violation`; `MethodName` is
+ * type-only), which is what keeps the registry↔scope-enforcement graph acyclic.
  *
  * Each checker mirrors a `WalletSchema` arg shape and must stay in sync with
  * `buildNetworkOperation` / `buildAccountOperation` in dispatcher.ts.
@@ -23,6 +20,9 @@ import type {
 	TransactionCapability,
 	DataCapability,
 } from "./capabilities"
+import { sameFieldAddress } from "./field-address"
+import type { MethodName } from "./method-descriptors"
+import { scopeViolation } from "./scope-violation"
 
 /** A per-method scope checker. Throws on a scope violation; returns on pass. */
 export type ScopeCheck = (args: unknown[], grants: GrantedCapabilityRecord[]) => void
@@ -36,7 +36,10 @@ type WireExecPayload = { calls?: unknown }
 // ── Helpers ───────────────────────────────────────────────────────────
 
 function matchesPattern(contract: string, fn: string, pattern: ScopePattern): boolean {
-	return (pattern.contract === "*" || String(pattern.contract) === contract) && (pattern.function === "*" || pattern.function === fn)
+	return (
+		(pattern.contract === "*" || sameFieldAddress(String(pattern.contract), contract)) &&
+		(pattern.function === "*" || pattern.function === fn)
+	)
 }
 
 function matchesScope(contract: string, fn: string, scope: Scope): boolean {
@@ -53,7 +56,7 @@ function matchesScope(contract: string, fn: string, scope: Scope): boolean {
 
 function inAddressList(address: string, list: "*" | unknown[]): boolean {
 	if (list === "*") return true
-	return list.some((item) => String(item) === address)
+	return list.some((item) => sameFieldAddress(String(item), address))
 }
 
 function grantsOfType<T extends { type: string }>(grants: GrantedCapabilityRecord[], type: string): T[] {
@@ -65,7 +68,7 @@ function grantsOfType<T extends { type: string }>(grants: GrantedCapabilityRecor
 /** A contracts grant carrying `flag` must list `address`. No contracts grants at all — let
  *  type-level enforcement handle it. */
 function requireContractsGrant(
-	method: string,
+	method: MethodName,
 	address: string,
 	flag: "canRegister" | "canGetMetadata",
 	grants: GrantedCapabilityRecord[],
@@ -73,7 +76,7 @@ function requireContractsGrant(
 	const caps = grantsOfType<ContractsCapability>(grants, "contracts")
 	if (!caps.length) return
 	if (!caps.some((c) => c[flag] && inAddressList(address, c.contracts))) {
-		throw new Error(`Scope violation: ${method} targets ${address}, not permitted by granted contracts scope`)
+		throw scopeViolation(`Scope violation: ${method} contract not permitted by granted contracts scope`)
 	}
 }
 
@@ -100,11 +103,11 @@ export function checkGetContractClassMetadata(args: unknown[], grants: GrantedCa
 
 	const permitted = caps.some((c) => c.canGetMetadata && inAddressList(id, c.classes))
 	if (!permitted) {
-		throw new Error(`Scope violation: getContractClassMetadata targets class ${id}, not permitted by granted contractClasses scope`)
+		throw scopeViolation("Scope violation: getContractClassMetadata class not permitted by granted contractClasses scope")
 	}
 }
 
-function checkTransactionCalls(methodName: string, args: unknown[], grants: GrantedCapabilityRecord[]): void {
+function checkTransactionCalls(methodName: MethodName, args: unknown[], grants: GrantedCapabilityRecord[]): void {
 	const exec = args[0] as WireExecPayload
 	const calls = exec?.calls
 	if (!Array.isArray(calls)) {
@@ -118,8 +121,7 @@ function checkTransactionCalls(methodName: string, args: unknown[], grants: Gran
 	const typedCalls = calls as WireCall[]
 	const permitted = caps.some((c) => typedCalls.every((call) => matchesScope(String(call.to), call.name, c.scope)))
 	if (!permitted) {
-		const desc = typedCalls.map((c) => `${c.name}@${String(c.to)}`).join(", ")
-		throw new Error(`Scope violation: ${methodName} calls [${desc}], not permitted by granted transaction scope`)
+		throw scopeViolation(`Scope violation: ${methodName} call not permitted by granted transaction scope`)
 	}
 }
 
@@ -136,11 +138,11 @@ export function checkGrantPublicAuthwit(args: unknown[], grants: GrantedCapabili
 
 	const permitted = caps.some((c) => matchesScope(contract, method, c.scope))
 	if (!permitted) {
-		throw new Error(`Scope violation: grantPublicAuthwit authorizes ${method}@${contract}, not permitted by granted transaction scope`)
+		throw scopeViolation("Scope violation: grantPublicAuthwit call not permitted by granted transaction scope")
 	}
 }
 
-function checkSimulationTransactions(methodName: string, args: unknown[], grants: GrantedCapabilityRecord[]): void {
+function checkSimulationTransactions(methodName: MethodName, args: unknown[], grants: GrantedCapabilityRecord[]): void {
 	const exec = args[0] as WireExecPayload
 	const calls = exec?.calls
 	if (!Array.isArray(calls)) {
@@ -152,12 +154,8 @@ function checkSimulationTransactions(methodName: string, args: unknown[], grants
 	if (!caps.length) return
 
 	const typedCalls = calls as WireCall[]
-	// F-08: never dereference a raw-unknown call element. A null/non-object entry
-	// (or one missing `to`) is malformed — surface a controlled scope error rather
-	// than a `TypeError: null is not an object` from `call.to`. (simulateTx/profileTx
-	// are checker-owned post-merge, so this deep guard lives here, not in the
-	// dispatcher's `assertAuthRelevantArgShape`.) A non-string `name` is coerced
-	// safely below and rejected by the downstream execution-layer Zod.
+	// Each element is unvalidated wire data: one that is not an object with a `to` is refused before
+	// `call.to` is read, and a non-string `name` is left to the execution layer's schema.
 	for (const call of typedCalls) {
 		if (typeof call !== "object" || call === null || (call as WireCall).to === undefined) {
 			throw new Error(`Scope enforcement: ${methodName} exec.calls entries must be objects with a \`to\` field`)
@@ -169,8 +167,7 @@ function checkSimulationTransactions(methodName: string, args: unknown[], grants
 		return typedCalls.every((call) => matchesScope(String(call.to), call.name, scope))
 	})
 	if (!permitted) {
-		const desc = typedCalls.map((c) => `${c.name}@${String(c.to)}`).join(", ")
-		throw new Error(`Scope violation: ${methodName} calls [${desc}], not permitted by granted simulation.transactions scope`)
+		throw scopeViolation(`Scope violation: ${methodName} call not permitted by granted simulation.transactions scope`)
 	}
 }
 
@@ -191,7 +188,7 @@ export function checkExecuteUtility(args: unknown[], grants: GrantedCapabilityRe
 		return matchesScope(contract, fn, scope)
 	})
 	if (!permitted) {
-		throw new Error(`Scope violation: executeUtility calls ${fn}@${contract}, not permitted by granted simulation.utilities scope`)
+		throw scopeViolation("Scope violation: executeUtility call not permitted by granted simulation.utilities scope")
 	}
 }
 
@@ -208,20 +205,17 @@ export function checkGetPrivateEvents(args: unknown[], grants: GrantedCapability
 		return inAddressList(address, contracts)
 	})
 	if (!permitted) {
-		throw new Error(`Scope violation: getPrivateEvents targets contract ${address}, not permitted by granted data.privateEvents scope`)
+		throw scopeViolation("Scope violation: getPrivateEvents contract not permitted by granted data.privateEvents scope")
 	}
 }
 
 /**
  * Check a call ({contract, function}) against the union of transaction and
- * simulation.transactions scopes on the given grants. Used by createAuthWit to
- * ensure an authwit cannot authorize a call broader than the dApp's granted
- * transaction scope.
+ * simulation.transactions scopes on the given grants, so an authwit cannot authorize a call
+ * broader than the dApp's granted scope.
  *
- * Returns true if any grant's scope covers the call, or if there are no
- * transaction/simulation grants at all (which means the authwit is being
- * requested without a transaction capability — let the accounts-level check
- * decide).
+ * `hasTxCaps` is false when no such scope is held, and `permitted` is then false too: the
+ * caller decides what an absent scope means.
  */
 function callWithinTxOrSimulationScope(
 	contract: string,
@@ -263,9 +257,9 @@ function isIntentInnerHash(x: unknown): x is IntentInnerHashShape {
 
 /**
  * Whether a dApp createAuthWit intent's target call is covered by a granted
- * transaction/simulation scope. The dispatcher uses this to route a covered call
- * to silent execution and an uncovered call — or any `IntentInnerHash`, which
- * carries no call to check — to an explicit confirmation popup.
+ * transaction/simulation scope. An `IntentInnerHash` carries no call, so it is never covered.
+ * Coverage alone never signs silently: the dispatcher also requires the app's authorizations
+ * consent.
  */
 export function isCreateAuthWitCoveredByTxOrSimulationScope(intent: unknown, grants: GrantedCapabilityRecord[]): boolean {
 	if (!isCallIntent(intent)) return false
@@ -287,7 +281,7 @@ export function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRec
 			(c) => c.canCreateAuthWit && (!Array.isArray(c.accounts) || c.accounts.some((a) => String(a.item) === from)),
 		)
 		if (!permitted) {
-			throw new Error(`Scope violation: createAuthWit for account ${from}, not permitted by granted accounts scope`)
+			throw scopeViolation("Scope violation: createAuthWit account not permitted by granted accounts scope")
 		}
 	}
 
@@ -302,9 +296,7 @@ export function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRec
 		const fn = intent.call.name
 		const { hasTxCaps, permitted } = callWithinTxOrSimulationScope(contract, fn, grants)
 		if (hasTxCaps && !permitted) {
-			throw new Error(
-				`Scope violation: createAuthWit authorizes ${fn}@${contract}, not permitted by granted transaction or simulation scope`,
-			)
+			throw scopeViolation("Scope violation: createAuthWit call not permitted by granted transaction or simulation scope")
 		}
 		return
 	}
@@ -317,8 +309,8 @@ export function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRec
 		const consumer = String(intent.consumer)
 		const { hasTxCaps, permitted } = callWithinTxOrSimulationScope(consumer, "*", grants)
 		if (hasTxCaps && !permitted) {
-			throw new Error(
-				`Scope violation: createAuthWit inner-hash authorizes consumer ${consumer}, not permitted by granted transaction or simulation scope`,
+			throw scopeViolation(
+				"Scope violation: createAuthWit inner-hash consumer not permitted by granted transaction or simulation scope",
 			)
 		}
 		return
@@ -331,23 +323,12 @@ export function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRec
 	throw new Error("Scope violation: createAuthWit requires a structured call intent; a raw message hash cannot be authorized")
 }
 
-/**
- * F-003: enforce `AccountsCapability.canGet === true` before allowing a
- * dApp to read its session's account addresses via `getAccounts`. Prior to
- * this checker, the `getAccounts` method was in `EXEMPT_METHODS` and the
- * `canGet` sub-grant was decorative — the UI exposed the toggle but the
- * dispatcher ignored it.
- *
- * The `accounts` cap is "any-of": if at least one granted accounts cap has
- * `canGet === true`, the read is permitted. (Multiple `accounts` grants
- * exist in some legacy session shapes; `.some()` mirrors the existing
- * pattern in `checkCreateAuthWit`.)
- */
+/** No accounts grant passes here: type-level enforcement refuses that call first. */
 export function checkGetAccounts(_args: unknown[], grants: GrantedCapabilityRecord[]): void {
 	const caps = grantsOfType<AccountsCapability>(grants, "accounts")
 	if (!caps.length) return
 	if (!caps.some((c) => c.canGet === true)) {
-		throw new Error("Scope violation: getAccounts requires accounts.canGet=true")
+		throw scopeViolation("Scope violation: getAccounts requires accounts.canGet=true")
 	}
 }
 
@@ -371,18 +352,17 @@ export function checkRegisterSender(_args: unknown[], grants: GrantedCapabilityR
 }
 
 /** The sub-bit must be literally `true`: a data grant with anything else denies. */
-function requireAddressBookGrant(method: string, grants: GrantedCapabilityRecord[]): void {
+function requireAddressBookGrant(method: MethodName, grants: GrantedCapabilityRecord[]): void {
 	const caps = grantsOfType<DataCapability>(grants, "data")
 	if (!caps.length) return
 	if (!caps.some((c) => c.addressBook === true)) {
-		throw new Error(`Scope violation: ${method} requires data.addressBook=true`)
+		throw scopeViolation(`Scope violation: ${method} requires data.addressBook=true`)
 	}
 }
 
-// ── Named wrappers (lifted from the former inline arrows in METHOD_SCOPE_CHECKER) ──
-// These exist so the registry's scopeCheck field can hold a STABLE function
-// reference that parity tests compare by identity. Behavior is identical to the
-// previous `(args, grants) => checkX("name", args, grants)` arrows.
+// ── Named wrappers ──
+// The registry's `scopeCheck` holds these stable references, which the parity tests compare by
+// identity.
 
 export function checkSendTx(args: unknown[], grants: GrantedCapabilityRecord[]): void {
 	checkTransactionCalls("sendTx", args, grants)
@@ -402,10 +382,59 @@ export function checkProfileTx(args: unknown[], grants: GrantedCapabilityRecord[
  * yet — `contractClasses` is read-only (no `canRegister`), and ScopeCheck is synchronous while the
  * artifact's class-id derivation is async. Deny it at scope-enforcement (the single source of truth;
  * scope runs before routing, so no dispatcher branch is needed). Revisit when canRegister + a
- * class-id-scoped async gate land. (codex audit, aztec-5.0-upgrade.)
+ * class-id-scoped async gate land.
  */
 export function checkRegisterContractClassDisabled(): never {
 	throw new Error(
 		"registerContractClass is intentionally disabled in Nulo pending contractClasses.canRegister support and class-id-scoped enforcement.",
 	)
+}
+
+// ── Authorizations consent ────────────────────────────────────────────
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function typeOf(cap: unknown): string | undefined {
+	return isRecord(cap) && typeof cap.type === "string" ? cap.type : undefined
+}
+
+/** Whether a scope reaches any contract. A malformed scope counts as any contract, so it never
+ *  keeps a narrow consent effective. */
+export function isAnyContractScope(scope: unknown): boolean {
+	if (!Array.isArray(scope)) return true
+	return scope.some((p) => !isRecord(p) || typeof p.contract !== "string" || typeof p.function !== "string" || p.contract === "*")
+}
+
+/** Whether a transaction or `simulation.transactions` scope reaches any contract. Utility scopes
+ *  are left out: they never authorize a call intent. */
+export function coversAnyContract(caps: readonly unknown[]): boolean {
+	return caps.some((cap) => {
+		if (!isRecord(cap)) return false
+		if (cap.type === "transaction") return isAnyContractScope(cap.scope)
+		if (cap.type !== "simulation" || cap.transactions === undefined) return false
+		return !isRecord(cap.transactions) || isAnyContractScope(cap.transactions.scope)
+	})
+}
+
+/** The stored consent, read strictly: it crosses `IDappSessionRef` as `unknown`, and a tolerant
+ *  read would let a truthy junk value sign silently. */
+export function readConsent(value: unknown): { broad: boolean } | undefined {
+	if (!isRecord(value) || typeof value.broad !== "boolean" || Object.keys(value).length !== 1) return undefined
+	return { broad: value.broad }
+}
+
+/** Whether the consent lets a covered call intent sign without asking. A narrow consent holds
+ *  only while no scope reaches any contract. */
+export function authorizationsEffective(consent: unknown, caps: readonly unknown[]): boolean {
+	const read = readConsent(consent)
+	return read !== undefined && (read.broad || !coversAnyContract(caps))
+}
+
+/** The grants a decision leaves in force, by the same per-type replacement the session writer
+ *  applies; `existing` is every stored grant, a rejected type's included. */
+export function effectiveGrants(existing: readonly unknown[], delta: readonly unknown[]): unknown[] {
+	const replaced = new Set(delta.map(typeOf))
+	return [...existing.filter((cap) => !replaced.has(typeOf(cap))), ...delta]
 }

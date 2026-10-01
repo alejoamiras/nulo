@@ -63,9 +63,9 @@
  * verify with a real dApp that hits an embedded fee path. See
  * `implementations-plan/embedded-fpc-firsttx-cosmetic/plan-v2.md`.
  */
-import { GasFees, GasSettings } from "@aztec/stdlib/gas"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import type { TxExecutionRequest } from "@aztec/stdlib/tx"
+import { GasFees, GasSettings } from "@aztec-labs/stdlib/gas"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
+import type { TxExecutionRequest } from "@aztec-labs/stdlib/tx"
 import type { FeeOptions } from "@/wallet/services/execution/client"
 
 export async function applyEmbeddedFpcGasCap(txRequest: TxExecutionRequest, fee: FeeOptions, node: AztecNode): Promise<void> {

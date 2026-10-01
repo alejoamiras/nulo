@@ -26,7 +26,7 @@ import type { BrowserApi, ClockPort } from "@nulo/wallet-core/ports"
 import type { LoggerStore } from "@/wallet/logger"
 
 let bbImpl: () => Promise<unknown>
-vi.mock("@aztec/bb.js", () => ({
+vi.mock("@aztec-foundation/bb.js", () => ({
 	BarretenbergSync: {
 		initSingleton: (..._args: unknown[]) => bbImpl(),
 	},

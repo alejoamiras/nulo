@@ -119,7 +119,6 @@ describe("buildFocusHandler", () => {
 	})
 })
 
-// Phase 2 follow-up v4 — cancel-dupe match logic.
 describe("isMatchingTask", () => {
 	const transferTask = { content: { kind: ContentKind.Transfer, tokenId: 42 } }
 	const executeTask = { content: { kind: ContentKind.ExecuteOperation, operationKind: "send_transaction" } }

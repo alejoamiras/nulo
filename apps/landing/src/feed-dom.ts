@@ -1,7 +1,7 @@
 import { createField, type Field, renderFrame, subjectAt } from "./feed"
 
-const MAX_COLS = 240
-const MAX_ROWS = 80
+const MAX_COLS = 400
+const MAX_ROWS = 120
 const FRAME_MS = 33
 const RECORD_ROWS = 16
 const FONT_WAIT_MS = 2500
@@ -18,13 +18,9 @@ type Feed = {
 	cols: number
 	rows: number
 	cell: Cell
+	scale: number
 	visible: boolean
 }
-
-/** Shared by the frame loop, the record stream and the clock, so Pause and a hidden tab stop all three. */
-type Run = { paused: boolean }
-
-const halted = (run: Run): boolean => run.paused || document.hidden
 
 const reducedMotion = (): boolean => matchMedia("(prefers-reduced-motion: reduce)").matches
 
@@ -40,18 +36,24 @@ function measureCell(pre: HTMLPreElement): Cell {
 	return { width, height }
 }
 
+/** A host larger than the capped grid gets the grid scaled up, never a bare edge; the transform is
+ *  cleared first because the probe measures rendered size. */
 function sizeFeed(feed: Feed): void {
+	feed.pre.style.transform = ""
 	feed.cell = measureCell(feed.pre)
-	feed.cols = Math.min(MAX_COLS, Math.ceil(feed.host.clientWidth / feed.cell.width) + 1)
-	feed.rows = Math.min(MAX_ROWS, Math.ceil(feed.host.clientHeight / feed.cell.height) + 1)
+	const { clientWidth: width, clientHeight: height } = feed.host
+	feed.scale = Math.max(1, width / (MAX_COLS * feed.cell.width), height / (MAX_ROWS * feed.cell.height))
+	feed.cols = Math.min(MAX_COLS, Math.ceil(width / (feed.cell.width * feed.scale)) + 1)
+	feed.rows = Math.min(MAX_ROWS, Math.ceil(height / (feed.cell.height * feed.scale)) + 1)
+	if (feed.scale > 1) feed.pre.style.transform = `scale(${feed.scale})`
 }
 
-/** The box follows the subject across the rendered grid, which the column cap can leave narrower than the host. */
+/** The subject is drawn at a fraction of the rendered grid, so the box is placed in grid units. */
 function placeBox(box: HTMLElement | null, feed: Feed | undefined, time: number): void {
 	if (!box || !feed) return
 	const p = subjectAt(time)
-	const left = p.x * feed.cols * feed.cell.width
-	const top = p.y * feed.rows * feed.cell.height
+	const left = p.x * feed.cols * feed.cell.width * feed.scale
+	const top = p.y * feed.rows * feed.cell.height * feed.scale
 	box.style.cssText = `left:${left.toFixed(0)}px;top:${top.toFixed(0)}px`
 }
 
@@ -88,7 +90,7 @@ function recordLine(index: number): HTMLElement {
 	return line
 }
 
-function startRecord(list: HTMLElement, counter: HTMLElement, run: Run | null): void {
+function startRecord(list: HTMLElement, counter: HTMLElement, live: boolean): void {
 	let count = 4312
 	let index = 0
 	const add = () => {
@@ -99,14 +101,14 @@ function startRecord(list: HTMLElement, counter: HTMLElement, run: Run | null): 
 	}
 	list.replaceChildren()
 	for (let i = 0; i < 12; i++) add()
-	if (run) setInterval(() => halted(run) || add(), 900)
+	if (live) setInterval(() => document.hidden || add(), 900)
 }
 
 const pad2 = (n: number): string => String(n).padStart(2, "0")
 
-function startClock(el: HTMLElement, run: Run): void {
+function startClock(el: HTMLElement): void {
 	const tick = () => {
-		if (halted(run)) return
+		if (document.hidden) return
 		const d = new Date()
 		const date = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 		el.textContent = `${date} ${d.toTimeString().slice(0, 8)}`
@@ -127,6 +129,7 @@ function collectFeeds(): Feed[] {
 		cols: 1,
 		rows: 1,
 		cell: { width: 7.2, height: 14 },
+		scale: 1,
 		visible: true,
 	}))
 }
@@ -154,7 +157,7 @@ function trackPointer(hero: HTMLElement | null, target: { x: number; y: number }
 	})
 }
 
-function startLoop(feeds: Feed[], field: Field, hero: HTMLElement | null, run: Run): void {
+function startLoop(feeds: Feed[], field: Field, hero: HTMLElement | null): void {
 	const box = document.querySelector<HTMLElement>("[data-box]")
 	const label = document.querySelector<HTMLElement>("[data-box-label]")
 	const heroFeed = feeds.find((f) => f.subject)
@@ -165,7 +168,7 @@ function startLoop(feeds: Feed[], field: Field, hero: HTMLElement | null, run: R
 	let last = 0
 	const frame = (now: number) => {
 		requestAnimationFrame(frame)
-		if (halted(run) || now - last < FRAME_MS) return
+		if (document.hidden || now - last < FRAME_MS) return
 		last = now
 		const time = (now - t0) / 1000
 		pan.x += (target.x - pan.x) * 0.08
@@ -175,17 +178,6 @@ function startLoop(feeds: Feed[], field: Field, hero: HTMLElement | null, run: R
 		if (label) label.textContent = BOX_LABELS[Math.floor(time / 3) % BOX_LABELS.length] as string
 	}
 	requestAnimationFrame(frame)
-}
-
-function wirePause(run: Run): void {
-	const button = document.querySelector<HTMLButtonElement>("[data-pause]")
-	if (!button) return
-	button.addEventListener("click", () => {
-		run.paused = !run.paused
-		button.textContent = run.paused ? "Play" : "Pause"
-		button.setAttribute("aria-pressed", String(run.paused))
-		document.documentElement.classList.toggle("is-paused", run.paused)
-	})
 }
 
 export async function mountPage(): Promise<void> {
@@ -209,16 +201,9 @@ export async function mountPage(): Promise<void> {
 	const list = document.querySelector<HTMLElement>("[data-record]")
 	const counter = document.querySelector<HTMLElement>("[data-record-count]")
 	const clock = document.querySelector<HTMLElement>("[data-clock]")
-	if (still) {
-		document.querySelector("[data-pause]")?.remove()
-		if (list && counter) startRecord(list, counter, null)
-		if (clock) startClock(clock, { paused: false })
-		return
-	}
-	const run: Run = { paused: false }
-	if (list && counter) startRecord(list, counter, run)
-	if (clock) startClock(clock, run)
-	wirePause(run)
+	if (list && counter) startRecord(list, counter, !still)
+	if (clock) startClock(clock)
+	if (still) return
 	watchVisibility(feeds)
-	startLoop(feeds, field, document.querySelector<HTMLElement>("[data-feed-host='hero']"), run)
+	startLoop(feeds, field, document.querySelector<HTMLElement>("[data-feed-host='hero']"))
 }

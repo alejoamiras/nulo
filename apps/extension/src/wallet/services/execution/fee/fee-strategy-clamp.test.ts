@@ -12,10 +12,10 @@
  * - zero teardown stays zero; absent txsLimits (defensive) ⇒ unchanged.
  */
 
-import { MAX_PROCESSABLE_L2_GAS, MAX_TX_DA_GAS } from "@aztec/constants"
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
-import { Gas, GasFees, GasSettings } from "@aztec/stdlib/gas"
-import type { TxSimulationResult } from "@aztec/stdlib/tx"
+import { MAX_PROCESSABLE_L2_GAS, MAX_TX_DA_GAS } from "@aztec-labs/constants"
+import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
+import { Gas, GasFees, GasSettings } from "@aztec-labs/stdlib/gas"
+import type { TxSimulationResult } from "@aztec-labs/stdlib/tx"
 import { describe, expect, test, vi } from "vitest"
 import type { Action } from "../spec"
 import { EmbeddedStrategy } from "./embedded-strategy"

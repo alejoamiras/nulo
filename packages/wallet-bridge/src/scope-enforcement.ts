@@ -15,31 +15,21 @@
 import type { GrantedCapabilityRecord } from "./capabilities"
 // The method→checker map is DERIVED from the method-descriptors registry (the
 // single source of truth) — no longer a hand-maintained literal here.
-import { METHOD_SCOPE_CHECKER } from "./method-descriptors"
+import { METHOD_SCOPE_CHECKER, type MethodName } from "./method-descriptors"
+import { type AccountScopeField, scopeViolation } from "./scope-violation"
 
-// ── F-005 session-account-scope helper ────────────────────────────────
+// ── Session-account-scope helper ──────────────────────────────────────
 
 /**
- * F-005: validate dApp-supplied account-scope arrays against the session's
- * approved account list. The dApp can pass `eventFilter.scopes`,
- * `opts.scopes`, or `opts.additionalScopes` — arrays of CAIP-10 accounts
- * the wallet should expose private state for during execution. Prior to
- * this helper, the dispatcher forwarded these arrays unchanged to PXE,
- * silently widening one granted account into N accounts.
- *
- * sessionAccounts is the set of CAIP-10 account identifiers the session
- * has approved (built from `dappSession.accounts`).
- *
- * Throws if any entry in the scope array is not in the approved set.
- * Returns silently if the scope field is absent or not an array (i.e. the
- * caller didn't pass it).
+ * Every entry of a dApp-supplied account list must be one of the session's approved accounts:
+ * PXE exposes private state for each, so an unchecked list widens one granted account into many.
+ * A field that is absent or not an array passes.
  */
-function validateAccountScopes(scopeField: unknown, sessionAccounts: Set<string>, fieldName: string): void {
+function validateAccountScopes(scopeField: unknown, sessionAccounts: Set<string>, method: MethodName, field: AccountScopeField): void {
 	if (!Array.isArray(scopeField)) return
 	for (const entry of scopeField) {
-		const addr = String(entry)
-		if (!sessionAccounts.has(addr)) {
-			throw new Error(`Scope violation: ${fieldName} contains ${addr}, not in session's approved accounts`)
+		if (!sessionAccounts.has(String(entry))) {
+			throw scopeViolation(`Scope violation: ${method}.${field} entry not in session's approved accounts`)
 		}
 	}
 }
@@ -65,14 +55,9 @@ export function enforceScope(methodName: string, args: unknown[], grants: Grante
 }
 
 /**
- * F-005: extended scope enforcement that ALSO validates dApp-supplied
- * account-scope arrays against the session's approved accounts.
- *
- * Closes the empty-`calls` fast path: F-005's account-scope check fires
- * even when `exec.calls = []` (which short-circuited `checkTransactionCalls`
- * and friends). A dApp could previously pass `{ calls: [], additionalScopes: [<other-account>] }`
- * and bypass enforcement because the contract/function checker exited
- * early on the empty-calls branch.
+ * `enforceScope`, then every dApp-supplied account list against the session's approved accounts.
+ * The account lists are checked even when `exec.calls` is empty, where the call checkers pass
+ * vacuously.
  *
  * `sessionAccounts` is the set of CAIP-10 account identifiers approved
  * for this session. Pass an empty set if no session — the caller (the
@@ -80,27 +65,24 @@ export function enforceScope(methodName: string, args: unknown[], grants: Grante
  * fails closed.
  */
 export function enforceScopeWithSession(
-	methodName: string,
+	methodName: MethodName,
 	args: unknown[],
 	grants: GrantedCapabilityRecord[],
 	sessionAccounts: Set<string>,
 ): void {
-	// First run the standard scope check.
 	enforceScope(methodName, args, grants)
 
-	// Then run the F-005 account-scope check. Runs regardless of whether
-	// the calls-array check was satisfied or short-circuited.
 	const exec = args[0] as Record<string, unknown> | undefined
 	const opts = args[1] as Record<string, unknown> | undefined
 
-	validateAccountScopes(exec?.scopes, sessionAccounts, `${methodName}.exec.scopes`)
-	validateAccountScopes(opts?.scopes, sessionAccounts, `${methodName}.opts.scopes`)
-	validateAccountScopes(opts?.additionalScopes, sessionAccounts, `${methodName}.opts.additionalScopes`)
+	validateAccountScopes(exec?.scopes, sessionAccounts, methodName, "exec.scopes")
+	validateAccountScopes(opts?.scopes, sessionAccounts, methodName, "opts.scopes")
+	validateAccountScopes(opts?.additionalScopes, sessionAccounts, methodName, "opts.additionalScopes")
 
 	// getPrivateEvents takes `(eventMetadata, eventFilter)` where eventFilter
 	// can also include a `scopes` array.
 	if (methodName === "getPrivateEvents") {
 		const eventFilter = args[1] as Record<string, unknown> | undefined
-		validateAccountScopes(eventFilter?.scopes, sessionAccounts, `${methodName}.eventFilter.scopes`)
+		validateAccountScopes(eventFilter?.scopes, sessionAccounts, methodName, "eventFilter.scopes")
 	}
 }

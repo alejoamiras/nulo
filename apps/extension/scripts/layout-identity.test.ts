@@ -11,30 +11,29 @@ import { describe, expect, it } from "vitest"
  */
 
 const fromExtension = import.meta.url
-const fromBridgeCore = new URL("../../../packages/bridge-core/package.json", import.meta.url).href
 const fromAztecRuntime = new URL("../../../packages/aztec-runtime/package.json", import.meta.url).href
 
 describe("layout identity — extension-anchored", () => {
-	it("sqlite3mc-wasm: declared pin, in lockstep with the copy @aztec/kv-store consumes", () => {
-		const report = assertPackageIdentity("@aztec/sqlite3mc-wasm", {
+	it("sqlite3mc-wasm: declared pin, in lockstep with the copy @aztec-labs/kv-store consumes", () => {
+		const report = assertPackageIdentity("@aztec-labs/sqlite3mc-wasm", {
 			from: fromExtension,
-			expectVersion: "5.2.0",
-			lockstepVia: "@aztec/kv-store",
+			expectVersion: "6.0.0-rc.1",
+			lockstepVia: "@aztec-labs/kv-store",
 		})
 		expect(report.lockstepRealRoot).toBe(report.realRoot)
 		for (const asset of ["./vendor/jswasm/sqlite3.wasm", "./vendor/jswasm/sqlite3-opfs-async-proxy.js"]) {
-			expect(existsSync(resolveExportedAsset("@aztec/sqlite3mc-wasm", asset, { from: fromExtension }))).toBe(true)
+			expect(existsSync(resolveExportedAsset("@aztec-labs/sqlite3mc-wasm", asset, { from: fromExtension }))).toBe(true)
 		}
 	})
 
 	it("patched noir packages: node-exports patch marker present, nodejs entries resolvable", () => {
 		for (const [pkg, entry] of [
-			["@aztec/noir-noirc_abi", "nodejs/noirc_abi_wasm.js"],
-			["@aztec/noir-acvm_js", "nodejs/acvm_js.js"],
+			["@aztec-foundation/noir-noirc_abi", "nodejs/noirc_abi_wasm.js"],
+			["@aztec-foundation/noir-acvm_js", "nodejs/acvm_js.js"],
 		] as const) {
 			assertPackageIdentity(pkg, {
 				from: fromExtension,
-				expectVersion: "5.2.0",
+				expectVersion: "6.0.0-rc.1",
 				mustContain: { file: "package.json", marker: `"node": "./${entry}"` },
 			})
 			expect(existsSync(resolvePackageAsset(pkg, entry, { from: fromExtension }))).toBe(true)
@@ -44,7 +43,7 @@ describe("layout identity — extension-anchored", () => {
 	it("bb.js wasm inputs resolve from the extension's declared dependency", () => {
 		expect(
 			existsSync(
-				resolvePackageAsset("@aztec/bb.js", "dest/node/barretenberg_wasm/barretenberg-threads.wasm.gz", {
+				resolvePackageAsset("@aztec-foundation/bb.js", "dest/node/barretenberg_wasm/barretenberg-threads.wasm.gz", {
 					from: fromExtension,
 				}),
 			),
@@ -70,18 +69,7 @@ describe("layout identity — extension-anchored", () => {
 })
 
 describe("layout identity — cross-workspace anchors (resolution runs from the DECLARING workspace)", () => {
-	it("bridge-core: private-fee-juice artifact + l1-artifacts contract sources", () => {
-		expect(
-			existsSync(
-				resolvePackageAsset("@alejoamiras/private-fee-juice", "target/private_contract-PrivateFPC.json", {
-					from: fromBridgeCore,
-				}),
-			),
-		).toBe(true)
-		expect(existsSync(resolvePackageAsset("@aztec/l1-artifacts", "l1-contracts/src", { from: fromBridgeCore }))).toBe(true)
-	})
-
-	it("aztec-runtime: @aztec/pxe storage metadata (pxe exports no '.' — no hints needed)", () => {
-		expect(existsSync(resolvePackageAsset("@aztec/pxe", "dest/storage/metadata.js", { from: fromAztecRuntime }))).toBe(true)
+	it("aztec-runtime: @aztec-labs/pxe storage metadata (pxe exports no '.' — no hints needed)", () => {
+		expect(existsSync(resolvePackageAsset("@aztec-labs/pxe", "dest/storage/metadata.js", { from: fromAztecRuntime }))).toBe(true)
 	})
 })

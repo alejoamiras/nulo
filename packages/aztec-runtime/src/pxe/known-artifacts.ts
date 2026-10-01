@@ -1,6 +1,6 @@
-import { Fr } from "@aztec/foundation/curves/bn254"
-import type { ContractArtifact } from "@aztec/stdlib/abi"
-import { type ContractInstanceWithAddress, getContractInstanceFromInstantiationParams } from "@aztec/stdlib/contract"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
+import { type ContractInstanceWithAddress, getContractInstanceFromInstantiationParams } from "@aztec-labs/stdlib/contract"
 import { ALL_CATALOG_KEYS, getCatalogEntry } from "./artifact-catalog"
 
 /** Standard SponsoredFPC deployment uses salt = 0. */
@@ -14,7 +14,7 @@ export type KnownArtifacts = {
 /** Loader signature. ArtifactRegistry invokes this lazily at first
  *  `ensureKnown()` call. Production returns the real compiled-in set;
  *  unit tests inject an empty or fixture loader to stay free of the
- *  heavy `@aztec/noir-contracts.js` / vite-alias imports. */
+ *  heavy `@aztec-labs/noir-contracts.js` / vite-alias imports. */
 export type KnownArtifactsLoader = () => Promise<KnownArtifacts>
 
 /** Production loader: the frozen 12 compiled-in artifacts + the SponsoredFPC

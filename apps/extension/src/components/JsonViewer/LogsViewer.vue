@@ -1,3 +1,4 @@
+<!-- Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0. -->
 <script setup>
 /** Vendor */
 import { onMounted, ref } from "vue"
@@ -145,10 +146,10 @@ async function exportLogsToCSV() {
 			data: csv,
 			filename: `NuloWalletLogs_${Math.floor(Date.now() / 1000)}.csv`,
 		})
-		openToast({ label: "Logs downloaded successfully", icon: "download" })
+		openToast({ kind: "success", label: "Logs downloaded successfully" })
 	} catch (err) {
 		console.error(err)
-		openToast({ label: "Failed to download logs", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Failed to download logs" })
 	}
 }
 
@@ -161,7 +162,7 @@ async function handleClearLogs() {
 		await nextTick()
 		updateEditorContent()
 	} catch (err) {
-		openToast({ label: "Failed to clear logs", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Failed to clear logs" })
 		console.error(err)
 	}
 }

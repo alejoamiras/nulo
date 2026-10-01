@@ -1,7 +1,7 @@
 # Plan — bun-1.4-bump (Arc A of the Bun 1.4 adoption goal)
 
 **Tier**: `/blueprint light` · **Worktree/branch**: `worktree-bun-1.4-bump` off dev @ ea9be876 · **eli5_mode**: Artifact
-**Parent dossier**: [adoption-map.md](../bun-1.4-adoption/adoption-map.md) · **Recon**: [recon.md](recon.md) · **Codex audit**: [audit-codex.md](audit-codex.md) — conditional approve; all five conditions adopted (see Audit log)
+**Parent dossier**: [adoption-map.md](../bun-1.4-adoption/adoption-map.md) · **Recon**: [recon.md](recon.md) · **Codex audit**: [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/bun-1.4-bump/audit-codex.md) — conditional approve; all five conditions adopted (see Audit log)
 
 **APPROVED (owner, 2026-08-24)** — conditional approve. Rulings: A1 = merge when green (runtime ≠ npm-dep policy, owner's words); A2 = advisory (default stands after plain-language explanation); A3 = **owner delegated the machine-wide bun upgrade to the agent** — install exactly 1.4.0 over the host binary immediately before merge (added to Delivery step 4b); A4 = accept-and-document (default stands after explanation).
 
@@ -109,7 +109,7 @@ SECURITY.md "Dependency policy": add the 1.4 pm workflow (`bun pm diff` on every
 
 ## Audit log (adopted vs rejected)
 
-Codex round 1 (session `01a03421-a1cb-7882-8a89-a2c47923e700`, xhigh, fresh): **conditional approve** — full transcript in [audit-codex.md](audit-codex.md).
+Codex round 1 (session `01a03421-a1cb-7882-8a89-a2c47923e700`, xhigh, fresh): **conditional approve** — full transcript in [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/bun-1.4-bump/audit-codex.md).
 
 | # | Finding | Disposition |
 |---|---|---|

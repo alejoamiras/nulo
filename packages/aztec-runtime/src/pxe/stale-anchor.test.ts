@@ -13,11 +13,11 @@ vi.mock("./note-schemas", () => ({
 	loadProductionNoteSchemas: async () => new Map<string, unknown>(),
 }))
 
-import type { PXE } from "@aztec/pxe/client/bundle"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { jsonStringify } from "@aztec/foundation/json-rpc"
-import { FunctionCall, FunctionSelector, FunctionType } from "@aztec/stdlib/abi"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import type { PXE } from "@aztec-labs/pxe/client/bundle"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { jsonStringify } from "@aztec-labs/foundation/json-rpc"
+import { FunctionCall, FunctionSelector, FunctionType } from "@aztec-labs/stdlib/abi"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { PxeStaleAnchorError, PxeStoreKeyMissingError } from "@nulo/extension-messaging/errors"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { ChainRuntime, type NetworkInfo, type PxeFactory } from "./chain-runtime"
@@ -149,7 +149,6 @@ describe("PxeService.executeUtility runs through the helper", () => {
 			FunctionType.UTILITY,
 			false,
 			false,
-			[],
 			[],
 		)
 		return JSON.parse(jsonStringify(call)) as FunctionCall

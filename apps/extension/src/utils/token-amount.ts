@@ -15,6 +15,14 @@ export function isValidDecimals(d: unknown): d is number {
 	return typeof d === "number" && Number.isInteger(d) && d >= 0 && d <= MAX_DECIMALS
 }
 
+/**
+ * A token's decimals when the wallet knows them, else null. A token without a decimals getter is
+ * stored with 0, so a stored 0 counts only with the getter.
+ */
+export function knownDecimals(token: { decimals?: unknown; hasDecimals?: boolean } | null | undefined): number | null {
+	return token?.hasDecimals === true && isValidDecimals(token.decimals) ? token.decimals : null
+}
+
 /** Absent → 0n (a side the row never had); a non-negative integer literal → its bigint; anything else → undefined. */
 function parseSide(s: string | undefined): bigint | undefined {
 	if (s === undefined || s === null) return 0n

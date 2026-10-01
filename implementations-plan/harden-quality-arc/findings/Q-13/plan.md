@@ -2,7 +2,7 @@
 
 **Re-verify (STEP 1, vs `dev-quality` HEAD `61292e6`):** VALID but **SHRUNK**. The audit cited "restore + id-alloc + ownership guards + cascades reimplemented per service." The **cascade half is already extracted** — `apps/extension/src/wallet/services/purge-rows.ts` (`purgeRows`) + `apps/extension/src/utils/restore-error.ts` + the `NetworkService.registerChainPurgeSubscriber` / `ProfileService.onProfileDeleted` fanout wiring are shared and adopted by 8 services. So Q-13 re-scopes to the **remaining open-coded scaffolding: restore loops, ID allocation, and ownership guards.**
 
-## Decision ledger (2 independent planning legs — [codex](./plan-leg-codex.md) `etx4Ao0w` + [opus Plan](./plan-leg-opus.md) — + main verification)
+## Decision ledger (2 independent planning legs — [codex](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/harden-quality-arc/findings/Q-13/plan-leg-codex.md) `etx4Ao0w` + [opus Plan](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/harden-quality-arc/findings/Q-13/plan-leg-opus.md) — + main verification)
 
 Both legs converged independently on the core architecture; where they differed, the opus argument won on strength (noted). Main leg independently verified the token-guard gap, the 3 repository.ts, and contact's clean pattern against the code.
 
@@ -45,7 +45,7 @@ Each PR gate: affected service units + the isolation suite + full `bun run test`
 ## Deep-tier audit note
 The two independent legs (codex + opus) + the main-agent verification constitute the 3-perspective deep draft; they converged on architecture (no base class, composable helpers, fail-closed, token-guard-surface, contact-first) with the divergence (class vs functions) resolved on the merits.
 
-## Contradiction-check outcome ([audit-codex-contradiction.md](./audit-codex-contradiction.md) `bi8495ipz`) — 3 PRE-EXISTING security gaps discovered → SURFACED
+## Contradiction-check outcome ([audit-codex-contradiction.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/harden-quality-arc/findings/Q-13/audit-codex-contradiction.md) `bi8495ipz`) — 3 PRE-EXISTING security gaps discovered → SURFACED
 The final fresh-context codex pass **confirmed token by-id is NOT dApp-reachable** (dApp path `handleWalletMessage`→`WalletSdkDispatcher.dispatch`; only the scope-gated `isTokenRegistered`→`getTokens(profileId,chainId)` reaches token — verified) but found the plan under-tested the boundary and surfaced a **real leak the 2 legs missed**. All 3 are PRE-EXISTING, NONE created by Q-13, and fixing ANY is a hard-limit (fail-open→closed / backup-shape / beyond-the-22-findings) → **SURFACED to owner, not self-resolved. Q-13's dedup PRESERVES current behavior for all 3.**
 
 1. **[BLOCKER — real leak] `TokenBalanceService.backup()` returns `repo.getAll()` UNFILTERED** (`token-balance/service.ts:259`). Verified: the export (`settings/security/export/full.vue:137`) is **per-profile** (per-profile master-key; `token.backup()` correctly returns `getTokensRaw(profile.id)`), but token-balance assigns `profile = requireActiveProfile(...)` then IGNORES it → a profile-A export includes **profile B's token balances**. Token balances have no `profileId`, so the fix must filter transitively (balance.token ∈ active-profile tokens). **Owner decision: this is an actual cross-profile data leak in the backup artifact — fix as a standalone security PR (recommended before Q-13 P12.5 touches token-balance).**

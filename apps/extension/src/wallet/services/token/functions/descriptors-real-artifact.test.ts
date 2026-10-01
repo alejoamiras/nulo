@@ -32,7 +32,7 @@ const EXPECTED_DEFAULTS: Record<keyof typeof TOKEN_FN_DESCRIPTORS, string> = {
 
 describe("descriptor matching vs the installed aztec-standards Token artifact", () => {
 	test("the artifact still splits public fns into nonDispatchPublicFunctions", () => {
-		// If a future @aztec/stdlib stops splitting, the source arrays (and the
+		// If a future @aztec-labs/stdlib stops splitting, the source arrays (and the
 		// descriptors' `source` variants) need re-auditing — surface it loudly.
 		expect(artifact.nonDispatchPublicFunctions?.length ?? 0).toBeGreaterThan(0)
 		expect(artifact.functions.length).toBeGreaterThan(0)

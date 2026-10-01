@@ -16,7 +16,7 @@ import type { BrowserApi, ClockPort } from "@nulo/wallet-core/ports"
 import { defineMigration } from "@nulo/wallet-core/migration"
 import type { LoggerStore } from "@/wallet/logger"
 
-vi.mock("@aztec/bb.js", () => ({
+vi.mock("@aztec-foundation/bb.js", () => ({
 	BarretenbergSync: { initSingleton: async () => ({}) },
 }))
 

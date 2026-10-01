@@ -14,13 +14,15 @@
  *   - Skip ONLY for `sendTx` messages — caller is responsible for routing.
  *   - Cap enforcement is atomic via `queuedCreationLock` — without this,
  *     concurrent arrivals all see a stale count and the cap is advisory
- *     rather than protective (codex + opus post-impl F1).
+ *     rather than protective.
  */
-import type { WalletMessage } from "@aztec/wallet-sdk/types"
-import type { ActiveSession } from "@aztec/wallet-sdk/extension/handlers"
+import type { WalletMessage } from "@aztec-labs/wallet-sdk/types"
+import type { ActiveSession } from "@aztec-labs/wallet-sdk/extension/handlers"
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@/wallet/logger"
-import { Lock } from "@nulo/wallet-core/utils"
+import { ScopeViolationError } from "@nulo/extension-messaging/errors"
+import type { KnownJobErrorKind } from "@nulo/wallet-core/jobs"
+import { getErrorMessage, Lock } from "@nulo/wallet-core/utils"
 import type { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import type { ProfileService } from "@/wallet/services/profile/service"
 import type { DappSessionService } from "@/wallet/services/dapp-session/service"
@@ -36,8 +38,7 @@ export const MAX_QUEUED_PER_SESSION = 8
 /** Global queued-record cap across all sessions. Coarser DoS backstop. */
 export const MAX_QUEUED_GLOBAL = 32
 
-/** Module-level lock around count + create. Closes the burst-bypass race
- *  flagged by codex + opus in the post-impl review. */
+/** Held around count + create, so concurrent arrivals cannot all read a count below the cap. */
 export const queuedCreationLock = new Lock("wallet-sdk-bg:queued-creation")
 
 /**
@@ -46,7 +47,7 @@ export const queuedCreationLock = new Lock("wallet-sdk-bg:queued-creation")
  * graph into unit tests). XORs chainId with rollup version per
  * NetworkService convention.
  */
-import type { Fr } from "@aztec/foundation/curves/bn254"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
 function chainInfoToChainId(obj: { chainInfo: { chainId: Fr | string; version: Fr | string } }): number {
 	const raw = obj.chainInfo
 	const chainId = typeof raw.chainId === "string" ? Number(BigInt(raw.chainId)) : Number(raw.chainId.toBigInt())
@@ -252,15 +253,23 @@ export async function failQueuedIfUnclaimed(
 	journalId: string,
 	message: string,
 	logger: ILogger,
+	kind: Extract<KnownJobErrorKind, "popup_bound" | "scope_refused"> = "popup_bound",
 ): Promise<void> {
 	try {
-		await operationJournal.transitionIfStage(
-			journalId,
-			["queued"],
-			{ stage: "failed" },
-			{ kind: "popup_bound", message, normalizedRaw: null },
-		)
+		await operationJournal.transitionIfStage(journalId, ["queued"], { stage: "failed" }, { kind, message, normalizedRaw: null })
 	} catch (transitionError) {
 		logger.log("wallet-sdk", LogLevel.Warn, `Failed to mark queued record ${journalId} as failed`, transitionError)
 	}
+}
+
+/** Fails a still-queued row with the error that ended its message before any claim: `scope_refused`
+ *  for a grant-check refusal, whose message is fixed text, and `popup_bound` for anything else. */
+export async function failQueuedForError(
+	operationJournal: OperationJournalService,
+	journalId: string,
+	error: unknown,
+	logger: ILogger,
+): Promise<void> {
+	const kind = error instanceof ScopeViolationError ? "scope_refused" : "popup_bound"
+	await failQueuedIfUnclaimed(operationJournal, journalId, getErrorMessage(error), logger, kind)
 }

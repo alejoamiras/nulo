@@ -64,11 +64,11 @@ const handleSave = async () => {
 		await managers.network.updateEndpoint(network.value.id, endpoint.value.id, labelTerm.value || undefined, urlTerm.value)
 		appStore.networks = await managers.network.getNetworks()
 		emit("onClose")
-		openToast({ label: "Endpoint updated" })
+		openToast({ kind: "success", label: "Endpoint updated" })
 	} catch (err) {
 		const msg = errorMessageFromUnknown(err)
 		if (msg.includes("ENDPOINT_CHAIN_MISMATCH")) {
-			errorText.value = `Wrong chain — this network is chain ${network.value.chainId}.`
+			errorText.value = `Wrong chain. This network is chain ${network.value.chainId}.`
 		} else if (msg.includes("DUPLICATE_ENDPOINT")) {
 			errorText.value = "Another endpoint of this network uses that URL."
 		} else if (msg === "Failed to fetch node info") {

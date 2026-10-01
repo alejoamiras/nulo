@@ -9,10 +9,10 @@ vi.mock("./note-schemas", () => ({
 	loadProductionNoteSchemas: async () => new Map<string, unknown>(),
 }))
 
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { jsonStringify } from "@aztec/foundation/json-rpc"
-import type { PXE } from "@aztec/pxe/client/bundle"
-import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { jsonStringify } from "@aztec-labs/foundation/json-rpc"
+import type { PXE } from "@aztec-labs/pxe/client/bundle"
+import type { ContractInstanceWithAddress } from "@aztec-labs/stdlib/contract"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { FrozenSchnorrAccountArtifact } from "../account/frozen-artifact"
 import { NuloAccount } from "../account/nulo-account"

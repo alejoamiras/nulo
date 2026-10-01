@@ -1,4 +1,5 @@
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { normalizeError } from "@nulo/wallet-core/jobs"
@@ -29,6 +30,7 @@ import { DEFAULT_TOKEN_SEEDS, type DefaultTokenSeed, findSeed } from "./default-
 import { PinMismatchError, TokenSeeder } from "./seeder"
 import {
 	type Token,
+	type TokenAdded,
 	type TokenInfo,
 	type TokenDeleted,
 	type SeedScope,
@@ -87,7 +89,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	)
 	public static name = TOKEN_SERVICE_NAME
 
-	public readonly onTokenAdded = new EventHandler<TokenInfo>()
+	public readonly onTokenAdded = new EventHandler<TokenAdded>()
 	public readonly onTokenUpdated = new EventHandler<TokenInfo>()
 	public readonly onTokenDeleted = new EventHandler<TokenDeleted>()
 	public readonly onSeedStatusChanged = new EventHandler<SeedScope>()
@@ -367,7 +369,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		// The catch stays INSIDE the locked section: the journal's "failed"
 		// transition must complete while the token lock is held, so a queued
 		// token op can never observe the operation mid-failure (audit D3).
-		return await this.lock.withLock(async () => {
+		return await this.lock.withLock(async (ownsLock) => {
 			try {
 				await this.journal.transitionOperation(journalOp.id, { stage: "simulating" })
 				let token = await this.findToken(profileId, tokenInterface.chainId, tokenInterface.contract)
@@ -427,7 +429,8 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 						await this.tokens.delete(`${token.id}`)
 						throw new Error("network deleted")
 					}
-					this.emit("onTokenAdded", getTokenInfo(token))
+					await this.assertCurrentBeforeEmit(fence, token.id, ownsLock)
+					this.emit("onTokenAdded", { ...getTokenInfo(token), profileId: token.profileId })
 				}
 				const result = getTokenInfo(token)
 				// Codex's success-boundary call: succeeded means "token added to
@@ -445,6 +448,18 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 				throw error
 			}
 		})
+	}
+
+	/**
+	 * The add's last fence before `onTokenAdded`. The lock's watchdog can release the add while its
+	 * last network check awaits, letting a deletion and a same-id restore both run: the add's
+	 * handlers would then act for the successor incarnation, and a delete by id could take the
+	 * restore's row. The row predates that deletion, so its purge removes the row either way.
+	 */
+	private async assertCurrentBeforeEmit(fence: ExecutionFence, tokenId: number, ownsLock: () => boolean): Promise<void> {
+		if (this.profiles.getDeletionState().isCurrent(fence.profileId, fence.epoch)) return
+		if (ownsLock()) await this.tokens.delete(`${tokenId}`)
+		throw new Error(`profile ${fence.profileId} deleted`)
 	}
 
 	/** Test/SW-internal trigger for a seed pass (also driven by the unlock and

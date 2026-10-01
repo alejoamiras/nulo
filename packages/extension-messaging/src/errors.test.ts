@@ -19,6 +19,7 @@ import {
 	remoteErrorFromResponseContent,
 	RpcDisconnectedError,
 	RpcTimeoutError,
+	ScopeViolationError,
 	SessionEndedError,
 	TooManyPendingError,
 	UserRejectedError,
@@ -85,7 +86,7 @@ describe("walletErrorFromPayload", () => {
 		const rebuilt = walletErrorFromPayload(new RecoveryModeError().toPayload())
 		expect(rebuilt).toBeInstanceOf(RecoveryModeError)
 		expect(rebuilt.code).toBe(RecoveryModeError.CODE)
-		expect(rebuilt.message).toBe("Wallet keys need recovery — export a backup and restore it")
+		expect(rebuilt.message).toBe("Wallet keys need recovery. Export a backup and restore it")
 	})
 
 	test("CapabilityNotGrantedError round-trips with capabilityType + exact stable message", () => {
@@ -157,6 +158,15 @@ describe("walletErrorFromPayload", () => {
 		expect(fromMessageOnly.message).toBe(SessionEndedError.MESSAGE)
 	})
 
+	test("ScopeViolationError round-trips as its class with its message and no details", () => {
+		const message = "Scope violation: sendTx call not permitted by granted transaction scope"
+		const rebuilt = walletErrorFromPayload(new ScopeViolationError(message).toPayload())
+		expect(rebuilt).toBeInstanceOf(ScopeViolationError)
+		expect(rebuilt.code).toBe("SCOPE_VIOLATION")
+		expect(rebuilt.message).toBe(message)
+		expect(rebuilt.details).toBeUndefined()
+	})
+
 	test("unknown code → base WalletError, code + message preserved (default arm)", () => {
 		const rebuilt = walletErrorFromPayload({ code: "SOME_FUTURE_CODE", message: "hi", details: { x: 1 } })
 		expect(rebuilt).toBeInstanceOf(WalletError)
@@ -214,6 +224,7 @@ describe("constructor identity ritual (owned by the WalletError base)", () => {
 			code: ContractNotRegisteredError.CODE,
 		},
 		{ err: new SessionEndedError(), ctor: SessionEndedError, name: "SessionEndedError", code: SessionEndedError.CODE },
+		{ err: new ScopeViolationError("s"), ctor: ScopeViolationError, name: "ScopeViolationError", code: ScopeViolationError.CODE },
 		{
 			err: new OperationNotRecordedError(),
 			ctor: OperationNotRecordedError,
@@ -222,7 +233,7 @@ describe("constructor identity ritual (owned by the WalletError base)", () => {
 		},
 	]
 
-	test("all 16 subclasses: exact prototype, literal name, and code on direct construction", () => {
+	test("all 17 subclasses: exact prototype, literal name, and code on direct construction", () => {
 		for (const { err, ctor, name, code } of instances) {
 			expect(Object.getPrototypeOf(err)).toBe(ctor.prototype)
 			expect(err).toBeInstanceOf(WalletError)
@@ -231,7 +242,7 @@ describe("constructor identity ritual (owned by the WalletError base)", () => {
 		}
 	})
 
-	test("the 15 switch-covered codes round-trip to the exact subclass with name intact", () => {
+	test("the 16 switch-covered codes round-trip to the exact subclass with name intact", () => {
 		for (const { err, ctor, name } of instances) {
 			if (ctor === TooManyPendingError) continue // see BUG PIN below
 			const rebuilt = walletErrorFromPayload(err.toPayload())

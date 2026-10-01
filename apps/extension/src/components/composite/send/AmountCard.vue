@@ -1,7 +1,10 @@
 <script setup>
 /** Utils */
-import { purgeNumber, normalizeAmount, clampDecimals, comma, formatBaseUnits } from "@/utils/amount"
+import { clampDecimals, formatBaseUnits, readAmountText } from "@/utils/amount"
+import { fitHero } from "@/utils/hero-fit"
+import { inputRoom, rulerWidth } from "@/utils/hero-ruler"
 import { usdToTokenAmount, tokenAmountToUsdMicro, formatUsdMicro, usdMicroToPlainString } from "@/wallet/services/price/convert"
+import { caretAfter, nextAmountText, restingAmount } from "./amount-field"
 
 const props = defineProps({
 	token: {
@@ -9,9 +12,8 @@ const props = defineProps({
 		required: false,
 	},
 	tokenBalanceByType: Number,
-	/** Raw base-units balance for the selected send type (string). Powers the
-	 *  bigint-exact fiat-mode Max/Half — the display-unit `tokenBalanceByType`
-	 *  Number path stays for token mode (pre-existing behavior, preserved). */
+	/** The selected side's balance in base units, as a digit string; null until it loads. Every
+	 *  balance digit Max fills or the corner shows comes from it: `tokenBalanceByType` is a float. */
 	balanceRawByType: { type: String, required: false, default: null },
 	/** Live usable quote for the selected token ({ usd, fetchedAt }) or null.
 	 *  Null hides all fiat UI (and the fiat-input toggle). */
@@ -27,14 +29,25 @@ const model = defineModel()
 /** Fiat-input mode flag (parent reads it for submit gating). */
 const fiatMode = defineModel("fiatMode", { default: false })
 /**
- * C3 quote-consistency guard, owned here, ENFORCED by the parent's submit
+ * The quote-consistency guard, owned here, ENFORCED by the parent's submit
  * gate: null outside fiat mode; { frozenUsd, frozenAt, converting } inside.
  * `converting` is true while the debounced fiat→token derivation is pending —
  * submit must stay disabled until it lands.
  */
 const fiatGuard = defineModel("fiatGuard", { default: null })
+/**
+ * `rested` is text the card itself wrote at rest (the blur, Max, a re-clamp): only it reads its
+ * commas as the wallet's grouping. Every other write and every edit clears it, an edit only after
+ * reading the prior text with it, so it never matches later text. The comma point marks the text's
+ * one "." as one a typed comma wrote, and lasts while that point does.
+ */
+const rested = defineModel("rested", { default: null })
+let commaPoint = false
+/** The text the card last wrote or the page last set: the prior text of the next edit. */
+let lastText = String(model.value ?? "")
 
 const inputEl = useTemplateRef("inputEl")
+const fieldRuler = useTemplateRef("fieldRuler")
 
 const tokenDecimals = computed(() => (typeof props.token?.decimals === "number" ? props.token.decimals : undefined))
 
@@ -43,70 +56,110 @@ const tokenDecimals = computed(() => (typeof props.token?.decimals === "number" 
  *  "Token supports N decimals" inline hint. Cleared when the user
  *  brings the input back within range or clears the field. */
 const wasClamped = ref(false)
+/** Why the field's text reads as no one amount ("unreadable" or "ambiguous"): shown at once after a
+ *  paste, after a keystroke once the field is left, and gone once the text reads or empties. */
+const readHint = ref(null)
 
 onMounted(() => {
 	if (props.tokenBalanceByType) inputEl.value.focus()
+	fitField()
+	document.fonts?.addEventListener("loadingdone", fitField)
 })
 
-// Works on the input's own value and writes the model once: `model.value` only reflects a write
-// after the parent re-renders, and nothing guarantees a flush between v-model's listener and this one.
-const handleAmountInput = (e) => {
-	const typed = e.target.value
-	const purgedAmount = purgeNumber(typed)
-
-	let next = purgedAmount
-	if (["0", ","].includes(e.data) && typed.length === 1) next = "0."
-
-	const normalizedAmount = normalizeAmount(purgedAmount)
-	if (typeof normalizedAmount === "string") next = normalizedAmount
-
-	// Clamp decimal places to the token's `decimals`. If the typed value
-	// had more, surface a small inline hint so the truncation is visible.
-	if (tokenDecimals.value !== undefined) {
-		const clamped = clampDecimals(typed, tokenDecimals.value)
-		wasClamped.value = clamped !== typed
-		if (wasClamped.value) next = clamped
-	}
-
-	model.value = next
-	// When `next` equals what the parent already holds, no re-render comes to correct the field.
-	if (e.target.value !== next) e.target.value = next
+/** Every write of the token amount goes through here, so the next edit starts from it. */
+function writeAmount(text, { atRest = false, point = false } = {}) {
+	lastText = text
+	commaPoint = point
+	rested.value = atRest ? text : null
+	model.value = text
 }
 
-/** When the active token changes, re-clamp whatever the user previously
- *  typed so a token swap (e.g. 18-dec → 6-dec) doesn't leave a value
- *  the new token can't accept. */
+/** Shows `text` in the input with the caret before the digits that followed it, where a browser
+ *  would put it at the end. */
+function showText(input, text) {
+	if (input.value === text) return
+	const caret = caretAfter(input.value, input.selectionEnd ?? input.value.length, text)
+	input.value = text
+	input.setSelectionRange(caret, caret)
+}
+
+// The field's only input listener, bound one way: a browser flushes microtasks between two listeners
+// of one keystroke, so a v-model write of the raw text would reach the page, and come back through
+// the model watcher below, before this read its prior text.
+const handleAmountInput = (e) => {
+	const next = nextAmountText({
+		prior: lastText,
+		value: e.target.value,
+		inputType: e.inputType,
+		data: e.data,
+		decimals: tokenDecimals.value,
+		rested: rested.value,
+		commaPoint,
+		hint: readHint.value,
+	})
+	wasClamped.value = next.hint === "clamp"
+	readHint.value = next.hint === "clamp" ? null : next.hint
+	writeAmount(next.text, { point: next.commaPoint })
+	// When the text equals what the parent already holds, no re-render comes to correct the field.
+	showText(e.target, next.text)
+}
+
+// A write from the page (a token pick clears the amount) ends the card's own state.
+watch(model, (value) => {
+	const text = String(value ?? "")
+	if (text === lastText) return
+	lastText = text
+	commaPoint = false
+	rested.value = null
+	readHint.value = null
+})
+
+/** When the active token changes, re-clamp an amount that reads, so a token swap (e.g. 18-dec →
+ *  6-dec) doesn't leave a value the new token can't accept; held text stays as it is. */
 watch(
 	() => tokenDecimals.value,
 	(newDecimals) => {
 		if (newDecimals === undefined || !model.value) return
-		const stringy = typeof model.value === "string" ? model.value : String(model.value)
-		const clamped = clampDecimals(stringy, newDecimals)
-		if (clamped !== stringy) {
-			model.value = clamped
-			wasClamped.value = true
-		}
+		const read = readAmountText(String(model.value), { rested: rested.value })
+		if (!read.ok) return
+		const clamped = clampDecimals(read.plain, newDecimals)
+		if (clamped === read.plain) return
+		writeAmount(restingAmount(clamped, newDecimals), { atRest: true })
+		wasClamped.value = true
 	},
 )
 
 const isFocused = ref(false)
 const handleAmountFocus = () => {
 	if (props.tokenBalanceByType) isFocused.value = true
+	fieldScale.value = 1
 }
 const handleAmountBlur = () => {
 	isFocused.value = false
-
-	if (!model.value) return
-	if (model.value.toString().includes(",")) return model.value
-
-	// Cap the post-blur formatting at the token's decimals (was hardcoded 8;
-	// tokens with >8 decimals were silently rounded). Falls back to 8 when
-	// decimals unknown, matching prior behavior.
-	const fixed = tokenDecimals.value !== undefined ? Math.min(tokenDecimals.value, 8) : 8
-	model.value = comma(model.value, ",", fixed)
+	if (!model.value || tokenDecimals.value === undefined) return
+	const read = readAmountText(String(model.value), { rested: rested.value })
+	if (!read.ok) {
+		readHint.value = read.reason
+		return
+	}
+	const rest = restingAmount(read.plain, tokenDecimals.value)
+	writeAmount(rest, { atRest: true, point: commaPoint && rest.includes(".") })
 }
 
-// ── C3: fiat-denominated input ──────────────────────────────────────────
+/** The token field's type as a fraction of its 40 px: full with focus, and at rest the largest
+ *  that shows the whole amount, however small. */
+const fieldScale = ref(1)
+function fitField() {
+	const input = inputEl.value
+	const form = fieldRuler.value
+	if (fiatMode.value || !input || !form) return
+	// Both: the fiat input sets `isFocused` and never clears it, and a window losing focus blurs the
+	// field while leaving it the document's active element.
+	const typing = isFocused.value && document.activeElement === input
+	fieldScale.value = typing ? 1 : fitHero(1, (_, scale) => rulerWidth(form, scale), inputRoom(input)).scale
+}
+
+// ── Fiat-denominated input ──────────────────────────────────────────
 
 const CONVERT_DEBOUNCE_MS = 250
 
@@ -118,13 +171,11 @@ const canUseFiatInput = computed(() => props.liveQuote != null && tokenDecimals.
 /** Token base units currently expressed by `model` (both modes), for display. */
 const modelRaw = computed(() => {
 	if (tokenDecimals.value === undefined) return null
-	const stringy = typeof model.value === "string" ? model.value : model.value?.toString()
-	if (!stringy) return null
-	const plain = purgeNumber(stringy)
-	const match = /^(\d*)(?:\.(\d*))?$/.exec(plain)
-	if (!match) return null
-	const frac = (match[2] ?? "").slice(0, tokenDecimals.value).padEnd(tokenDecimals.value, "0")
-	return BigInt(match[1] || "0") * 10n ** BigInt(tokenDecimals.value) + BigInt(frac || "0")
+	const read = readAmountText(String(model.value ?? ""), { rested: rested.value })
+	if (!read.ok) return null
+	const [whole, fraction = ""] = read.plain.split(".")
+	const frac = fraction.slice(0, tokenDecimals.value).padEnd(tokenDecimals.value, "0")
+	return BigInt(whole || "0") * 10n ** BigInt(tokenDecimals.value) + BigInt(frac || "0")
 })
 
 /** Token-mode conversion line — LIVE quote (display-only; freezing applies to
@@ -144,14 +195,15 @@ const tokenModeFiatLabel = computed(() => {
 	return `≈ ${formatUsdMicro(micro)}`
 })
 
-/** Proxy provenance moved off the line into a tooltip (G1b). */
 const conversionTitle = computed(() => (props.proxyTicker ? `Priced via ${props.proxyTicker}, at today's rate` : "At today's rate"))
 
 /** Corner balance segment: amount + symbol only — the From selector above
- *  already names the private/public side, so no dot/word repeats it here. */
+ *  already names the private/public side, so no dot/word repeats it here.
+ *  Truncated at 8 places, so it never reads more than the balance. */
 const balanceSegment = computed(() => {
-	if (!props.token || !props.tokenBalanceByType) return null
-	return `${comma(props.tokenBalanceByType, ",", 8)} ${props.token.symbol}`
+	if (!props.token || !props.tokenBalanceByType || props.balanceRawByType == null || tokenDecimals.value === undefined) return null
+	const amount = formatBaseUnits(props.balanceRawByType, tokenDecimals.value, { maxDecimals: 8, thousandsSep: ",", decimalSep: "." })
+	return `${amount} ${props.token.symbol}`
 })
 
 /** Fiat-mode secondary line: the DERIVED token amount that will send;
@@ -161,40 +213,63 @@ const derivedTokenLabel = computed(() => {
 	return `≈ ${formatBaseUnits(modelRaw.value, tokenDecimals.value, { thousandsSep: ",", decimalSep: "." })} ${props.token?.symbol ?? ""}`
 })
 
+const plainAmount = (raw) => formatBaseUnits(raw, tokenDecimals.value, { thousandsSep: "", decimalSep: "." })
+
 const writeModelFromRaw = (raw) => {
-	// Plain machine format (no separators) — this exact string is what the
-	// parent validates and integerizes; it IS the amount that sends.
-	model.value = formatBaseUnits(raw, tokenDecimals.value, { thousandsSep: "", decimalSep: "." })
+	writeAmount(plainAmount(raw))
 }
 
-const scheduleConvert = () => {
-	if (!fiatGuard.value) return
-	fiatGuard.value = { ...fiatGuard.value, converting: true }
+let fiatLastText = ""
+let fiatCommaPoint = false
+/** Every write of the USD text goes through here, so its next edit starts from it. */
+function writeFiat(text, point = false) {
+	fiatLastText = text
+	fiatCommaPoint = point
+	fiatTerm.value = text
+}
+
+/** A USD reading takes a "0" before a bare point (`parseUsdToMicro` refuses ".5") and is cut to
+ *  micro precision, rounding down; a text that needs neither stays as written. */
+function usdText(text) {
+	const read = readAmountText(text, { currency: "$" })
+	if (!read.ok) return text
+	const fixed = clampDecimals(read.plain.startsWith(".") ? `0${read.plain}` : read.plain, 6)
+	return fixed === read.plain ? text : fixed
+}
+
+const scheduleConvert = (base = fiatGuard.value) => {
+	if (!base) return
+	fiatGuard.value = { ...base, converting: true }
 	clearTimeout(convertTimer)
 	convertTimer = setTimeout(() => {
 		const guard = fiatGuard.value
 		if (!guard) return
-		const raw = fiatTerm.value ? usdToTokenAmount(purgeNumber(fiatTerm.value), tokenDecimals.value, guard.frozenUsd) : null
+		const read = readAmountText(fiatTerm.value, { currency: "$" })
+		const raw = read.ok ? usdToTokenAmount(read.plain, tokenDecimals.value, guard.frozenUsd) : null
 		if (raw !== null) {
 			writeModelFromRaw(raw)
 		} else {
-			model.value = ""
+			writeAmount("")
 		}
 		fiatGuard.value = { ...guard, converting: false }
 	}, CONVERT_DEBOUNCE_MS)
 }
 
-const handleFiatInput = () => {
-	let purged = purgeNumber(fiatTerm.value)
-	// A bare leading dot (".5") parses to null downstream — normalize to "0.5",
-	// matching the token-mode input's behavior.
-	if (purged.startsWith(".")) purged = `0${purged}`
-	// USD input caps at micro precision; extra digits are truncated (round-down).
-	const match = /^(\d*)(?:\.(\d*))?$/.exec(purged)
-	if (match?.[2] !== undefined && match[2].length > 6) {
-		purged = `${match[1]}.${match[2].slice(0, 6)}`
-	}
-	fiatTerm.value = purged
+const handleFiatInput = (e) => {
+	const next = nextAmountText({
+		prior: fiatLastText,
+		value: e.target.value,
+		inputType: e.inputType,
+		data: e.data,
+		commaPoint: fiatCommaPoint,
+		hint: readHint.value,
+		currency: "$",
+	})
+	readHint.value = next.hint
+	const text = usdText(next.text)
+	// Before the write, so v-model's re-render finds the text in place and leaves the caret.
+	showText(e.target, text)
+	writeFiat(text, next.commaPoint && text.includes("."))
 	scheduleConvert()
 }
 
@@ -206,15 +281,17 @@ const toggleFiatMode = () => {
 		fiatMode.value = true
 		fiatGuard.value = { frozenUsd: props.liveQuote.usd, frozenAt: Date.now(), converting: false }
 		// Seed the fiat field from the current token amount at the frozen rate.
-		fiatTerm.value =
+		writeFiat(
 			modelRaw.value !== null && modelRaw.value > 0n
 				? usdMicroToPlainString(tokenAmountToUsdMicro(modelRaw.value, tokenDecimals.value, props.liveQuote.usd))
-				: ""
+				: "",
+		)
 	} else {
 		fiatMode.value = false
 		fiatGuard.value = null
 		clearTimeout(convertTimer)
 	}
+	readHint.value = null
 }
 
 /** A token swap mid-fiat-session would silently keep the OLD token's frozen
@@ -234,20 +311,23 @@ watch(
 watch(canUseFiatInput, (can) => {
 	if (!can && fiatMode.value) exitFiatMode({ clearAmount: true })
 })
+// After the render, so the ruler holds what the field shows; the fiat toggle takes the field's width.
+watch([model, isFocused, fiatMode, canUseFiatInput], fitField, { flush: "post" })
 /**
  * Watch-driven exits are FAIL-CLOSED: they also clear the amount. Leaving the
  * fiat-derived token amount sendable after the session's basis vanished (quote
  * lost/expired, token swapped) would silently convert a blocked fiat submit
  * into an allowed token-mode submit of a possibly-stale derivation. The
- * user-driven toggle exit keeps the amount — that swap is the G1b design.
+ * user-driven toggle exit keeps the amount.
  */
 function exitFiatMode({ clearAmount = false } = {}) {
 	fiatMode.value = false
 	fiatGuard.value = null
+	readHint.value = null
 	clearTimeout(convertTimer)
 	if (clearAmount) {
-		model.value = ""
-		fiatTerm.value = ""
+		writeAmount("")
+		writeFiat("")
 	}
 }
 
@@ -256,13 +336,14 @@ function exitFiatMode({ clearAmount = false } = {}) {
  *  amount before confirming. */
 const refreezeQuote = () => {
 	if (!fiatMode.value || !props.liveQuote) return
-	fiatGuard.value = { frozenUsd: props.liveQuote.usd, frozenAt: Date.now(), converting: false }
-	scheduleConvert()
+	// Handed over, not written first: `fiatGuard.value` reads the page's old quote until it re-renders.
+	scheduleConvert({ frozenUsd: props.liveQuote.usd, frozenAt: Date.now(), converting: false })
 }
 defineExpose({ refreezeQuote })
 
 onBeforeUnmount(() => {
 	clearTimeout(convertTimer)
+	document.fonts?.removeEventListener("loadingdone", fitField)
 })
 
 const handleFocus = () => {
@@ -275,7 +356,11 @@ const handleMax = () => {
 		handleFiatBalanceAction(1n)
 		return
 	}
-	model.value = props.tokenBalanceByType
+	if (props.balanceRawByType == null || tokenDecimals.value === undefined) return
+	// Max's click stops short of the card's focus, so no blur rests the amount: it is written at rest,
+	// in one write, as `model.value` reads the page's old value until the page re-renders.
+	writeAmount(restingAmount(plainAmount(BigInt(props.balanceRawByType)), tokenDecimals.value), { atRest: true })
+	readHint.value = null
 }
 
 /** Fiat-mode Max/Half: bigint-exact from the RAW balance — the sent amount is
@@ -285,7 +370,8 @@ const handleFiatBalanceAction = (divisor) => {
 	if (!guard || props.balanceRawByType == null) return
 	const raw = BigInt(props.balanceRawByType) / divisor
 	writeModelFromRaw(raw)
-	fiatTerm.value = usdMicroToPlainString(tokenAmountToUsdMicro(raw, tokenDecimals.value, guard.frozenUsd))
+	writeFiat(usdMicroToPlainString(tokenAmountToUsdMicro(raw, tokenDecimals.value, guard.frozenUsd)))
+	readHint.value = null
 	fiatGuard.value = { ...guard, converting: false }
 	clearTimeout(convertTimer)
 }
@@ -294,30 +380,35 @@ const handleFiatBalanceAction = (divisor) => {
 <template>
 	<Flex @click="handleFocus" gap="8" direction="column" :class="$style.wrapper">
 		<Flex direction="column" gap="4">
-			<Flex gap="8" align="baseline" justify="between">
-				<input
-					v-if="fiatMode"
-					ref="inputEl"
-					v-model="fiatTerm"
-					@input="handleFiatInput"
-					@focus="handleAmountFocus"
-					:disabled="!tokenBalanceByType"
-					placeholder="0.00"
-					data-testid="send-amount-fiat-input"
-					:class="$style.input_field"
-				/>
-				<input
-					v-else
-					ref="inputEl"
-					v-model="model"
-					@input="handleAmountInput"
-					@focus="handleAmountFocus"
-					@blur="handleAmountBlur"
-					:disabled="!tokenBalanceByType"
-					placeholder="0.00"
-					data-testid="send-amount-input"
-					:class="$style.input_field"
-				/>
+			<Flex gap="8" justify="between" data-testid="send-amount-row">
+				<div :class="$style.field_line">
+					<input
+						v-if="fiatMode"
+						ref="inputEl"
+						v-model="fiatTerm"
+						@input="handleFiatInput"
+						@focus="handleAmountFocus"
+						:disabled="!tokenBalanceByType"
+						placeholder="0.00"
+						data-testid="send-amount-fiat-input"
+						:class="[$style.input_field, $style.field_type]"
+					/>
+					<input
+						v-else
+						ref="inputEl"
+						:value="model"
+						@input="handleAmountInput"
+						@focus="handleAmountFocus"
+						@blur="handleAmountBlur"
+						:disabled="!tokenBalanceByType"
+						placeholder="0.00"
+						data-testid="send-amount-input"
+						:class="[$style.input_field, $style.field_type]"
+						:style="{ '--hero-scale': fieldScale }"
+					/>
+					<!-- The fit's ruler: it shares the field's `field_type` class, or the two widths part. -->
+					<span aria-hidden="true" :class="$style.field_ruler"><span ref="fieldRuler" :class="$style.field_type">{{ model }}</span></span>
+				</div>
 				<span
 					v-if="canUseFiatInput"
 					@click.stop="toggleFiatMode"
@@ -348,11 +439,18 @@ const handleFiatBalanceAction = (divisor) => {
 
 				<Flex align="center" gap="8" style="flex: none">
 					<span v-if="balanceSegment" data-testid="send-amount-balance" :class="$style.balance_corner">{{ balanceSegment }}</span>
-					<span @click="handleMax" data-testid="send-amount-max" :class="$style.action_link">Max</span>
+					<span @click.stop="handleMax" data-testid="send-amount-max" :class="$style.action_link">Max</span>
 				</Flex>
 			</Flex>
 
-			<span v-if="wasClamped && tokenDecimals !== undefined" :class="$style.clamp_hint" data-testid="send-amount-clamp-hint">
+			<!-- A read hint first: the clamp hint can outlive a switch to USD, a read hint never outlives its text. -->
+			<span v-if="readHint === 'unreadable'" :class="$style.clamp_hint" data-testid="send-amount-unreadable-hint">
+				Not an amount. Type it like 1234.56
+			</span>
+			<span v-else-if="readHint === 'ambiguous'" :class="$style.clamp_hint" data-testid="send-amount-ambiguous-hint">
+				Type it without the comma.
+			</span>
+			<span v-else-if="wasClamped && tokenDecimals !== undefined" :class="$style.clamp_hint" data-testid="send-amount-clamp-hint">
 				{{ token.symbol || "Token" }} supports {{ tokenDecimals }} decimal{{ tokenDecimals === 1 ? "" : "s" }}
 			</span>
 		</Flex>
@@ -367,20 +465,61 @@ const handleFiatBalanceAction = (divisor) => {
 	padding: 8px 0;
 }
 
-.input_field {
-	width: 100%;
+/* The line keeps the full size's height and baseline while the amount's type shrinks, so nothing
+ * below it moves. */
+.field_line {
+	position: relative;
 	flex: 1;
 	min-width: 0;
+
+	white-space: nowrap;
+}
+
+/* A zero-width strut in the full type, with the input's vertical padding. The unit toggle holds
+ * one too, so its label sits on the amount's baseline and its box, the press target, still fills
+ * the row. */
+.field_line::after,
+.unit_pair::before {
+	content: "\200b";
+	display: inline-block;
+	width: 0;
+	padding-block: 1px;
 
 	font-family: var(--font-headline);
 	font-size: 40px;
 	font-weight: 700;
-	letter-spacing: -0.04em;
+}
+
+.input_field {
+	width: 100%;
+	/* The browsers' own, stated because the strut copies it. */
+	padding-block: 1px;
+
 	color: var(--txt-primary);
 
 	&::placeholder {
 		color: var(--txt-tertiary);
 	}
+}
+
+.field_type {
+	font-family: var(--font-headline);
+	font-size: calc(40px * var(--hero-scale, 1));
+	font-weight: 700;
+	letter-spacing: -0.04em;
+}
+
+.field_ruler {
+	position: absolute;
+	width: 0;
+	height: 0;
+	overflow: hidden;
+	visibility: hidden;
+	pointer-events: none;
+}
+
+.field_ruler > span {
+	position: absolute;
 }
 
 .unit_pair {

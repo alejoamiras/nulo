@@ -1,5 +1,6 @@
 <script setup>
 /** Components */
+import { SectionLabel } from "@nulo/design"
 import TransactionAwaitingCard from "@/components/composite/activity/TransactionAwaitingCard.vue"
 import TransactionTerminalCard from "@/components/composite/activity/TransactionTerminalCard.vue"
 import TransactionIncomingCard from "@/components/composite/activity/TransactionIncomingCard.vue"
@@ -31,8 +32,10 @@ import { buildCancelHandler, buildFocusHandler, filterPendingDoubleRender, isMat
 import { buildRecentActivityRows, remainingRowSlots } from "./recent-activity-rows"
 
 /** Composables */
+import { ARRIVALS_KEY } from "@/composables/useArrivals"
 import { useIncomingSyncHealth } from "@/composables/useIncomingSyncHealth"
 import { useIncomingTransfers } from "@/composables/useIncomingTransfers"
+import { useScopedTokens } from "@/composables/useScopedTokens"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -46,17 +49,13 @@ const props = defineProps({
 
 const router = useRouter()
 
-/** Phase 2 follow-up v4: terminal journal records (cancelled / interrupted /
- *  failed) stay visible in the recent-activity area until browser exit —
- *  same lifetime as settled chain txs. Previously a 5-min window aged them
- *  out, which user QA found confusing ("what the hell, why did it disappear?").
+/** Terminal journal records (cancelled / interrupted / failed) have no age
+ *  cutoff: like settled chain txs, they persist across browser restarts.
  *
- *  Row budget: total visible rows cap at 5. Codex post-impl audit caught
- *  that v4 v1 capped settled txs separately + rendered structurally
- *  (awaiting → all terminals → settled), which let 6+ terminals push out
- *  every settled row. Fixed below via `recentActivityRows` chronological
- *  merge — terminals + settled compete fairly for the remaining slots
- *  after awaiting cards. */
+ *  Row budget: 5, counting the in-flight cards, which always render, so the
+ *  preview can exceed it. Terminal records, settled txs and incoming
+ *  transfers share whatever slots remain, newest first, with none reserved
+ *  for any kind (`recentActivityRows`). */
 const ROW_BUDGET = 5
 
 const filteredRecentTransactions = computed(() => {
@@ -89,7 +88,7 @@ const recentActivityRows = computed(() => {
 	// (`awaitingAccountTxs` / `isTokenAwaitingTx` generic card) is suppressed
 	// by the template when ANY journal card or orphan executing task is on
 	// screen — counting it in that window would undercount remaining settled
-	// slots by 1 (codex post-impl catch). Mirror the template's `v-else-if`
+	// slots by 1. Mirror the template's `v-else-if`
 	// chain here so the math matches the DOM.
 	const journalCount = renderedInFlightOps.value.length
 	const orphanCount = hasOrphanExecutingTask.value ? 1 : 0
@@ -136,49 +135,21 @@ const executingSubtasks = ref([])
 /** PER-LOADER scope fences: a newer trigger of the SAME loader supersedes its
  *  older in-flight run (A→B→A cannot revalidate a stale run — captured-equality
  *  alone would), while independent loaders never cross-cancel — one shared
- *  fence let a standalone journal reconnect silently kill parked token/task
- *  loads AFTER the switch-clear, starving the feed until an unrelated event.
- *  The scope watcher begins all three so its clear + reloads form one
- *  supersede unit per loader. */
+ *  fence let a standalone journal reconnect silently kill parked task loads
+ *  AFTER the switch-clear, starving the feed until an unrelated event. The
+ *  scope watcher begins both so its clear + reloads form one supersede unit
+ *  per loader; the token lookup fences itself. */
 const journalFence = createRunFence()
 const taskFence = createRunFence()
-const tokensFence = createRunFence()
 
-/** Tokens lookup — UI Transfer tasks carry a tokenId; we resolve to symbol +
- *  decimals so the awaiting card can mirror TransactionCard (icon + amount). */
-const tokens = ref([])
+/** UI Transfer tasks and journal rows carry a tokenId; the lookup resolves it to symbol + decimals
+ *  so the awaiting card mirrors TransactionCard (icon + amount). */
 const tokenService = new TokenServiceClient()
-async function loadTokens(isCurrent = tokensFence.begin()) {
-	if (!appStore.profile || !appStore.network) return
-	let fetched
-	try {
-		fetched = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
-	} catch (error) {
-		// A port that cannot open rejects at once. The map is a label lookup: keep what we have so a
-		// mount-time failure cannot abort the rest of mount, and a fire-and-forget reload cannot go unhandled.
-		console.debug("recent activity token lookup failed", { error })
-		return
-	}
-	// A deferred fetch for the OLD scope must not overwrite the new scope's map.
-	if (!isCurrent()) return
-	tokens.value = fetched
-}
-
-// Keep the local tokens map fresh as new tokens are added during this
-// session. Without this, incoming-transfer rows for a just-added token
-// render with the "Token" placeholder until the user re-opens the
-// extension: the tokenById lookup misses because `tokens` was only
-// populated once at mount.
-// Wrapped: EventHandler invokes callbacks WITH the payload — a bare
-// registration would feed the TokenInfo object into loadTokens' isCurrent
-// default parameter and TypeError after the first await (the listener dies).
-tokenService.onTokenAdded.add(() => {
-	loadTokens()
+const scopedTokens = useScopedTokens({
+	tokenService,
+	scope: () => (appStore.profile && appStore.network ? { profileId: appStore.profile.id, chainId: appStore.network.chainId } : undefined),
 })
-
-function tokenById(id) {
-	return tokens.value.find((t) => t.id === id)
-}
+const { tokens, tokenById } = scopedTokens
 
 const isUiTransfer = computed(() => executingTask.value?.content?.kind === ContentKind.Transfer)
 
@@ -214,7 +185,7 @@ const executingAmount = computed(() => {
 	if (!isUiTransfer.value) return null
 	const token = tokenById(executingTask.value.content.tokenId)
 	if (!token) return null
-	return balanceFormatted(String(executingTask.value.content.amount), token.decimals || 0, 8).value
+	return balanceFormatted(String(executingTask.value.content.amount), token.decimals || 0, 8, { compact: true }).value
 })
 const executingAmountSymbol = computed(() => {
 	if (!isUiTransfer.value) return null
@@ -238,11 +209,12 @@ const journalOps = ref([])
  *  (hidden=false only); the merge below adds them to recentActivityRows. */
 // Parent owns the client lifecycle (connect/disconnect in onMounted/
 // onBeforeUnmount below); useIncomingTransfers wires the listeners + the
-// `incomingTransfersVisible` toggle reload. Shared verbatim with activity.vue.
+// `incomingTransfersVisible` toggle reload.
 const incomingTransferService = new IncomingTransferServiceClient()
 const configService = new ConfigServiceClient()
 const incomingPriceService = new PriceServiceClient()
 const incomingPrices = usePrices(incomingPriceService)
+const arrivals = inject(ARRIVALS_KEY, undefined)
 const { incomingTransfers, dispose: disposeIncomingTransfers } = useIncomingTransfers({
 	incomingTransferService,
 	configService,
@@ -251,6 +223,9 @@ const { incomingTransfers, dispose: disposeIncomingTransfers } = useIncomingTran
 		appStore.profile?.id && appStore.network?.id && appStore.account?.address
 			? { profileId: appStore.profile.id, networkId: appStore.network.id, account: appStore.account.address }
 			: undefined,
+	// Rows are assigned under the state that judges them; the token page's never play, so its reads
+	// wait for none.
+	afterRead: arrivals && ((scope) => (props.token ? Promise.resolve() : arrivals.load(scope))),
 })
 /** Account mode only: whether the active network's incoming scan has stalled. Same client as the
  *  receipts above — the parent owns its connect/disconnect. */
@@ -263,19 +238,11 @@ const syncHealth = useIncomingSyncHealth({
 })
 const showStalledLine = computed(() => !props.token && syncHealth.stalled.value)
 function incomingCardProps(inc) {
-	const token = inc.tokenId !== undefined ? tokenById(inc.tokenId) : undefined
-	return buildIncomingCardProps(inc, token, token ? (incomingPrices.tokenFiatLabel(token, BigInt(inc.amountRaw || 0)) ?? null) : null)
+	return buildIncomingCardProps(inc, tokens.value, incomingPrices.tokenFiatLabel)
 }
-function handleSelectIncoming(inc) {
-	// Dedicated received-detail page (D5-A), replacing the old redirect to the token page.
-	router.push(`/popup/received/${inc.id}`)
-}
-
-/** Phase 2 follow-up: execution-service client for Cancel surface.
- *  Disconnected in onBeforeUnmount alongside the others. */
 const executionService = new ExecutionServiceClient()
 
-/** Phase 2 follow-up: cancel handler for the awaiting card's `@cancel` emit.
+/** Cancel handler for the awaiting card's `@cancel` emit.
  *  Built from a pure module so the wire is unit-testable without mounting
  *  the full Vue component. The card emits `cancel(jobId)`; the handler
  *  cancels exactly that record. With multiple in-flight cards on screen
@@ -324,8 +291,8 @@ const inFlightJournalOps = computed(() =>
 )
 
 /** Terminal journal records (cancelled / failed) in scope, sorted newest-first.
- *  No time window — they stay visible until browser exit, same lifetime
- *  as the chain settled txs they sit alongside. */
+ *  No time window: like the settled chain txs beside them, they persist
+ *  across browser restarts. */
 const recentlyTerminalJournalOps = computed(() => {
 	return journalOps.value
 		.filter((op) => {
@@ -403,7 +370,7 @@ function cardAmountFor(op) {
 	if (op.tokenId === undefined) return null
 	const token = tokenById(op.tokenId)
 	if (!token) return null
-	return balanceFormatted(op.amountRaw, token.decimals || 0, 8).value
+	return balanceFormatted(op.amountRaw, token.decimals || 0, 8, { compact: true }).value
 }
 
 /** Per-op symbol. Same gating as the amount — returns null when token
@@ -441,10 +408,9 @@ function journalTerminalCardProps(op) {
  *  `isMatchingTask` is kind-only for `dapp_execute` and kind+tokenId for
  *  `transfer`. Two concurrent same-token transfers (or any two dapp_execute
  *  ops) would both match the same executingTask. Broadcasting the subtask
- *  label to both cards would attribute progress to the wrong op — codex
- *  post-impl catch. When the match is ambiguous (≥ 2 cards match), every
- *  card falls back to the bare FSM-stage label so we never lie about
- *  which op the subtask belongs to. */
+ *  label to both cards would attribute progress to the wrong op. When the
+ *  match is ambiguous (≥ 2 cards match), every card falls back to the bare
+ *  FSM-stage label so we never lie about which op the subtask belongs to. */
 function cardSubtitleFor(op) {
 	if (!op) return "Processing..."
 	// Backend evidence outranks the task label: the label only says a proof is
@@ -484,16 +450,15 @@ const hasOrphanExecutingTask = computed(() => {
 })
 
 /**
- * Phase 2 follow-up v4: when a journal record turns terminal and matches
+ * When a journal record turns terminal and matches
  * the current executingTask, clear executingTask in the same tick so the
  * stale awaiting card disappears immediately alongside the terminal card
  * appearing. Without this, TaskService's eventual onTaskUpdated (after
  * the SW's catch block runs) leaves a brief duplicate-render window.
  *
- * Two call shapes — codex post-impl review caught a HARD regression in
- * the original v1 (scan-all) implementation: with terminals living forever,
- * any OLD cancelled record matching by kind+tokenId would false-clear a
- * fresh executingTask. Narrowed:
+ * Two call shapes, because terminal records never age out and a scan of
+ * all of them would let an old cancelled record matching by kind+tokenId
+ * clear a fresh executingTask:
  *
  * - **Event path** (`onJournalAdded`/`Updated`): we already know which op
  *   just changed; check only that op. No scan; can't false-match an
@@ -690,16 +655,6 @@ function onExecutingTaskDeleted(task) {
 	}
 }
 
-const handleSelectTx = (tx) => {
-	router.push(`/popup/tx/${tx.hash}`)
-}
-
-// Terminal journal rows (cancelled / interrupted / failed pre-broadcast)
-// have no chain tx hash. Route to the dedicated journal detail page.
-const handleSelectTerminal = (op) => {
-	router.push(`/popup/journal/${op.id}`)
-}
-
 /** Snapshot the active account's in-flight executingTask from TaskService.
  *  Shared by mount and the account-switch reset watcher. Captured-account guard:
  *  a late snapshot for the previous account (A→B) is dropped, never assigned into
@@ -734,8 +689,8 @@ async function loadExecutingTaskSnapshot(isCurrent = taskFence.begin()) {
  *  part is missing (bare interpolation would stringify undefined into a
  *  never-falsy key, killing the not-ready guard and firing throwaway RPCs on
  *  every bootstrap transition). A rename (same triple) still does not reset.
- *  Incoming transfers are reset separately by `useIncomingTransfers`' own sync
- *  scope watcher. */
+ *  Incoming transfers and tokens are reset separately by their composables' own
+ *  sync scope watchers. */
 const scopeTripleKey = () => {
 	const p = appStore.profile?.id
 	const n = appStore.network?.id
@@ -748,16 +703,13 @@ watch(
 		if (nv === ov) return
 		const journalRun = journalFence.begin()
 		const taskRun = taskFence.begin()
-		const tokensRun = tokensFence.begin()
 		journalOps.value = []
 		executingTask.value = null
 		executingSubtasks.value = []
 		pendingCancelJobIds.value = new Set()
-		tokens.value = []
 		if (!nv) return
 		resnapshotJournal(journalRun)
 		loadExecutingTaskSnapshot(taskRun)
-		loadTokens(tokensRun)
 	},
 	{ flush: "sync" },
 )
@@ -769,6 +721,16 @@ watch(
 	() => void syncHealth.refresh(),
 )
 
+// After the render that showed them: only rows that rendered are claimed, so one the row budget
+// left out plays where it is first shown. The token page's rows never play.
+watch(
+	recentActivityRows,
+	(rows) => {
+		if (!props.token) arrivals?.present(rows.filter((row) => row.type === "incoming").map((row) => row.inc))
+	},
+	{ flush: "post" },
+)
+
 /** Exposed for Layer-A containment component tests: assert the switch-reset +
  *  captured-account guards at the STATE level (a render filter alone can mask a
  *  containment gap). Placed after the declarations it references (temporal dead
@@ -776,7 +738,7 @@ watch(
 defineExpose({ journalOps, executingTask, executingSubtasks, pendingCancelJobIds, hasOrphanExecutingTask, recentActivityRows, tokens })
 
 onMounted(async () => {
-	await loadTokens()
+	await scopedTokens.reload()
 
 	// ServiceClient doesn't auto-connect on listener registration — make
 	// explicit connects so the onUpdate (visibility toggle) and
@@ -815,6 +777,7 @@ onBeforeUnmount(() => {
 	incomingPriceService.disconnect()
 	disposeIncomingTransfers()
 	syncHealth.dispose()
+	scopedTokens.dispose()
 })
 </script>
 
@@ -828,8 +791,8 @@ onBeforeUnmount(() => {
 		:data-active-account="appStore.account?.address"
 	>
 		<Flex align="end" justify="between" :class="$style.section_header">
-			<span :class="$style.header_title">RECENT TRANSACTIONS</span>
-			<span @click="router.push('/popup/activity')" :class="$style.archive_link">View Archives</span>
+			<SectionLabel label="Recent activity" />
+			<span @click="router.push('/popup/activity')" :class="$style.archive_link" data-testid="activity-view-all">View history</span>
 		</Flex>
 
 		<div v-if="showStalledLine" :class="$style.stalled_line" data-testid="incoming-sync-stalled">
@@ -887,23 +850,24 @@ onBeforeUnmount(() => {
 			<!-- Chronological merge of terminal journal records + settled chain
 			     txs. Branch by row.type. -->
 			<template v-for="row in recentActivityRows" :key="row.key">
-				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectTx(row.tx)" />
+				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" :tokens="tokens" :to="`/popup/tx/${row.tx.hash}`" />
 				<TransactionIncomingCard
 					v-else-if="row.type === 'incoming'"
 					v-bind="incomingCardProps(row.inc)"
-					@click="handleSelectIncoming(row.inc)"
+					:to="`/popup/received/${row.inc.id}`"
+					:arriving="!token && (arrivals?.isArriving(row.inc) ?? false)"
 				/>
 				<TransactionTerminalCard
 					v-else-if="row.type === 'journal' && journalTerminalCardProps(row.op)"
 					v-bind="journalTerminalCardProps(row.op)"
-					@click="handleSelectTerminal(row.op)"
+					:to="`/popup/journal/${row.op.id}`"
 				/>
 			</template>
 		</div>
 	</Flex>
 	<Flex v-else-if="token" direction="column" gap="16" data-testid="activity-feed-root" :data-active-account="appStore.account?.address">
 		<Flex align="end" justify="between" :class="$style.section_header">
-			<span :class="$style.header_title">RECENT TRANSACTIONS</span>
+			<SectionLabel label="Recent activity" />
 		</Flex>
 
 		<div :class="$style.empty_state">
@@ -917,15 +881,6 @@ onBeforeUnmount(() => {
 .section_header {
 	padding-bottom: 8px;
 	border-bottom: 1px solid rgba(74, 70, 63, 0.2);
-}
-
-.header_title {
-	font-family: var(--font-headline);
-	font-size: 12px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
 }
 
 .archive_link {
@@ -986,7 +941,7 @@ onBeforeUnmount(() => {
 .list {
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
+	gap: 10px;
 }
 
 .empty_state {

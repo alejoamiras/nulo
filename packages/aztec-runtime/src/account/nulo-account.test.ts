@@ -9,8 +9,8 @@
  * surfaces are stubbed at the instance seam — the subject is the DECISION and
  * its out-param, not the request assembly.
  */
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { GasFees } from "@aztec/stdlib/gas"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { GasFees } from "@aztec-labs/stdlib/gas"
 import { beforeAll, describe, expect, test, vi } from "vitest"
 import { NuloAccount } from "./nulo-account"
 

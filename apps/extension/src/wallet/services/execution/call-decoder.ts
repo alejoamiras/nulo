@@ -6,20 +6,20 @@
  * decoded here reaches execution.
  */
 
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import {
 	type AbiDecoded,
 	type AbiType,
 	type ContractArtifact,
 	type FunctionAbi,
 	countArgumentsSize,
-	decodeFromAbi,
+	decodeEachFromAbi,
 	isAztecAddressStruct,
 	isEthAddressStruct,
 	isFunctionSelectorStruct,
 	isOptionStruct,
 	isWrappedFieldStruct,
-} from "@aztec/stdlib/abi"
+} from "@aztec-labs/stdlib/abi"
 import type { DecodedCall, DecodedValue, DisplayCallInput } from "@nulo/wallet-bridge"
 import { findFunctionByName, findFunctionBySelector } from "./contract-resolver"
 
@@ -43,9 +43,7 @@ export async function decodeCallForDisplay(lookup: ArtifactLookup, call: Display
 	const fields = toFields(call.args)
 	if (!fields || fields.length !== countArgumentsSize(fn)) return { kind: "undecoded", reason: "arguments" }
 	try {
-		const decoded = decodeFromAbi(types, fields)
-		// `decodeFromAbi` hands back the lone value for a single parameter and an array otherwise.
-		const values = types.length === 1 ? [decoded] : (decoded as AbiDecoded[])
+		const values = decodeEachFromAbi(types, fields)
 		return {
 			kind: "decoded",
 			contract: artifact.name,
@@ -65,7 +63,7 @@ async function resolveFunction(artifact: ContractArtifact, call: DisplayCallInpu
 }
 
 /** How many leaves a value of `type` decodes into, one per array slot. The ABI, not the argument
- *  count, sets what `decodeFromAbi` allocates — an array of empty structs needs zero fields — so
+ *  count, sets what `decodeEachFromAbi` allocates — an array of empty structs needs zero fields — so
  *  the bound is taken on the type before decoding. */
 function abiNodes(type: AbiType, depth = 0): number {
 	if (depth > MAX_TYPE_DEPTH) return Number.POSITIVE_INFINITY

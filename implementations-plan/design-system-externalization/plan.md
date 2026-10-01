@@ -11,8 +11,8 @@
   between sign-offs. This is what makes the ambitious takeover safe without a visual-regression
   harness — the user's eyes are the gate for the global-CSS change.
 - **Status:** approved (ambitious, supervised); finalizing seeds → handoff.
-- **Inputs:** [`brief.md`](./brief.md) · [`audit-codex.md`](./audit-codex.md) ·
-  [`audit-fable.md`](./audit-fable.md) (incl. the takeover-review rejects that shaped this design).
+- **Inputs:** [`brief.md`](./brief.md) · [`audit-codex.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/design-system-externalization/audit-codex.md) ·
+  [`audit-fable.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/design-system-externalization/audit-fable.md) (incl. the takeover-review rejects that shaped this design).
 
 ---
 

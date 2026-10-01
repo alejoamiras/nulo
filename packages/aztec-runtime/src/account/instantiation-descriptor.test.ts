@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { encodeArguments } from "@aztec/stdlib/abi"
-import { FunctionSelector } from "@aztec/stdlib/abi"
-import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
-import { computeInitializationHashFromEncodedArgs } from "@aztec/stdlib/contract"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { encodeArguments } from "@aztec-labs/stdlib/abi"
+import { FunctionSelector } from "@aztec-labs/stdlib/abi"
+import type { ContractInstanceWithAddress } from "@aztec-labs/stdlib/contract"
+import { computeInitializationHashFromEncodedArgs } from "@aztec-labs/stdlib/contract"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { describe, expect, test } from "vitest"
 import { FrozenSchnorrAccountArtifact } from "./frozen-artifact"
@@ -50,7 +50,7 @@ describe("frozen instantiation descriptor", () => {
 		const account = await NuloAccount.new(seed, nullLogger)
 		const instance = instanceOf(account)
 		const { signingKey } = await import("@nulo/wallet-crypto").then((m) => m.deriveNuloAccountKeys(seed))
-		const { Schnorr } = await import("@aztec/foundation/crypto/schnorr")
+		const { Schnorr } = await import("@aztec-labs/foundation/crypto/schnorr")
 		const signingPublicKey = await new Schnorr().computePublicKey(signingKey)
 
 		const ctorCall = await buildFrozenConstructorCall(FrozenSchnorrAccountArtifact, account.address, signingPublicKey)
@@ -80,7 +80,7 @@ describe("frozen instantiation descriptor", () => {
 			functions: FrozenSchnorrAccountArtifact.functions.filter((f) => f.name !== "constructor"),
 		}
 		const account = await NuloAccount.new(seed, nullLogger)
-		const { Schnorr } = await import("@aztec/foundation/crypto/schnorr")
+		const { Schnorr } = await import("@aztec-labs/foundation/crypto/schnorr")
 		const { signingKey } = await import("@nulo/wallet-crypto").then((m) => m.deriveNuloAccountKeys(seed))
 		const signingPublicKey = await new Schnorr().computePublicKey(signingKey)
 		await expect(buildFrozenConstructorCall(gutted, account.address, signingPublicKey)).rejects.toThrow(

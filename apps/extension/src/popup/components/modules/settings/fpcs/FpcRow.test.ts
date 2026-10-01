@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest"
 import { mount } from "@vue/test-utils"
+import { RowAction } from "@nulo/design"
 import FpcRow from "./FpcRow.vue"
 
 const STUBS = {
@@ -11,14 +12,7 @@ const STUBS = {
 	Flex: { template: "<div><slot /></div>" },
 	Text: { template: "<span><slot /></span>" },
 	Tooltip: { template: '<span><slot /><slot name="content" /></span>' },
-	Icon: {
-		props: ["name"],
-		// Forward the native event so parents using `@click.stop` can call
-		// $event.stopPropagation() without crashing the runtime.
-		template: '<i v-bind="$attrs" :data-icon="name" @click="$emit(\'click\', $event)"></i>',
-		emits: ["click"],
-		inheritAttrs: false,
-	},
+	Icon: { props: ["name"], template: '<i :data-icon="name" />' },
 }
 
 const baseFpc = { id: "f1", address: "0xabc", name: "My FPC", typeName: "sponsored", typeDescription: "Fees covered by sponsor" }
@@ -26,16 +20,18 @@ const baseFpc = { id: "f1", address: "0xabc", name: "My FPC", typeName: "sponsor
 const factory = (props: Record<string, unknown> = {}) =>
 	mount(FpcRow, {
 		props: { fpc: baseFpc, ...props },
-		global: { stubs: STUBS },
+		global: { stubs: STUBS, components: { RowAction } },
 	})
 
+const copyAction = (w: ReturnType<typeof factory>) => w.findAll('button[aria-label="Copy FPC address"]')
+
 describe("FpcRow", () => {
-	test("user-added row renders copy + edit + delete icons", () => {
+	test("user-added row renders copy + edit + delete as named buttons", () => {
 		const w = factory()
-		expect(w.find('[data-testid="fpc-edit-btn"]').exists()).toBe(true)
-		expect(w.find('[data-testid="fpc-delete-btn"]').exists()).toBe(true)
-		// copy icon has no testid; locate via the data-icon attribute on the stub
-		expect(w.findAll('[data-icon="copy"]')).toHaveLength(1)
+		expect(w.find('[data-testid="fpc-edit-btn"]').element.tagName).toBe("BUTTON")
+		expect(w.find('[data-testid="fpc-edit-btn"]').attributes("aria-label")).toBe("Edit FPC")
+		expect(w.find('[data-testid="fpc-delete-btn"]').attributes("aria-label")).toBe("Delete FPC")
+		expect(copyAction(w)).toHaveLength(1)
 	})
 
 	test("never renders the colored badge", () => {
@@ -55,41 +51,41 @@ describe("FpcRow", () => {
 		const w = factory({ protectedRow: true })
 		expect(w.find('[data-testid="fpc-edit-btn"]').exists()).toBe(true)
 		expect(w.find('[data-testid="fpc-delete-btn"]').exists()).toBe(false)
-		expect(w.findAll('[data-icon="copy"]')).toHaveLength(1)
+		expect(copyAction(w)).toHaveLength(1)
 	})
 
-	test("nonEditable + protected row (PrivateFPC) shows only the copy icon", () => {
+	test("nonEditable + protected row (PrivateFPC) shows only the copy action", () => {
 		const w = factory({ protectedRow: true, nonEditable: true })
 		expect(w.find('[data-testid="fpc-edit-btn"]').exists()).toBe(false)
 		expect(w.find('[data-testid="fpc-delete-btn"]').exists()).toBe(false)
-		expect(w.findAll('[data-icon="copy"]')).toHaveLength(1)
+		expect(copyAction(w)).toHaveLength(1)
 	})
 
-	test("synthetic public-fj row renders no action icons", () => {
+	test("synthetic public-fj row renders no actions", () => {
 		const w = factory({
 			fpc: { id: "public-fj", name: "Public Fee Juice", typeDescription: "Pays fees from your public Fee Juice" },
 			synthetic: "public-fj",
 		})
 		expect(w.find('[data-testid="fpc-edit-btn"]').exists()).toBe(false)
 		expect(w.find('[data-testid="fpc-delete-btn"]').exists()).toBe(false)
-		expect(w.findAll('[data-icon="copy"]')).toHaveLength(0)
+		expect(w.findAll("button")).toHaveLength(0)
 	})
 
-	test("emits 'edit' with the fpc when edit icon is clicked", async () => {
+	test("emits 'edit' with the fpc when the edit action is pressed", async () => {
 		const w = factory()
 		await w.find('[data-testid="fpc-edit-btn"]').trigger("click")
 		expect(w.emitted("edit")?.[0]?.[0]).toEqual(baseFpc)
 	})
 
-	test("emits 'delete' with the fpc when delete icon is clicked", async () => {
+	test("emits 'delete' with the fpc when the delete action is pressed", async () => {
 		const w = factory()
 		await w.find('[data-testid="fpc-delete-btn"]').trigger("click")
 		expect(w.emitted("delete")?.[0]?.[0]).toEqual(baseFpc)
 	})
 
-	test("emits 'copyAddress' with the address when copy icon is clicked", async () => {
+	test("emits 'copyAddress' with the address when the copy action is pressed", async () => {
 		const w = factory()
-		await w.findAll('[data-icon="copy"]')[0].trigger("click")
+		await copyAction(w)[0].trigger("click")
 		expect(w.emitted("copyAddress")?.[0]?.[0]).toBe(baseFpc.address)
 	})
 })

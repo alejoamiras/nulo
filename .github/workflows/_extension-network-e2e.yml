@@ -123,7 +123,7 @@ jobs:
       # `true && ''` returns `''` (right operand), and then `'' || '1'`
       # falls through to `'1'` because empty string is falsy. So the inverted
       # form would resolve to `'1'` in BOTH branches, completely defeating
-      # the disable flag (codex post-impl audit finding #1).
+      # the disable flag.
       # Presto-required ONLY when not disabled AND not proverless (proverless
       # ⊥ presto — the offscreen would FATAL on both). Same short-circuit
       # shape as the disable flag (`(A && B) && '1' || ''` → '1' iff both true).
@@ -181,12 +181,12 @@ jobs:
         with:
           # Headless server; bb is fetched per the SDK-requested version
           # (x-aztec-version) and cached in ~/.presto/versions/.
-          version: "1.1.2"
+          version: "1.1.3"
           # Both pins, established from the release assets (the tarball is
           # checked before extraction; the extracted binary on every run,
           # cache hits included). See SECURITY.md "Binary dependencies".
-          expected_tarball_sha256: 1e15aeb478e1cf92d8b69c42eb0cf3117a70efdfa7f80842f8d2a19fc8c27088
-          expected_sha256: 52eb05414908d61c142e22c52cb314989565f38c295abdbcaced0934ba0b58a0
+          expected_tarball_sha256: 90b76733c36ef337f19a326a3263ae0128b83d36bbea9ffb39bb09a4c0c07c41
+          expected_sha256: 9e183fa971405d475311e394c34a7f4cec0191b7088607f6c2483b3e18baef21
 
       - name: Start presto-server
         if: '${{ !inputs.disable_presto && !inputs.proverless }}'
@@ -354,7 +354,7 @@ jobs:
             echo "::error::presto-server log missing — startup failure"
             exit 1
           fi
-          # Literals from presto-v1.1.2 packages/presto/core/src/server/prove.rs:283,:475.
+          # Literals from presto-v1.1.3 packages/presto/core/src/server/prove.rs:283,:475.
           PROVE_COUNT=$(grep -c 'Received /prove request' /tmp/presto-server.log || true)
           PROVE_SUCCESS=$(grep -c 'Proving succeeded' /tmp/presto-server.log || true)
           echo "::notice::presto-server log: ${PROVE_COUNT} /prove requests, ${PROVE_SUCCESS} successful proofs"

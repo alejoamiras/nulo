@@ -114,7 +114,7 @@ describe("Header — avatar/name/address split", () => {
 		await flushPromises()
 
 		expect(writeText).toHaveBeenCalledWith(FULL_ADDRESS)
-		expect(H.openToast).toHaveBeenCalledWith({ label: "Address is copied", icon: "copy" }, undefined)
+		expect(H.openToast).toHaveBeenCalledWith({ kind: "success", label: "Address is copied" })
 		expect(H.openPopup).not.toHaveBeenCalled() // copying never opens the switcher
 	})
 
@@ -128,6 +128,14 @@ describe("Header — avatar/name/address split", () => {
 })
 
 describe("Header — lock", () => {
+	test("is a chip: the padlock and the word Lock, named for what it does", () => {
+		const lock = mountHeader().get('[data-testid="header-lock"]')
+		expect(lock.get('[data-testid="stub-material"]').attributes("data-name")).toBe("lock")
+		expect(lock.text()).toBe("Lock")
+		expect(lock.attributes("aria-label")).toBe("Lock wallet")
+		expect(lock.attributes("type")).toBe("button")
+	})
+
 	async function clickLock() {
 		const w = mountHeader()
 		await w.find('[data-testid="header-lock"]').trigger("click")

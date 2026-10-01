@@ -3,6 +3,10 @@
 </route>
 
 <script setup lang="ts">
+/** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
+
+/** Utils */
 import { clearOnboardingTabTracking } from "@/wallet/utils/onboarding-tab"
 
 const appStore = useAppStore()
@@ -99,6 +103,7 @@ async function openWallet() {
 		</Flex>
 
 		<Button
+			v-snack-footer
 			variant="cta"
 			size="large"
 			data-testid="onboarding-done-open"

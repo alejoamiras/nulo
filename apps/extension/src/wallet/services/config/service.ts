@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 import type { Restored, ServiceSpec } from "@/wallet/base"
 import { toRestoreError } from "@/utils/restore-error"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"

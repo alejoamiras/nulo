@@ -25,7 +25,7 @@ function record(profileId: string): string {
 		accountIndex: 0,
 		storedAddress: "0xstored",
 		derivedAddress: "0xderived",
-		regimeId: "nulo-v5",
+		regimeId: "nulo-v6",
 		walletVersion: "0.0.0",
 		detectedAt: 1,
 	})
@@ -67,6 +67,9 @@ describe("AccountIntegrityBarrier", () => {
 		expect(w.text()).toContain("derives a different address")
 		expect(w.text()).toContain("recovery phrase still derives your accounts")
 		expect(w.text()).not.toContain("funds are safe")
+		expect(w.find("[data-testid='account-integrity-blocked-copy']").text()).toBe(
+			"This version of the wallet derives a different address than this profile's accounts were created with, so the profile has been locked. Your recovery phrase still derives your accounts on a compatible version of Nulo. Never enter your recovery phrase anywhere in response to this message. No legitimate screen will ask for it.",
+		)
 	})
 
 	test("record for a DIFFERENT profile than the presented one does not brick it", async () => {

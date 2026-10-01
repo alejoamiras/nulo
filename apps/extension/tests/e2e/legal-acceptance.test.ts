@@ -12,6 +12,7 @@ import type { Page } from "puppeteer"
 import { extensionUrl, reloadExtensionPage, waitForOpenedUrl } from "./fixtures/browser"
 import {
 	clickByTestId,
+	expectNoNameField,
 	launchExtension,
 	openOnboarding,
 	openPopup,
@@ -20,9 +21,9 @@ import {
 	test,
 	waitForHash,
 } from "./fixtures/extension"
-import { ensureUnlocked, lockWallet, navigateByHash, waitForLockScreen } from "./fixtures/helpers"
+import { ensureUnlocked, lockWallet, navigateByHash, waitForLockScreen, waitForToast } from "./fixtures/helpers"
 import { setupPasskeyVirtualAuth } from "./fixtures/passkey"
-import { exportAccountBody } from "./helpers/account-io"
+import { exportAccountBody, FIRST_ACCOUNT_NAME } from "./helpers/account-io"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "./helpers/backup-export"
 import { CANONICAL_SEED_24, importSeed, ONBOARDING_IMPORT_SHELL, readActiveAccount, TEST_PASSWORD } from "./helpers/import-drivers"
 import {
@@ -31,13 +32,18 @@ import {
 	isSheetPresent,
 	pointerClick,
 	readLegalRecord,
+	readSnackOverSheet,
+	refuseNextAcceptanceWrite,
 	reloadWithLegalState,
 	waitForSheet,
 	waitForTermsGate,
+	waitForToastLayer,
 } from "./helpers/legal-drivers"
 
 const CURRENT_TERMS = LEGAL_MANIFEST.terms.at(-1)?.version
 const CURRENT_PRIVACY = LEGAL_MANIFEST.privacy.at(-1)?.version
+/** `SNACK_GAP` in `src/composables/snackInset.ts`: the drawn gap between a snack and the row under it. */
+const SNACK_GAP = 12
 
 describe("onboarding: the Terms gate", () => {
 	test("S1 a fresh install cannot continue unticked; ticking records the manifest version, then create works", async ({
@@ -61,7 +67,7 @@ describe("onboarding: the Terms gate", () => {
 		expect(record?.acceptedAt).toBeGreaterThanOrEqual(before)
 		expect(record?.history).toHaveLength(1)
 
-		await replaceInputValue(page, '[data-testid="onboarding-name-input"]', "Gate Test")
+		await expectNoNameField(page, "onboarding-create-page", "onboarding-name-input")
 		await replaceInputValue(page, '[data-testid="onboarding-password-input"]', TEST_PASSWORD)
 		await replaceInputValue(page, '[data-testid="onboarding-password-confirm"]', TEST_PASSWORD)
 		await clickByTestId(page, "onboarding-submit-create")
@@ -156,7 +162,10 @@ describe("popup: declining never locks a person out", () => {
 			await waitForHash(page, "#/popup/general", 30_000)
 			await reloadWithLegalState(page, "missing")
 
+			await waitForSheet(page, "review")
+			await waitForToastLayer(page, "9500")
 			await declineFromSheet(page, "review")
+			await waitForToastLayer(page, "auto")
 			expect(await textOf(page, "legal-declined-version")).toBe(`Terms v${CURRENT_TERMS} not accepted`)
 			expect(await page.$$eval('[data-testid="legal-declined-kept"]', (rows) => rows.length)).toBe(3)
 			expect(await page.$$eval('[data-testid="legal-declined-paused"]', (rows) => rows.length)).toBe(1)
@@ -205,7 +214,7 @@ describe("popup: declining never locks a person out", () => {
 				expect(phrase.split(" ")).toHaveLength(24)
 				expect(await isSheetPresent(page)).toBe(false)
 
-				const body = await exportAccountBody(page, "Account", false)
+				const body = await exportAccountBody(page, FIRST_ACCOUNT_NAME, false)
 				expect(Object.keys(JSON.parse(body) as object).length).toBeGreaterThan(0)
 				expect(await isSheetPresent(page)).toBe(false)
 
@@ -247,6 +256,31 @@ describe("popup: declining never locks a person out", () => {
 		await navigateByHash(page, "#/popup/send", 15_000)
 		await page.waitForSelector('[data-testid="send-submit"]', { visible: true, timeout: 15_000 })
 		expect(await page.$('[data-testid="send-legal-banner"]')).toBeNull()
+		await page.close()
+	}, 120_000)
+
+	test("S11 a refused acceptance: its error shows over the sheet above Continue, and Continue again records it", async ({
+		registeredExtensionPerTest: extension,
+	}) => {
+		const page = await openPopup(extension)
+		await waitForHash(page, "#/popup/general", 30_000)
+		await reloadWithLegalState(page, "missing")
+		await waitForSheet(page, "review")
+		await pointerClick(page, "legal-consent-checkbox")
+
+		await refuseNextAcceptanceWrite(extension)
+		await pointerClick(page, "legal-continue")
+		await waitForToast(page, "Could not record your acceptance", 10_000, { kind: "error" })
+		await waitForSheet(page, "review")
+
+		const shown = await readSnackOverSheet(page)
+		expect(shown.hits).toEqual({ card: "snackbar", continue: "legal-continue", notNow: "legal-sheet-not-now", beside: "legal-sheet" })
+		expect(Math.abs(shown.gapAboveContinue - SNACK_GAP)).toBeLessThanOrEqual(1)
+
+		await pointerClick(page, "legal-continue")
+		await page.waitForFunction(() => !document.querySelector('[data-testid="legal-sheet"]'), { timeout: 10_000 })
+		expect(await readLegalRecord(page)).toMatchObject({ termsVersion: CURRENT_TERMS, surface: "popup" })
+		await waitForToastLayer(page, "auto")
 		await page.close()
 	}, 120_000)
 
@@ -331,8 +365,7 @@ describe("popup: a passkey wallet that declined", () => {
 			await waitForHash(page, "#/popup/register", 15_000)
 			await page.waitForFunction(() => !document.querySelector('[data-testid="global-loader"]'), { timeout: 15_000, polling: 500 })
 			await clickByTestId(page, "register-create-btn")
-			await page.waitForSelector('[data-testid="register-name-input"]', { visible: true, timeout: 10_000 })
-			await replaceInputValue(page, '[data-testid="register-name-input"]', "Passkey Profile")
+			await expectNoNameField(page, "register-page", "register-name-input")
 			await clickByTestId(page, "register-method-passkey")
 			await clickByTestId(page, "register-submit-btn")
 			await waitForHash(page, "#/popup/general", 60_000)
@@ -363,7 +396,7 @@ describe("popup: a passkey wallet that declined", () => {
 		// Read through the extension origin rather than the tab's text/plain rendering.
 		const notices = await page.evaluate(async (url) => (await fetch(url)).text(), expected)
 		expect(notices.startsWith("THIRD-PARTY NOTICES\n")).toBe(true)
-		for (const name of ["@aztec/sqlite3mc-wasm@", "@alejoamiras/presto@", "@vue/runtime-core@", "buffer@"]) {
+		for (const name of ["@aztec-labs/sqlite3mc-wasm@", "@alejoamiras/presto@", "@vue/runtime-core@", "buffer@"]) {
 			expect(notices).toContain(`\n${name}`)
 		}
 		await page.close()

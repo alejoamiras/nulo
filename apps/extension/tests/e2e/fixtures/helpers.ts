@@ -1,9 +1,11 @@
 import { MessageType } from "@nulo/extension-messaging/messages"
 import { wrapParams } from "@nulo/extension-messaging/utils"
-import type { Page } from "puppeteer"
+import type { ElementHandle, Page } from "puppeteer"
+import { defaultProfileName } from "@/utils/profile-name"
+import { pinnedTokensKey } from "@/utils/profile-ui-keys"
 import { reloadExtensionPage } from "./browser"
 import { TEST_PASSWORD } from "./constants"
-import { clickByTestId, clickSelector, replaceInputValue, waitForHash, withTimeoutMessage } from "./extension"
+import { clickByTestId, clickSelector, expectNameFieldPrefill, replaceInputValue, waitForHash, withTimeoutMessage } from "./extension"
 import { type SendAction, submitSend } from "./send-page"
 
 /**
@@ -347,22 +349,51 @@ export async function reopenAndRecoverAfterImport(page: Page, password = TEST_PA
 
 /** Create a profile from the lock screen's picker and land on its home screen: creating a profile
  *  activates it. Starts unlocked with no approved send running, so the lock button locks without
- *  asking. Returns the new profile's id. */
+ *  asking. The name field must open prefilled with the default the stored profiles give before
+ *  `name` replaces it. Returns the new profile's id. */
 export async function createAndActivateProfile(page: Page, name: string, password: string): Promise<string> {
 	const previous = (await readSessionRow(page))?.profile
 	await clickByTestId(page, "header-lock")
 	await page.waitForSelector('[data-testid="auth-profile"]', { visible: true, timeout: 15_000 })
 	await clickByTestId(page, "auth-profile")
 	await page.waitForSelector('[data-testid="select-profile-new-btn"]', { visible: true, timeout: 10_000 })
+	// Read from storage: the picker draws its button before its rows arrive.
+	const before = await readProfileNames(page)
 	await clickByTestId(page, "select-profile-new-btn")
 
-	await page.waitForSelector('[data-testid="register-name-input"]', { visible: true, timeout: 10_000 })
+	await expectNameFieldPrefill(page, "register-page", "register-name-input", defaultProfileName(before))
 	await replaceInputValue(page, '[data-testid="register-name-input"]', name)
 	await replaceInputValue(page, '[data-testid="register-password-input"]', password)
 	await replaceInputValue(page, '[data-testid="register-password-confirm-input"]', password)
 	await clickByTestId(page, "register-submit-btn")
 	await waitForHash(page, "#/popup/general", 90_000)
+	await expectNewProfileNamed(page, before, name)
 	return (await waitForSessionRow(page, (row) => row.profile !== previous)).profile
+}
+
+/** Every stored profile's name, in storage order. EntityStorage rows live under
+ *  `nulo:core:profiles@<id>`. */
+export async function readProfileNames(page: Page): Promise<string[]> {
+	return page.evaluate(async () => {
+		const all = await chrome.storage.local.get(null)
+		return Object.entries(all)
+			.filter(([key, raw]) => key.startsWith("nulo:core:profiles@") && typeof raw === "string")
+			.map(([, raw]) => (JSON.parse(raw as string) as { name: string }).name)
+	})
+}
+
+/** Waits for the stored profile names to become `before` plus `expected`, and fails on any other
+ *  outcome, a profile lost or renamed included. */
+export async function expectNewProfileNamed(page: Page, before: readonly string[], expected: string, timeoutMs = 10_000): Promise<void> {
+	const want = [...before, expected].sort()
+	const deadline = Date.now() + timeoutMs
+	for (;;) {
+		const stored = (await readProfileNames(page)).sort()
+		if (stored.length === want.length && stored.every((name, i) => name === want[i])) return
+		if (stored.length > before.length || Date.now() > deadline)
+			throw new Error(`expected the profiles ${JSON.stringify(want)}, got ${JSON.stringify(stored)}`)
+		await new Promise((resolve) => setTimeout(resolve, 200))
+	}
 }
 
 // ── Session ────────────────────────────────────────────────────────────
@@ -815,11 +846,9 @@ export async function addContact(page: Page, name: string, address: string): Pro
 	await closeStuckPopup(page)
 }
 
-/** Force-close a popup that's stuck in Vue <Transition>'s enter-from class.
- *  Pinia state is correct (popupStore says nothing is open), but the DOM
- *  hasn't unmounted because the transitionend never fires. We dispatch
- *  Escape — every popup in the wallet listens for it via FormPopup or
- *  PopupHeader — and clear the popupStore for safety. */
+/** Last-resort recovery for popup DOM that outlived its close: presses Escape, then removes every
+ *  popup container and dimmer without touching the store — so never while a lower popup must stay
+ *  (`settleClosedPopup` is the scoped form). */
 export async function closeStuckPopup(page: Page): Promise<void> {
 	await page.keyboard.press("Escape").catch(() => undefined)
 	await page.evaluate(() => {
@@ -1033,6 +1062,14 @@ export async function pinFromTokenPage(page: Page): Promise<void> {
 		;(document.querySelector('[data-testid="token-menu-pin"]') as HTMLElement)?.click()
 	})
 	await page.waitForSelector('[data-testid="token-menu-pin"]', { hidden: true, timeout: 5_000 })
+}
+
+/** Removes every profile's pinned-tokens key; an open page's pins follow the storage change. */
+export async function clearPinnedTokens(page: Page): Promise<void> {
+	await page.evaluate(async (prefix: string) => {
+		const all = await chrome.storage.local.get()
+		await chrome.storage.local.remove(Object.keys(all).filter((key) => key.startsWith(prefix)))
+	}, pinnedTokensKey(""))
 }
 
 /** On a token page, read the pin item's `data-pinned` ("true" | "false") and close the menu again. */
@@ -1333,19 +1370,34 @@ export async function getSelectedFeeMethod(page: Page): Promise<string | null> {
 	})
 }
 
-// ── Toast ──────────────────────────────────────────────────────────────
+// ── Snackbar ───────────────────────────────────────────────────────────
 
-/** Wait for a toast notification containing the given text. Toasts auto-dismiss in ~2s.
- *  Uses textContent + case-insensitive compare because the toast applies
- *  text-transform: uppercase via CSS, which `innerText` reflects but
- *  `textContent` does not — matching by textContent keeps the assertion
- *  readable (`"Contact is added"` not `"CONTACT IS ADDED"`). */
-export async function waitForToast(page: Page, text: string, timeout = 5_000): Promise<void> {
-	await page.waitForFunction(
-		(t: string) => (document.body.textContent ?? "").toLowerCase().includes(t.toLowerCase()),
+/** Wait for the snack whose title or sub contains `text` (case-insensitive: the title is uppercased
+ *  by CSS, not in the DOM), optionally of one `kind`, and return it. A success closes itself after
+ *  6 s; an error stays until closed. */
+export async function waitForToast(
+	page: Page,
+	text: string,
+	timeout = 5_000,
+	opts: { kind?: "success" | "error" } = {},
+): Promise<ElementHandle<Element>> {
+	const handle = await page.waitForFunction(
+		(t: string, kind: string | null) => {
+			for (const card of document.querySelectorAll('[data-testid="snackbar"]')) {
+				if (kind && card.getAttribute("data-kind") !== kind) continue
+				const title = card.querySelector('[data-testid="snackbar-title"]')?.textContent ?? ""
+				const sub = card.querySelector('[data-testid="snackbar-sub"]')?.textContent ?? ""
+				if (`${title} ${sub}`.toLowerCase().includes(t.toLowerCase())) return card
+			}
+			return null
+		},
 		{ timeout, polling: 200 },
 		text,
+		opts.kind ?? null,
 	)
+	const element = handle.asElement()
+	if (!element) throw new Error(`the snack containing "${text}" left between the wait and the read`)
+	return element
 }
 
 // ── Popup chain helpers ──────────────────────────────────────────────────
@@ -1864,10 +1916,9 @@ export async function waitForProfilePurged(
 		if (!Object.values(last).some(Boolean)) return
 		await new Promise((r) => setTimeout(r, 500))
 	}
-	// The "Couldn't delete profile" rejection toast auto-dismisses in ~2s, so it
-	// cannot be sampled at timeout; the persisting tombstone+row combination IS the
-	// rejected-or-wedged signature. Session presence distinguishes "delete never
-	// started (still logged in, nothing changed)" from "mid-purge wedge".
+	// The persisting tombstone+row combination IS the rejected-or-wedged signature.
+	// Session presence distinguishes "delete never started (still logged in,
+	// nothing changed)" from "mid-purge wedge".
 	const sessionPresent = await page
 		.evaluate(async () => {
 			const r = await chrome.storage.session.get("nulo:core:session")

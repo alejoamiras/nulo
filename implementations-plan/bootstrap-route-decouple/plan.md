@@ -7,7 +7,7 @@
   recommended** (env-override swap; two stored shapes; torn-unlock refusal on auth; narrowed
   marker guarantee; cancellation deferred to ledger; the stated caps). Phase-0 UX decisions
   recorded below verbatim.
-- **Audit state**: fable round 1 **conditional approve** (conditions folded — [audit-fable.md](audit-fable.md)); codex round 1 **reject** (all three blocking findings addressed in this revision — dispositions in [audit-codex.md](audit-codex.md)); final fresh codex pass pending.
+- **Audit state**: fable round 1 **conditional approve** (conditions folded — [audit-fable.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/bootstrap-route-decouple/audit-fable.md)); codex round 1 **reject** (all three blocking findings addressed in this revision — dispositions in [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/bootstrap-route-decouple/audit-codex.md)); final fresh codex pass pending.
 - **eli5_mode**: artifact — published at https://claude.ai/code/artifact/476020d5-63c1-42c2-ba98-6a7e6ef6e3ff (source: `implementations-plan/bootstrap-route-decouple/eli5.html`; redeploy the same path to update)
 
 ## Goal + success criteria (from the /goal directive)
@@ -486,7 +486,7 @@ decisions as approved, codex consults + verdicts, remaining OPEN items); suggest
   backoff. Owner-kept: Continue gate.
 - **Audit round 1 (parallel)**: fable **conditional approve** (4 conditions — all folded);
   codex **reject** (3 blocking — all addressed). Full dispositions + cross-auditor dispute
-  resolutions in [audit-codex.md](audit-codex.md) / [audit-fable.md](audit-fable.md). Key
+  resolutions in [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/bootstrap-route-decouple/audit-codex.md) / [audit-fable.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/bootstrap-route-decouple/audit-fable.md). Key
   resolutions: skip-record shape rebuilt (C1/H1); marker generation-bound, both branches,
   entry-cleared, guarantee NARROWED to the storage-slice window (C2 option b + fable M3);
   runExclusive-≠-atomicity mechanics adopted (C3); Shape B+ cancellation plumbing REJECTED for
@@ -501,8 +501,8 @@ decisions as approved, codex consults + verdicts, remaining OPEN items); suggest
 ## Audit verdicts
 
 - **Round 1 — fable (Plan agent, model fable, fresh)**: **conditional approve** →
-  [audit-fable.md](audit-fable.md); all four conditions folded.
-- **Round 1 — codex (gpt-5.6-sol xhigh, fresh)**: **reject** → [audit-codex.md](audit-codex.md);
+  [audit-fable.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/bootstrap-route-decouple/audit-fable.md); all four conditions folded.
+- **Round 1 — codex (gpt-5.6-sol xhigh, fresh)**: **reject** → [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/bootstrap-route-decouple/audit-codex.md);
   all three blocking findings addressed in this revision (C1 skip-shape, C2 marker scope,
   C3 marker atomicity + H4-H7/M8-M13/L14 dispositions logged).
 - **Round 2 — final fresh-context codex pass (gpt-5.6-sol xhigh)**: **reject** — zero
@@ -514,7 +514,7 @@ decisions as approved, codex consults + verdicts, remaining OPEN items); suggest
   remainder-deadline; shared pure normalizer with aggregate caps; marker corruption fail-closed
   + edge-case test list; Phase-5/6 docs delivery path; stale test comment). It explicitly
   verified every round-1 fold as correct ("Resolved correctly" list in
-  [audit-codex.md](audit-codex.md)).
+  [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/bootstrap-route-decouple/audit-codex.md)).
 - **Round 3 — resumed re-verdict**: **reject** (one blocking: per-launch deadline enforcement
   before every sender/contract launch + the slow-success pin; 3 Lows) — all folded.
 - **Round 4 — resumed re-verdict**: **conditional approve** (condition: rewrite the stale

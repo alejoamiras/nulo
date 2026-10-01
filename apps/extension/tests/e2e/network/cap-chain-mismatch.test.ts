@@ -13,9 +13,9 @@ const hasConfig = aztecConfig !== undefined
  *
  * The e2e build seeds Testnet as the active network and the playground's default chainInfo
  * resolves to Local Network, so NOT switching first (every other connect fixture does) is exactly
- * the mismatch a user hits when an Alpha wallet meets a Testnet app. The wallet must provision the
- * Local Network default account on demand, list it, name the chain, and let the user either approve
- * as is or switch first.
+ * the mismatch a user hits when the wallet is on one network and the app on another. The wallet
+ * must provision the Local Network default account on demand, list it, name the chain, and let the
+ * user either approve as is or switch first.
  */
 async function requestAccountsCapability(ctx: Parameters<typeof connectPlayground>[0], page: Page) {
 	const fromSeq = await snapshotResultSeq(page)

@@ -1,4 +1,4 @@
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { describe, expect, test, vi } from "vitest"
 import { deriveBip39Seed } from "./mnemonic-master"
 import { PasskeyCredential } from "./passkey-credential"

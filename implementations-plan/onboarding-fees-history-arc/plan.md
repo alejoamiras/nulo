@@ -2,7 +2,7 @@
 
 Date: 2026-06-02 (revised post-audit)
 Supersedes: plan v1 (same path; rewritten in place).
-Audit trail: [`audit-codex.md`](./audit-codex.md) (v1 verdict: Reject), [`audit-opus.md`](./audit-opus.md) (v1 verdict: Approve-with-changes), [`audit-codex-followup-v2.md`](./audit-codex-followup-v2.md) (v2 verdict: Approve-with-changes — concerns folded into v2.1 inline below).
+Audit trail: [`audit-codex.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/onboarding-fees-history-arc/audit-codex.md) (v1 verdict: Reject), [`audit-opus.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/onboarding-fees-history-arc/audit-opus.md) (v1 verdict: Approve-with-changes), [`audit-codex-followup-v2.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/onboarding-fees-history-arc/audit-codex-followup-v2.md) (v2 verdict: Approve-with-changes — concerns folded into v2.1 inline below).
 Branch: `feat/onboarding-fees-history-arc` (off `dev`, squash-merged back as one PR with multiple commits)
 Quality calibration: **Production** (full unit + component coverage, smoke e2e where user flows touch new UI, network e2e for the incoming-history happy path, polished onboarding copy)
 Scope discipline: ONE PR, 4 phase commits. Phases are risk-ascending so a partial revert is still safe.

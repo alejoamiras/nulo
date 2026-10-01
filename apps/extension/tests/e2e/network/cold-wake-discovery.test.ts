@@ -4,7 +4,7 @@ import type { AztecTestConfig } from "../fixtures/aztec"
 import { openPopup, test, waitForHash } from "../fixtures/extension"
 import { ensureUnlocked, readLivenessBaseline, waitForWorkerLiveness } from "../fixtures/helpers"
 import { clickPgButton, openPlayground } from "../fixtures/playground"
-import { approveDiscover, approveVerify, waitForPopup } from "../fixtures/popups"
+import { approveConnect, approveVerify, waitForPopup } from "../fixtures/popups"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
@@ -76,10 +76,7 @@ describe("cold-wake discovery", () => {
 			await ensureUnlocked(probe)
 			await probe.close()
 
-			const discoverPage = await discoverP
-			await approveDiscover(discoverPage)
-
-			const verifyPage = await waitForPopup(ext, "verify", { timeout: 30_000 })
+			const verifyPage = await approveConnect(ext, await discoverP)
 			await approveVerify(verifyPage)
 
 			await dappPage.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 20_000 })

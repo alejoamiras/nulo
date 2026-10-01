@@ -369,7 +369,7 @@ not copy: USDC (registered) showed the first-time path on a plain Ethereum walle
 
 A design canvas (four mint variants) was approved with no changes; the mint decision moved to
 variant B (a testnet-only strip, the flow otherwise identical on both networks). The arc is
-[send-wizard-ux](../../send-wizard-ux/plan.md), branch `any-erc20-bridge/ux` above the stack, four
+[send-wizard-ux](https://github.com/alejoamiras/nulo/blob/6611f8611100931fe266f6fd1dfff27e331e2897/implementations-plan/send-wizard-ux/plan.md), branch `any-erc20-bridge/ux` above the stack, four
 commits (token step, amount step, review, wizard). Findings while building it:
 
 - **The first-time false positive was the wallet seam.** `useTokenSelection` only read the hub's

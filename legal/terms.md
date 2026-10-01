@@ -10,7 +10,7 @@ install or use Nulo. If you do not agree, do not install or use it.
 > or custody your assets. Anyone who obtains usable credentials or an effective authorisation may be
 > able to access your assets. Recovery and transaction finality have the limitations described in
 > § 4. Nulo has not been audited by an independent security
-> firm, it connects to Aztec mainnet by default, and the network it connects to is early-stage. You
+> firm, it connects to the Aztec testnet by default, and the network it connects to is early-stage. You
 > can lose everything you put into it. Warranty exclusions and liability limits appear in §§ 16–19
 > and are subject to rights that applicable law does not permit you to waive.
 >
@@ -29,7 +29,9 @@ support desk and no service organisation. These Terms are an agreement between y
 individual.
 
 Contact: **hello@nulo.sh**. Any additional publisher disclosures required by the applicable
-extension store are available at «FILL: official Chrome Web Store listing URL» and «FILL: official Firefox Add-ons listing URL».
+extension store are available at
+https://chromewebstore.google.com/detail/nulo-v5/jlmiaokmjoicmclelpiiocdhncddkdmc and
+https://addons.mozilla.org/firefox/addon/nulo-v5/.
 
 In these Terms, "**Nulo**" means the Nulo browser extension distributed for Chrome and Firefox.
 These Terms do not govern separate applications or websites. The [Privacy Policy](privacy.md)
@@ -85,7 +87,7 @@ control and then selecting Continue.** Nulo records that acceptance on your devi
 you accepted and the time; the record is not sent anywhere and is not part of a backup. These Terms
 apply from that acceptance and do not retrospectively change rights or liabilities arising before it.
 
-Before accepting, review the mainnet, security and recovery risks in §§ 4–5. **Recovery options
+Before accepting, review the network, security and recovery risks in §§ 4–5. **Recovery options
 differ between password and passkey profiles** — see § 4.3.
 
 If you do not meet the conditions above, or do not agree, you must not install or use Nulo, and you
@@ -159,9 +161,10 @@ impersonating distributions; responsibility for them remains subject to applicab
 
 ## 5. Experimental software on an early-stage network
 
-**Nulo selects Aztec mainnet by default.** Mainnet transactions may involve assets with real value.
-Selecting a network labelled testnet or local changes the environment. A version number, a store
-listing or a mainnet connection is not a security certification.
+**Nulo selects the Aztec testnet by default.** Testnet assets are for testing and are not meant to
+carry real value. Selecting another network, including one you add, changes the environment, and a
+mainnet network may involve assets with real value. A version number, a store listing or a network
+connection is not a security certification.
 
 **5.1 No independent security audit.** As at the effective date of these Terms, Nulo has **not** been
 reviewed by an independent third-party security firm. It has been reviewed internally and with
@@ -330,8 +333,10 @@ make your own decisions.
 
 ## 13. Open source, licence and the Nulo name
 
-**13.1 The code.** Nulo's original code is licensed under the **Apache License, Version 2.0**, which
-governs the rights it grants in source and object form. These Terms address use of the Developer's
+**13.1 The code.** Nulo's code is licensed under the **Apache License, Version 2.0**, which governs
+the rights it grants in source and object form. Parts of it are derived from Azguard Wallet,
+Copyright 2026 BB Strategy Pte. Ltd., also licensed under Apache-2.0; the NOTICE file and the notices
+accompanying each release identify them. These Terms address use of the Developer's
 distributed extension and do not restrict rights granted by that licence. Bundled components are
 licensed as identified in the licence files and notices accompanying each release, including any
 alternative licence expressly granted by their copyright holders. These Terms do not restrict

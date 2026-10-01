@@ -1,3 +1,4 @@
+<!-- Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0. -->
 <script setup>
 import { FieldWarning } from "@nulo/design"
 import { isValidHex } from "@/utils/string"
@@ -6,6 +7,7 @@ import { isValidHex } from "@/utils/string"
 import { AccountStateServiceClient } from "@/wallet/services/account-state/client"
 
 /** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
@@ -67,7 +69,7 @@ const handleAddSender = async () => {
 	try {
 		await accountStateClientService.addSender(appStore.network.id, senderAddress.value)
 		emit("onClose")
-		openToast({ label: "Sender is added" })
+		openToast({ kind: "success", label: "Sender is added" })
 	} catch (err) {
 		fillError("error", "Failed to add sender", err)
 	} finally {
@@ -118,7 +120,7 @@ usePopupEntity(() => props.show, {
 					</template>
 				</Input>
 
-				<Flex direction="column" gap="10">
+				<Flex v-snack-footer direction="column" gap="10">
 					<Transition name="fade">
 						<Tooltip
 							v-if="error.type === 'error'"

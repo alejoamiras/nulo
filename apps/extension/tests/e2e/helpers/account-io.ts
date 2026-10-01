@@ -124,6 +124,9 @@ async function runExportStages(page: Page, encrypt: boolean, password: string): 
 	return body
 }
 
+/** Every network's first derived account is named this (`DEFAULT_ACCOUNT_NAME`). */
+export const FIRST_ACCOUNT_NAME = "Account 1"
+
 /** Export the account named `accountName` via the full page flow (picker included). */
 export async function exportAccountBody(
 	page: Page,

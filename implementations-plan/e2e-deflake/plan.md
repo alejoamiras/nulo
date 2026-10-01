@@ -396,10 +396,10 @@ not silently assumed.
 
 ## Audit verdicts
 
-- **Round 1 — codex (gpt-5.6-sol xhigh)**: reject → see [audit-codex.md](audit-codex.md).
+- **Round 1 — codex (gpt-5.6-sol xhigh)**: reject → see [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/e2e-deflake/audit-codex.md).
   All blocking findings addressed above.
 - **Round 1 — fable (Plan agent)**: conditional approve (C1–C4) → see
-  [audit-fable.md](audit-fable.md). C1 (preflight) → Fix 6; C2 (Fix 1 exception) → surfaced
+  [audit-fable.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/e2e-deflake/audit-fable.md). C1 (preflight) → Fix 6; C2 (Fix 1 exception) → surfaced
   Ask; C3 (Fix 4 render assert + bound) → Fix 4; C4 (certification rules) → Phase 6.
 - **Round 2 — final fresh codex pass**: reject (fake settle window; 45s disguised raise;
   Phase-6 contradiction) → all findings fixed same-session (see audit-codex.md § Round 2);

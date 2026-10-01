@@ -5,11 +5,11 @@
 **Audit cycle:** Plan iterated 5 rounds with codex (xhigh). v6 is the clean rewrite consolidating findings; goes back to codex for round-6.
 
 **Earlier audits archived (DO read before reviewing — full context):**
-- [audit-codex-round-1.md](audit-codex-round-1.md) — diagnosed wrong layer (popup-lock). BLOCKER.
-- [audit-codex-round-2.md](audit-codex-round-2.md) — direction sound, batch + NO_FROM corrections.
-- [audit-codex-round-3.md](audit-codex-round-3.md) — popup-handoff hooks + unsafe claim fallback + batch contradiction. BLOCKER.
-- [audit-codex-round-4.md](audit-codex-round-4.md) — error-pipeline + record-shape + cancel race + sessionId field. NEEDS-WORK.
-- [audit-codex-round-5.md](audit-codex-round-5.md) — journal-layer mutex needed (transitionOperation has no CAS). BLOCKER.
+- [audit-codex-round-1.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/dapp-interaction-lock-fix-v1/audit-codex-round-1.md) — diagnosed wrong layer (popup-lock). BLOCKER.
+- [audit-codex-round-2.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/dapp-interaction-lock-fix-v1/audit-codex-round-2.md) — direction sound, batch + NO_FROM corrections.
+- [audit-codex-round-3.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/dapp-interaction-lock-fix-v1/audit-codex-round-3.md) — popup-handoff hooks + unsafe claim fallback + batch contradiction. BLOCKER.
+- audit-codex-round-4.md — error-pipeline + record-shape + cancel race + sessionId field. NEEDS-WORK.
+- [audit-codex-round-5.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/dapp-interaction-lock-fix-v1/audit-codex-round-5.md) — journal-layer mutex needed (transitionOperation has no CAS). BLOCKER.
 
 ---
 

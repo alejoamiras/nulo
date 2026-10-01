@@ -1,20 +1,17 @@
 /**
- * Split-line residue gate: the workspace `@aztec/*` line moves while
- * @alejoamiras/private-fee-juice and @aztec-foundation/aztec-standards stay pinned
- * to an older line. Every remaining `@aztec/*@5.0.1` lock entry must be reachable
- * from one of those packages through the lock's dependency graph — computed over
- * graph edges, not key prefixes, because bun.lock shortens a nested key to the bare
- * position when only one dependent exists. Runtime resolution must agree: every
- * consumer reaches the workspace line, directly and through each held package.
- * A held package's exact-pinned `@aztec` PEER only re-binds to the workspace line when
- * the consuming workspace DECLARES that package; otherwise it silently nests the old
- * version (bridge-core hit exactly this with `@aztec/protocol-contracts`), which is why
- * every peer is checked from every consumer rather than a sample.
+ * Single-generation gate for the Aztec line (`@aztec-labs/*`, `@aztec-foundation/*`). Every lock
+ * entry in those scopes is on the workspace line unless a held package reaches it through the lock's
+ * dependency graph — computed over graph edges, not key prefixes, because bun.lock shortens a nested
+ * key to the bare position when only one dependent exists — and no package of the retired `@aztec`
+ * scope but `@aztec/viem` is locked at all. Runtime resolution must agree: every consumer, and
+ * everything that must share its generation, reaches one physical copy of each Aztec package.
+ * A package's exact-pinned Aztec PEER only re-binds to the workspace line when the consuming
+ * workspace DECLARES that package; otherwise it silently nests its own copy, which is why every peer
+ * is checked from every consumer rather than a sample.
  *
- * The Presto SDK is deliberately NOT held: a single `@aztec` generation in the
- * prover path is load-bearing, because upstream's `getVKIndex` discriminates with
+ * One generation in the prover path is load-bearing: upstream's `getVKIndex` discriminates with
  * `instanceof` and silently mis-resolves when two copies of
- * @aztec/noir-protocol-circuits-types coexist in one bundle.
+ * @aztec-labs/noir-protocol-circuits-types coexist in one bundle.
  *
  * Usage: bun scripts/aztec-hold-residue-check.ts   (exits 1 on any violation)
  */
@@ -23,11 +20,13 @@ import { createRequire } from "node:module"
 import { join } from "node:path"
 
 const ROOT = join(import.meta.dir, "..")
-const WORKSPACE_LINE = "5.2.0"
-const HELD_LINE = "5.0.1"
-const HELD_ROOTS = ["@alejoamiras/private-fee-juice", "@aztec-foundation/aztec-standards"]
-/** Packages whose own `@aztec` deps must resolve to the workspace line, not a private copy. */
-const SINGLE_GENERATION_ROOTS = ["@alejoamiras/presto"]
+const WORKSPACE_LINE = "6.0.0-rc.1"
+/** Packages allowed to stay on an older Aztec line, with everything they reach. Empty: one generation. */
+const HELD_ROOTS: string[] = []
+/** Packages whose own Aztec deps and peers must resolve to the workspace line, not a private copy. */
+const SINGLE_GENERATION_ROOTS = ["@alejoamiras/presto", "@alejoamiras/private-fee-juice", "@aztec-foundation/aztec-standards"]
+const AZTEC_LINE = /^@aztec-(labs|foundation)\//
+const RETIRED_SCOPE = /^@aztec\/(?!viem$)/
 
 let failures = 0
 const fail = (msg: string) => {
@@ -76,17 +75,19 @@ while (queue.length > 0) {
 
 for (const [key, e] of Object.entries(lock.packages)) {
 	const resolved = e[0]
-	if (!resolved.startsWith("@aztec/")) continue
-	if (versionOf(resolved).startsWith(HELD_LINE) && !reachable.has(key)) {
-		fail(`lock: ${key} resolves ${resolved} but is not reachable from any held package`)
+	if (RETIRED_SCOPE.test(nameOf(resolved))) {
+		fail(`lock: ${key} resolves ${resolved}, a package of the retired scope`)
+	} else if (AZTEC_LINE.test(resolved) && versionOf(resolved) !== WORKSPACE_LINE && !reachable.has(key)) {
+		fail(`lock: ${key} resolves ${resolved}, off the workspace line, and no held package reaches it`)
 	}
 }
 
-// Workspace manifests must not pin the held line for the moving scope.
+// Workspace manifests pin the workspace line, and nothing from the retired scope.
 for (const [ws, meta] of Object.entries(lock.workspaces)) {
 	for (const [n, rng] of Object.entries({ ...meta.dependencies, ...meta.devDependencies })) {
-		if (n.startsWith("@aztec/") && n !== "@aztec/viem" && rng.startsWith(HELD_LINE)) {
-			fail(`workspace ${ws || "(root)"}: ${n} still pinned ${rng}`)
+		if (RETIRED_SCOPE.test(n)) fail(`workspace ${ws || "(root)"}: ${n} is a package of the retired scope`)
+		else if (AZTEC_LINE.test(n) && !HELD_ROOTS.includes(n) && rng !== WORKSPACE_LINE) {
+			fail(`workspace ${ws || "(root)"}: ${n} pinned ${rng}, not ${WORKSPACE_LINE}`)
 		}
 	}
 }
@@ -97,7 +98,7 @@ const resolveFrom = (dir: string, spec: string): string => {
 	return realpathSync(req.resolve(`${spec}/package.json`))
 }
 const versionAt = (p: string): string => {
-	const m = p.match(/@aztec[+/]([a-z0-9_.-]+)@(\d[^+/]*)/)
+	const m = p.match(/@aztec-(?:labs|foundation)[+/]([a-z0-9_.-]+)@(\d[^+/]*)/)
 	return m ? m[2] : `unparsed:${p}`
 }
 
@@ -107,7 +108,7 @@ const checks: Expectation[] = []
 
 const aztecDepsOf = (pkg: string, field: "dependencies" | "peerDependencies"): string[] => {
 	const entry = Object.values(lock.packages).find((e) => nameOf(e[0]) === pkg)
-	return Object.keys(entry?.[2]?.[field] ?? {}).filter((n) => n.startsWith("@aztec/"))
+	return Object.keys(entry?.[2]?.[field] ?? {}).filter((n) => AZTEC_LINE.test(n))
 }
 
 // Consumers and specs are DERIVED, never hard-coded: a new workspace that pulls a held package,
@@ -117,7 +118,7 @@ for (const [ws, meta] of Object.entries(lock.workspaces)) {
 	const declared = { ...meta.dependencies, ...meta.devDependencies }
 	// Probe what this workspace actually declares: under the isolated linker an undeclared
 	// package resolves out of the worktree entirely, which is a phantom dep, not a version fact.
-	for (const spec of Object.keys(declared).filter((n) => n.startsWith("@aztec/") && n !== "@aztec/viem")) {
+	for (const spec of Object.keys(declared).filter((n) => AZTEC_LINE.test(n) && !HELD_ROOTS.includes(n))) {
 		checks.push({ consumer: ws, chain: [], spec, want: WORKSPACE_LINE })
 	}
 	for (const held of HELD_ROOTS) {
@@ -129,7 +130,10 @@ for (const [ws, meta] of Object.entries(lock.workspaces)) {
 	}
 	for (const single of SINGLE_GENERATION_ROOTS) {
 		if (!declared[single]) continue
-		// Walk the WHOLE `@aztec` closure, not just direct deps: the module that actually broke
+		for (const spec of aztecDepsOf(single, "peerDependencies")) {
+			checks.push({ consumer: ws, chain: [single], spec, want: WORKSPACE_LINE })
+		}
+		// Walk the WHOLE Aztec closure, not just direct deps: the module that actually broke
 		// (noir-protocol-circuits-types, home of getVKIndex) hangs off bb-prover, one edge in.
 		const visited = new Set<string>([single])
 		const paths: string[][] = [[single]]
@@ -164,7 +168,7 @@ for (const { consumer, chain, spec, want } of checks) {
 		} else if (!seen) {
 			canonical.set(spec, { path: target, label })
 		}
-		if (got.startsWith(want)) console.log(`ok   ${label} = ${got}`)
+		if (got === want) console.log(`ok   ${label} = ${got}`)
 		else fail(`${label} = ${got}, want ${want} (${target})`)
 	} catch (e) {
 		fail(`${[consumer, ...chain, spec].join(" → ")}: ${(e as Error).message.split("\n")[0]}`)

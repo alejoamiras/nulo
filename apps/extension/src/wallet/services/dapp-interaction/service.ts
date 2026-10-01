@@ -1,4 +1,4 @@
-import type { AztecAddress } from "@aztec/stdlib/aztec-address"
+import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
@@ -6,6 +6,7 @@ import { ProfileService } from "@/wallet/services/profile/service"
 import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import { NetworkService } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
+import { FpcService } from "@/wallet/services/fpc/service"
 import { DappSessionService, AccessLevel, type DappSession } from "@/wallet/services/dapp-session/service"
 import {
 	ExecutionService,
@@ -25,6 +26,7 @@ import { parseCaipAccount, parseCaipChain, resolveNetworkByChainId } from "@/wal
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { isSelfPay } from "@nulo/wallet-bridge"
 import { assertSilentExecutable, materializeRequest, type MaterializeDeps } from "./materialize"
+import { knownContracts } from "./known-contracts"
 import { applyFeeSelection, type OperationApprovalDelta } from "./approval-delta"
 import {
 	DAPP_INTERACTION_SERVICE_NAME,
@@ -36,6 +38,7 @@ import {
 	type DiscoveryPayload,
 	type DiscoveryParams,
 	type DiscoveryResult,
+	type DiscoveryOutcome,
 	type ExecutionHooks,
 	type ExecutionParams,
 	type CaipChain,
@@ -61,6 +64,11 @@ const INTERACTION_TIMEOUT_MS = 10 * 60 * 1000
 /** A capability payload also carries a session; only an execution payload has operations to run. */
 function isExecutionPayload(payload: DappInteraction["payload"]): payload is ExecutionPayload {
 	return "session" in payload && Array.isArray((payload as { params?: { operations?: unknown } }).params?.operations)
+}
+
+/** A discovery is the only interaction without a session: it is what creates one. */
+function isDiscoveryPayload(payload: DappInteraction["payload"]): payload is DiscoveryPayload {
+	return !("session" in payload)
 }
 
 /** The confirmation gate keys off the strongest level in a batch; a kind missing here is a
@@ -110,6 +118,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 	private dappSessionService: DappSessionService = null!
 	private executionService: ExecutionService = null!
 	private operationJournal: OperationJournalService = null!
+	private fpcService: FpcService = null!
 
 	public constructor(
 		logger: ILogger,
@@ -125,6 +134,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		this.dappSessionService = services.get(DappSessionService.name)
 		this.executionService = services.get(ExecutionService.name)
 		this.operationJournal = services.get(OperationJournalService.name)
+		this.fpcService = services.get(FpcService.name)
 		// A feed cancel lands in the journal only (`cancelJob` → queued → cancelled);
 		// the open approval popup and the dApp's pending promise learn of it here.
 		this.operationJournal.onOperationUpdated.add((record) => {
@@ -211,7 +221,21 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		// as the resolveInteraction RPC, and the onRemoved event could race
 		// with settle if it arrives first.
 		this.windowManager.detach(interactionRequest.handleId)
+		if (isDiscoveryPayload(interactionRequest.payload)) {
+			this.settleDiscovery(interactionRequest.handleId, result)
+			return
+		}
 		this.windowManager.settle(interactionRequest.handleId, result)
+	}
+
+	/** An approved connect window stays open to show the emoji check, and its id comes from the
+	 *  handle, never the page. Any other answer is a denial and closes the window. */
+	private settleDiscovery(handleId: string, result: unknown): void {
+		if ((result as Partial<DiscoveryResult> | null | undefined)?.approved === true) {
+			this.windowManager.handOver(handleId, (windowId): DiscoveryOutcome => ({ approved: true, windowId }))
+			return
+		}
+		this.windowManager.settle<DiscoveryOutcome>(handleId, { approved: false })
 	}
 
 	public async rejectInteraction(id: string, reason: string): Promise<void> {
@@ -385,7 +409,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		const session = await this.validateSession(params)
 		const payload: ExecutionPayload = { params, session }
 
-		// Cancel-before-claim short-circuit (codex F2 / post-impl review):
+		// Cancel-before-claim short-circuit:
 		// If the user cancelled this sendTx while it was queued, the journal
 		// record is now at stage `cancelled`. Throw the cancelled-pipeline
 		// error directly so the popup never opens — without this, the user
@@ -411,13 +435,15 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 	public async requestCapabilities(params: CapabilityParams, cancellationToken?: string): Promise<CapabilityResult> {
 		await this.ensureInitialized()
 		const session = await this.dappSessionService.getDappSession(params.sessionId)
-		const payload: CapabilityPayload = { params, session }
+		const chainId = Number(session.chainId)
+		const known = knownContracts(chainId, await this.fpcService.getOrComputeProtocolAddresses(chainId))
+		const payload: CapabilityPayload = { params: { ...params, knownContracts: known }, session }
 		return (await this.interaction("capabilities", payload, cancellationToken)) as CapabilityResult
 	}
 
-	public async discover(params: DiscoveryParams, cancellationToken?: string): Promise<DiscoveryResult> {
+	public async discover(params: DiscoveryParams, cancellationToken?: string): Promise<DiscoveryOutcome> {
 		const payload: DiscoveryPayload = { params }
-		return (await this.interaction("discover", payload, cancellationToken)) as DiscoveryResult
+		return (await this.interaction("discover", payload, cancellationToken)) as DiscoveryOutcome
 	}
 
 	private async interaction(
@@ -443,6 +469,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 				height: 800,
 				timeoutMs: INTERACTION_TIMEOUT_MS,
 				kind: type,
+				placement: "top-right",
 			})
 
 			const interaction: DappInteraction = {
@@ -497,9 +524,9 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		// Silent path (self-paid sendTx, no popup): fast-forward the queued
 		// record to `pending` so the UI shows "Preparing..." immediately
 		// instead of briefly showing "Queued..." for a request that never
-		// opens a popup (opus post-impl F7).
+		// opens a popup.
 		//
-		// CRITICAL ORDERING (codex closeout F1): this fast-forward MUST stay
+		// CRITICAL ORDERING: this fast-forward MUST stay
 		// immediately before `executeOperations()`. If we hoisted it to the
 		// top of the method, a throw in `materializeRequest` /
 		// `refreshSession` / profile-check would leave the record stranded

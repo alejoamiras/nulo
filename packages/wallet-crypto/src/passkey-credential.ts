@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 import {
 	asBase64CredentialId,
 	asHexUserHandle,
@@ -7,7 +8,7 @@ import {
 	type HexUserHandle,
 	type MasterSecretBytes,
 } from "./secret-types"
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { fromBase64 } from "@nulo/wallet-core/utils"
 import { zeroize } from "./zeroize"
 

@@ -26,7 +26,7 @@ vi.mock("@/wallet/utils", () => ({
 import { initTransactionService, managers } from "@/utils/core"
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { AccountServiceClient } from "@/wallet/services/account/client"
-import { activateCreatedProfile, makeCreateKeydownHandler, shouldHandleEnter } from "./new-profile-helpers"
+import { activateCreatedProfile, makeCreateKeydownHandler } from "./new-profile-helpers"
 
 type AppStoreLike = Parameters<typeof activateCreatedProfile>[1]["appStore"]
 type RouterLike = Parameters<typeof activateCreatedProfile>[1]["router"]
@@ -106,33 +106,6 @@ describe("activateCreatedProfile (popup manual sequence)", () => {
 	})
 })
 
-describe("shouldHandleEnter (Quirk 2 double-fire guard)", () => {
-	test("Enter from a text input submits", () => {
-		const e = { key: "Enter", target: document.createElement("input") } as unknown as KeyboardEvent
-		expect(shouldHandleEnter(e)).toBe(true)
-	})
-
-	test("Enter from a textarea submits", () => {
-		const e = { key: "Enter", target: document.createElement("textarea") } as unknown as KeyboardEvent
-		expect(shouldHandleEnter(e)).toBe(true)
-	})
-
-	test("Enter from a focused button does NOT submit (no double-fire)", () => {
-		const e = { key: "Enter", target: document.createElement("button") } as unknown as KeyboardEvent
-		expect(shouldHandleEnter(e)).toBe(false)
-	})
-
-	test("Enter from a non-form element does NOT submit", () => {
-		const e = { key: "Enter", target: document.createElement("div") } as unknown as KeyboardEvent
-		expect(shouldHandleEnter(e)).toBe(false)
-	})
-
-	test("a non-Enter key never submits", () => {
-		const e = { key: "a", target: document.createElement("input") } as unknown as KeyboardEvent
-		expect(shouldHandleEnter(e)).toBe(false)
-	})
-})
-
 describe("makeCreateKeydownHandler (popup-create page wiring)", () => {
 	test("Enter from a text input invokes onSubmit once", () => {
 		const onSubmit = vi.fn()
@@ -149,6 +122,16 @@ describe("makeCreateKeydownHandler (popup-create page wiring)", () => {
 	test("a non-Enter key never invokes onSubmit", () => {
 		const onSubmit = vi.fn()
 		makeCreateKeydownHandler(onSubmit)({ key: "a", target: document.createElement("input") } as unknown as KeyboardEvent)
+		expect(onSubmit).not.toHaveBeenCalled()
+	})
+
+	test.each([
+		["a composing Enter", { isComposing: true }],
+		["a repeat Enter", { repeat: true }],
+		["an Enter a child already handled", { defaultPrevented: true }],
+	] as const)("%s from a text input does NOT invoke onSubmit", (_name, fields) => {
+		const onSubmit = vi.fn()
+		makeCreateKeydownHandler(onSubmit)({ key: "Enter", target: document.createElement("input"), ...fields } as unknown as KeyboardEvent)
 		expect(onSubmit).not.toHaveBeenCalled()
 	})
 })

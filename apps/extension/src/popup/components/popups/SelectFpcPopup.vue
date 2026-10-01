@@ -1,6 +1,10 @@
+<!-- Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0. -->
 <script setup>
 /** Services */
 import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
+
+/** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
 
 /** Utils */
 import { stringCompare } from "@/utils/string"
@@ -166,6 +170,7 @@ watch(
 				</Flex>
 
 				<Button
+					v-snack-footer
 					@click="popupStore.open('new_fpc')"
 					wide
 					variant="primary_outline"

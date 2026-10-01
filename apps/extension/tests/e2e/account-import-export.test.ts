@@ -29,7 +29,7 @@ import {
 	waitForHash,
 	pickFileByTestId,
 } from "./fixtures/extension"
-import { confirmImport, exportAccountBody, gotoAccounts, previewImport } from "./helpers/account-io"
+import { confirmImport, exportAccountBody, FIRST_ACCOUNT_NAME, gotoAccounts, previewImport } from "./helpers/account-io"
 import { writeBackupToTemp } from "./helpers/import-drivers"
 
 test("account export → import into a SECOND profile (plaintext + encrypted round-trips)", { timeout: 240_000 }, async ({
@@ -40,8 +40,8 @@ test("account export → import into a SECOND profile (plaintext + encrypted rou
 	await waitForHash(sourcePage, "#/popup/general", 30_000)
 
 	// Export the default account BOTH ways from the source profile.
-	const plaintextBody = await exportAccountBody(sourcePage, "Account", false)
-	const encryptedBody = await exportAccountBody(sourcePage, "Account", true)
+	const plaintextBody = await exportAccountBody(sourcePage, FIRST_ACCOUNT_NAME, false)
+	const encryptedBody = await exportAccountBody(sourcePage, FIRST_ACCOUNT_NAME, true)
 	// A plaintext export is a JSON envelope; the encrypted one is an opaque base64 blob.
 	expect(plaintextBody.trim().startsWith("{")).toBe(true)
 	expect(encryptedBody.trim().startsWith("{")).toBe(false)
@@ -105,7 +105,7 @@ test("account export → import into a SECOND profile (plaintext + encrypted rou
 test("a TAMPERED account export is rejected (confirm step never renders)", { timeout: 180_000 }, async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general", 30_000)
-	const body = await exportAccountBody(page, "Account", false)
+	const body = await exportAccountBody(page, FIRST_ACCOUNT_NAME, false)
 
 	// Flip one hex digit of the signing key inside the plaintext envelope: the service recomputes
 	// the address from the key and rejects the mismatch (the checksum authenticates nothing).
@@ -123,7 +123,7 @@ test("a TAMPERED account export is rejected (confirm step never renders)", { tim
 test("a DUPLICATE account import is rejected", { timeout: 180_000 }, async ({ registeredExtensionPerTest }) => {
 	const page = await openPopup(registeredExtensionPerTest)
 	await waitForHash(page, "#/popup/general", 30_000)
-	const body = await exportAccountBody(page, "Account", false)
+	const body = await exportAccountBody(page, FIRST_ACCOUNT_NAME, false)
 
 	// The account is ALREADY in this profile — the very first import must be refused as a
 	// duplicate (importAccount's dup check is (profileId, chainId)-scoped).
@@ -140,7 +140,7 @@ test("a DUPLICATE account import is rejected", { timeout: 180_000 }, async ({ re
 test("the file-chooser import path accepts a written export file", { timeout: 180_000 }, async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general", 30_000)
-	const body = await exportAccountBody(page, "Account", false)
+	const body = await exportAccountBody(page, FIRST_ACCOUNT_NAME, false)
 	// A plaintext export carries a REAL signing key — clean the temp file up.
 	const filePath = writeBackupToTemp(body, "account-export.json")
 	try {

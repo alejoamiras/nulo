@@ -1,4 +1,4 @@
-import type { PendingDiscovery } from "@aztec/wallet-sdk/extension/handlers"
+import type { PendingDiscovery } from "@aztec-labs/wallet-sdk/extension/handlers"
 import type { PendingVerificationEntry } from "./pending-verification"
 import { describeExternalId, isDiscoveryExpired } from "@nulo/wallet-bridge"
 import { type ILogger, LogLevel } from "@nulo/wallet-core/logger"
@@ -16,7 +16,8 @@ import { type ILogger, LogLevel } from "@nulo/wallet-core/logger"
  * can still leave the row, but approval fails closed regardless), no
  * verification is scheduled, and the discovery is rejected — so an
  * approved-but-unreachable, or unverified-yet-live, session is not handed to a
- * dApp that has stopped listening.
+ * dApp that has stopped listening. An attempt abandoned during the writes (its
+ * connect window closed) is rolled back the same way.
  *
  * @returns `true` iff the discovery was approved; `false` on rollback or when
  *   the SDK reports the approval did not land (the request was already gone).
@@ -27,6 +28,8 @@ export async function approveOrRollbackDiscoverySession(args: {
 	/** The profile whose DappSession row this approval created — bound into the
 	 *  marker so establishment can fail-close an approve/validate profile skew. */
 	approverProfileId: string
+	/** `false` once the attempt was abandoned; rechecked with no await before the marker is set. */
+	attemptOpen: () => boolean
 	approveDiscovery: (requestId: string) => boolean
 	rejectDiscovery: (requestId: string) => void
 	deleteSession: (sessionId: string) => Promise<unknown>
@@ -35,19 +38,20 @@ export async function approveOrRollbackDiscoverySession(args: {
 }): Promise<boolean> {
 	const { discovery, sessionId, approverProfileId, approveDiscovery, rejectDiscovery, deleteSession, pendingVerification, logger } = args
 
-	if (isDiscoveryExpired(discovery)) {
+	const refusal = isDiscoveryExpired(discovery) ? "expired" : args.attemptOpen() ? undefined : "abandoned"
+	if (refusal) {
 		try {
 			await deleteSession(sessionId)
 		} catch {
 			// A concurrent disconnect may have already removed the row — the
 			// rejection below still stands, so swallow and log.
-			logger.log("wallet-sdk", LogLevel.Warn, `Failed to roll back expired discovery session ${describeExternalId(sessionId)}`)
+			logger.log("wallet-sdk", LogLevel.Warn, `Failed to roll back ${refusal} discovery session ${describeExternalId(sessionId)}`)
 		}
 		rejectDiscovery(discovery.requestId)
 		logger.log(
 			"wallet-sdk",
 			LogLevel.Warn,
-			`Discovery rejected (expired during session creation): request ${describeExternalId(discovery.requestId)}`,
+			`Discovery rejected (${refusal} during session creation): request ${describeExternalId(discovery.requestId)}`,
 		)
 		return false
 	}

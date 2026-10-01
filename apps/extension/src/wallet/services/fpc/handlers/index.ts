@@ -1,6 +1,7 @@
-import type { Fr } from "@aztec/foundation/curves/bn254"
-import type { ContractArtifact } from "@aztec/stdlib/abi"
-import type { Gas } from "@aztec/stdlib/gas"
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
+import type { Gas } from "@aztec-labs/stdlib/gas"
 import type { Action } from "@/wallet/services/execution/spec"
 import { type FpcInfo, FpcType } from "../spec"
 import { DefaultSponsoredFpcHandler } from "./default-sponsored-fpc-handler"

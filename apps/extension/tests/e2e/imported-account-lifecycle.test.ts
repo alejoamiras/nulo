@@ -25,7 +25,14 @@ import { reloadExtensionPage, stopBackground } from "./fixtures/browser"
 import { TEST_PASSWORD } from "./fixtures/constants"
 import { clickByTestId, launchExtension, openPopup, registerProfile, replaceInputValue, test, waitForHash } from "./fixtures/extension"
 import { changePassword, closeStuckPopup, ensureUnlocked, lockWallet, waitForToast } from "./fixtures/helpers"
-import { confirmImport, exportAccountBody, exportImportedAccountBody, gotoAccounts, previewImport } from "./helpers/account-io"
+import {
+	confirmImport,
+	exportAccountBody,
+	exportImportedAccountBody,
+	FIRST_ACCOUNT_NAME,
+	gotoAccounts,
+	previewImport,
+} from "./helpers/account-io"
 
 const NEW_PASSWORD = "changed-password-9"
 
@@ -55,7 +62,7 @@ describe("imported account lifecycle", () => {
 				await registerProfile(donor)
 				const donorPage = await openPopup(donor)
 				await waitForHash(donorPage, "#/popup/general", 30_000)
-				foreignBody = await exportAccountBody(donorPage, "Account", false)
+				foreignBody = await exportAccountBody(donorPage, FIRST_ACCOUNT_NAME, false)
 			} finally {
 				await donor.close()
 			}
@@ -109,8 +116,7 @@ describe("imported account lifecycle", () => {
 		// ── Stage 5 (destructive, LAST): corrupt the envelope MAC at rest → degradation ──
 		// The MAC field alone is flipped — dekSealed stays intact — which is precisely the case
 		// the state machine must treat as untrusted: derived-only session, user-visible warning,
-		// and a REFUSED password change (self-healing here would destroy recoverable keys — the
-		// post-implementation round-3 decision).
+		// and a REFUSED password change (self-healing here would destroy recoverable keys).
 		const tamperedCount = await page2.evaluate(async () => {
 			const all = await chrome.storage.local.get(null)
 			let count = 0
@@ -136,7 +142,7 @@ describe("imported account lifecycle", () => {
 		await waitForHash(page2, "#/popup/general", 30_000)
 
 		// Derived-account operation still works: the degraded session is derived-only, not dead.
-		const derivedBody = await exportAccountBody(page2, "Account", false, NEW_PASSWORD)
+		const derivedBody = await exportAccountBody(page2, FIRST_ACCOUNT_NAME, false, NEW_PASSWORD)
 		expect(derivedBody.trim().startsWith("{")).toBe(true)
 		await closeStuckPopup(page2)
 

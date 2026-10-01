@@ -9,15 +9,16 @@ Marketing landing page for the wallet (nulo.sh). Standalone Vite app; ships inde
 | `index.html` | The whole page: head/meta, the camera-feed hero, the two-screens section, three promises, the illustrative public record, the preview notice, CTA, footer. All copy lives here, before any script runs. |
 | `src/main.ts` | Vite entry: imports the stylesheets in order and mounts the page. |
 | `src/feed.ts` | Pure renderer for the character "camera feed": seeded value noise, an optional bright subject, Bayer 4×4 dithering into a five-glyph ramp. DOM-free; unit-tested in `feed.test.ts`. |
-| `src/feed-dom.ts` | Wiring: measures the mono cell after fonts load, sizes each `pre[data-feed]` to its host, runs one ~30 fps loop (skips off-screen and hidden-tab, honours Pause and reduced motion), and drives the clock, tracking box and record stream. |
+| `src/feed-dom.ts` | Wiring: measures the mono cell after fonts load, sizes each `pre[data-feed]` to its host, runs one ~30 fps loop (skips off-screen and hidden-tab, scales the grid up past its cell cap so any screen is covered, honours reduced motion), and drives the clock, tracking box and record stream. |
 | `src/release.ts`, `src/release-resolver.ts` | Typed access to the build-time release info (`src/generated/release.json`). |
 | `src/styles/overrides.css` | The few corrections a web page needs on top of `@nulo/design/base.css` (link colour, focus ring, selectable text, visible scrollbars). |
 | `src/styles/page.css` | Page presentation: plates, bar, hero overlay, sections, breakpoints. |
 | `scripts/headers.ts` | Parses the site-wide block of `public/_headers` so `vite preview` serves the production CSP. |
 | `scripts/release-html-plugin.ts` | Substitutes `{{release_url}}` and friends into `index.html` at build; throws if a known token survives. |
 | `scripts/fetch-latest-release.ts`, `scripts/ensure-release-json.ts` | Prebuild fetch of the latest GitHub release; the no-release stub for typecheck/test. |
-| `public/` | `_headers` (CSP and caching for Cloudflare Pages), favicon, robots, sitemap. |
+| `public/` | `_headers` (CSP and caching, applied by Cloudflare), favicon, robots, sitemap. |
 | `vite.config.ts` | Vite config, including `preview.headers` from `_headers`. |
+| `wrangler.jsonc` | The `nulo-landing` Worker: static assets from `dist/`, unknown paths served `index.html` (released wallets deep-link to `/forms/*`), Workers Logs off. `nulo.sh` is a Custom Domain attached outside the file (the build token has no zone permission); no workers.dev host; previews on for non-production branches. |
 
 ## Scripts
 
@@ -28,6 +29,8 @@ Marketing landing page for the wallet (nulo.sh). Standalone Vite app; ships inde
 | `bun run preview` | Preview the production build with the production response headers. |
 | `bun run typecheck` | `tsc --noEmit`. |
 | `bun run test` | Unit tests (renderer, headers parser, release resolver). |
+| `bun run deploy:dry` | Validate `wrangler.jsonc` against the built `dist/`; needs no credentials. |
+| `bun run deploy`, `bun run deploy:preview` | The production (`main`) and other-branch commands to configure when connecting Workers Builds in the Cloudflare dashboard. By hand only to create the Worker. |
 
 ## Key notes
 
@@ -36,7 +39,7 @@ Marketing landing page for the wallet (nulo.sh). Standalone Vite app; ships inde
 - **Two design rules.** Copy, buttons and panels sit on solid plates; section headings sit on the grain with a dark halo. The grain runs behind every section uninterrupted.
 - **Copy rule.** No wallet jargon above the fold; the technical words (nullifier, commitment, log) appear only inside the public-record panel, which is labelled illustrative because its values are generated locally.
 - **CSP.** `public/_headers` is the policy; preview applies it too. No inline scripts, no CDN, no remote fonts.
-- **Independent ship.** Builds and deploys (Cloudflare Pages, from `main`) without the extension. CI lints, typechecks and unit-tests this package on every PR but does not build it; run `bun run --cwd apps/landing build` locally before opening a PR.
+- **Independent ship.** Builds and deploys from `main` without the extension: the `nulo-landing` Worker serves `nulo.sh` and builds from Git pushes only (Workers Builds, no hook). `prebuild` reads the latest release, so a release reaches the page with the next push to `main`, or when the production build is re-run in the Cloudflare dashboard. CI lints, typechecks and unit-tests this package on every PR, and builds it when the PR touches it or `legal/`.
 
 ## Legal pages
 

@@ -1,4 +1,5 @@
-import type { Fr } from "@aztec/foundation/curves/bn254"
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
 import type {
 	Base64CredentialId,
 	Base64MasterSecret,

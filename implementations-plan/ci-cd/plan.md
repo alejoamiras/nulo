@@ -1,6 +1,6 @@
 # CI/CD bring-up plan
 
-> **Audit status**: this plan has been reviewed by two independent auditors (codex `xhigh` + opus 4.7). Their full responses live in [`audit-codex.md`](./audit-codex.md) and [`audit-opus.md`](./audit-opus.md). Where they agreed, the plan has been updated in place; where they disagreed, the open-question list (§11) calls it out. Decisions tagged **[R]** were reconciled after the audit pass.
+> **Audit status**: this plan has been reviewed by two independent auditors (codex `xhigh` + opus 4.7). Their full responses live in [`audit-codex.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/ci-cd/audit-codex.md) and [`audit-opus.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/ci-cd/audit-opus.md). Where they agreed, the plan has been updated in place; where they disagreed, the open-question list (§11) calls it out. Decisions tagged **[R]** were reconciled after the audit pass.
 
 ## Mandate (from user, paraphrased)
 

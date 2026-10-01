@@ -98,14 +98,20 @@ const STUBS = {
 					v-for="m in methods"
 					:key="m.fpc?.id ?? m.type"
 					:data-testid="'pick-' + m.type"
+					:data-fpc-id="m.fpc?.id"
 					:data-disabled="m.disabled ? 'true' : 'false'"
+					:data-reason="m.disabledReason"
+					:data-spend="m.spend"
 					@click="!m.disabled && $emit('update:modelValue', m)"
 				>{{ m.title }}</button>
 			</div>
 		`,
 	},
 	FeeMethodRow: { template: '<div data-testid="fee-method-row" />' },
-	FeeCostReadout: { template: '<div data-testid="fee-cost-readout" />' },
+	FeeCostReadout: {
+		props: ["estimate", "isEstimating", "payer"],
+		template: '<div data-testid="fee-cost-readout" :data-payer="payer" />',
+	},
 	FeePriorityRow: {
 		props: ["modelValue"],
 		emits: ["update:modelValue"],
@@ -260,7 +266,7 @@ describe("FeeSettingsCard — bug pins (init race)", () => {
 
 describe("FeeSettingsCard — mounting & init contract", () => {
 	test("no saved method, sponsored available: auto-selects sponsored and emits valid settings", async () => {
-		mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+		mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor", isProtocol: true }])
 		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
 
 		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
@@ -304,7 +310,7 @@ describe("FeeSettingsCard — mounting & init contract", () => {
 				fpc: { id: "deleted-fpc", type: 1, name: "deleted-sponsor" },
 			},
 		}
-		mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+		mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor", isProtocol: true }])
 		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
 
 		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
@@ -320,6 +326,8 @@ describe("FeeSettingsCard — mounting & init contract", () => {
 		})
 		await flushPromises()
 
+		const banner = w.find('[data-testid="send-fee-embedded"]')
+		expect(banner.findAll("span").map((n) => n.text())).toEqual(["Fee", "Embedded payload"])
 		// runInit early-returns when isCustomMethod && !useOwnMethod, so no SW calls.
 		expect(mocks.getGasBalances).not.toHaveBeenCalled()
 		expect(mocks.getTokenBalances).not.toHaveBeenCalled()
@@ -340,9 +348,11 @@ describe("FeeSettingsCard — a method the dApp locked", () => {
 		const w = mount(FeeSettingsCard, { props: baseProps({ lockedMethod: "fj" }), global: { stubs: STUBS } })
 		await flushPromises()
 
-		expect(w.find('[data-testid="send-fee-locked"]').exists()).toBe(true)
+		const locked = w.find('[data-testid="send-fee-locked"]')
+		expect(locked.findAll("span").map((n) => n.text())).toEqual(["Fee", "Public Fee Juice · set by the app"])
 		expect(w.find('[data-testid="fee-method-selector"]').exists()).toBe(false)
 		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fj" } })
+		expect(w.find('[data-testid="fee-cost-readout"]').attributes("data-payer")).toBe("self")
 		// A locked mount reads the balance FRESH: the dApp asked because the balance just moved.
 		expect(mocks.getGasBalances).toHaveBeenCalledWith(expect.anything(), expect.anything(), true)
 		// The lock is the dApp's, not a preference: nothing is persisted for the account.
@@ -359,6 +369,138 @@ describe("FeeSettingsCard — a method the dApp locked", () => {
 		const truthy = (w.emitted<unknown[]>("update:modelValue") ?? []).filter((ev) => ev[0] !== undefined && ev[0] !== null)
 		expect(truthy).toEqual([])
 		expect(w.find('[data-testid="send-fee-nudge"]').exists()).toBe(true)
+	})
+})
+
+describe("FeeSettingsCard — who the readout says pays", () => {
+	test("it follows the paying method: Nulo's sponsor, one added by hand, then the account", async () => {
+		mocks.getFpcs.mockResolvedValue([
+			{ id: "s1", type: 1, name: "Sponsored", isProtocol: true },
+			{ id: "s2", type: 1, name: "Dev sponsor", isProtocol: false },
+		])
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+
+		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+		await flushPromises()
+		const payer = () => w.find('[data-testid="fee-cost-readout"]').attributes("data-payer")
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+		expect(payer()).toBe("sponsor")
+
+		await w.findAll('[data-testid="pick-fpc"]')[1].trigger("click")
+		await flushPromises()
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s2" } })
+		expect(payer()).toBe("unvouched")
+
+		await w.find('[data-testid="pick-fj"]').trigger("click")
+		await flushPromises()
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fj" } })
+		expect(payer()).toBe("self")
+		w.unmount()
+	})
+})
+
+describe("FeeSettingsCard — the default sponsor, with no saved pick", () => {
+	const HAND_ADDED = { id: "s2", type: 1, name: "Dev sponsor", isProtocol: false }
+
+	test("Nulo's sponsor, even listed after one added by hand, and the readout says a sponsor pays", async () => {
+		mocks.getFpcs.mockResolvedValue([HAND_ADDED, { id: "s1", type: 1, name: "Sponsored", isProtocol: true }])
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+
+		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+		await flushPromises()
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+		expect(w.find('[data-testid="fee-cost-readout"]').attributes("data-payer")).toBe("sponsor")
+		w.unmount()
+	})
+
+	test("only one added by hand: nothing is selected", async () => {
+		mocks.getFpcs.mockResolvedValue([HAND_ADDED])
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+
+		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+		await flushPromises()
+		const truthy = (w.emitted<unknown[]>("update:modelValue") ?? []).filter((ev) => ev[0] !== undefined && ev[0] !== null)
+		expect(truthy).toEqual([])
+		expect(w.find('[data-testid="fee-method-selector"]').attributes("data-active-type")).toBeUndefined()
+		w.unmount()
+	})
+
+	/** Nulo's sponsor, then its address edited in another window: the row turns custom. */
+	test.each([
+		{ saved: false, after: undefined },
+		{ saved: true, after: { paymentMethod: { kind: "fpc", fpcId: "s1" } } },
+	])("its address edited elsewhere: dropped when chosen unasked, kept when picked (saved $saved)", async ({ saved, after }) => {
+		const { FpcServiceClient } = await import("@/wallet/services/fpc/client")
+		const NULO = { id: "s1", type: 1, name: "Sponsored", isProtocol: true }
+		if (saved) storageBacking[FEE_METHOD_LS_KEY] = { [account.address]: { type: "fpc", fpc: NULO } }
+		mocks.getFpcs.mockResolvedValue([NULO])
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+
+		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+		await flushPromises()
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+
+		const fpc = vi.mocked(FpcServiceClient).mock.results.at(-1)?.value as { onFpcUpdated: { add: ReturnType<typeof vi.fn> } }
+		const onUpdated = fpc.onFpcUpdated.add.mock.calls[0]?.[0] as (f: unknown) => void
+		onUpdated({ ...NULO, address: `0x${"ab".repeat(32)}`, isProtocol: false })
+		await flushPromises()
+
+		expect(lastEmittedSettings(w)).toEqual(after)
+		w.unmount()
+	})
+
+	const EDITED = { id: "s1", type: 1, name: "Sponsored", address: `0x${"ab".repeat(32)}`, isProtocol: false }
+	const lastFpcHandler = async (name: "onFpcUpdated") => {
+		const { FpcServiceClient } = await import("@/wallet/services/fpc/client")
+		const fpc = vi.mocked(FpcServiceClient).mock.results.at(-1)?.value as Record<typeof name, { add: ReturnType<typeof vi.fn> }>
+		return fpc[name].add.mock.calls[0]?.[0] as (f: unknown) => void
+	}
+
+	test("a default dropped for its edited address stays dropped when a failed gas read recovers", async () => {
+		vi.useFakeTimers()
+		try {
+			mocks.getGasBalances.mockRejectedValueOnce(new Error("boom"))
+			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsored", isProtocol: true }])
+
+			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+
+			;(await lastFpcHandler("onFpcUpdated"))(EDITED)
+			await vi.advanceTimersByTimeAsync(0)
+			expect(lastEmittedSettings(w)).toBeUndefined()
+
+			await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0])
+			await vi.advanceTimersByTimeAsync(0)
+			expect(w.find('[data-testid="fee-init-degraded"]').exists()).toBe(false)
+			expect(lastEmittedSettings(w)).toBeUndefined()
+			w.unmount()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("after an account switch, the new account's saved pick follows an edit made while it loads", async () => {
+		const NULO = { id: "s1", type: 1, name: "Sponsored", isProtocol: true }
+		mocks.getFpcs.mockResolvedValue([NULO])
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+		await flushPromises()
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+
+		storageBacking[FEE_METHOD_LS_KEY] = { "0xother": { type: "fpc", fpc: NULO } }
+		const gas = deferred<{ publicFeeJuice: string; privateFeeJuice: string | null }>()
+		mocks.getGasBalances.mockReturnValueOnce(gas.promise)
+		await w.setProps({ account: { id: "a2", address: "0xother" } })
+		await flushPromises()
+
+		;(await lastFpcHandler("onFpcUpdated"))(EDITED)
+		gas.resolve({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+		await flushPromises()
+
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+		w.unmount()
 	})
 })
 
@@ -397,7 +539,7 @@ describe("FeeSettingsCard — user actions", () => {
 	})
 
 	test("priority change: emits settings with priorityLevel set; payment method preserved", async () => {
-		mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+		mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor", isProtocol: true }])
 		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
 
 		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
@@ -498,7 +640,7 @@ describe("FeeSettingsCard — reactivity & lifecycle (codex's gap-fillers)", () 
 	})
 
 	test("account prop change re-runs init for the new account's saved record", async () => {
-		mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+		mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor", isProtocol: true }])
 		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
 
 		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
@@ -609,49 +751,12 @@ describe("FeeSettingsCard — concurrency", () => {
 	})
 })
 
-describe("FeeSettingsCard — per-network defaults + fee-juice nudge", () => {
-	const mainnet = { id: "n1", chainId: 4248422646, kind: "mainnet" }
-	const testnet = { id: "n1", chainId: 1816023401, kind: "testnet" }
-
-	test("mainnet: defaults to Private Fee Juice and hides Sponsored FPC", async () => {
-		mocks.getFpcs.mockResolvedValue([
-			{ id: "p1", type: 2, name: "Private FPC", isProtocol: true },
-			{ id: "s1", type: 1, name: "Sponsor" },
-		])
-		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: "5000000000000000000" })
-
-		const w = mount(FeeSettingsCard, { props: baseProps({ network: mainnet }), global: { stubs: STUBS } })
-		await flushPromises()
-
-		// Default is the PrivateFPC, not the sponsored one.
-		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "p1" } })
-		// Sponsored FPC is not offered at all on mainnet.
-		expect(w.find('[data-testid="pick-fpc"]').exists()).toBe(false)
-	})
-
-	test("mainnet with zero private fee juice: no usable settings, emits needsFeeJuice + shows the nudge", async () => {
-		mocks.getFpcs.mockResolvedValue([{ id: "p1", type: 2, name: "Private FPC", isProtocol: true }])
-		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: "0" })
-
-		const w = mount(FeeSettingsCard, { props: baseProps({ network: mainnet }), global: { stubs: STUBS } })
-		await flushPromises()
-
-		// Default private_fpc is disabled (0 balance) → no usable settings.
-		expect(lastEmittedSettings(w)).toBeUndefined()
-		// Parent gets the CTA-takeover signal.
-		const needs = w.emitted<unknown[]>("update:needsFeeJuice") ?? []
-		expect(needs.at(-1)?.[0]).toBe(true)
-		// The explainer banner renders.
-		expect(w.text()).toContain("You have no fee juice yet")
-		// No fee estimate / priority rows when there's nothing to estimate.
-		expect(w.find('[data-testid="fee-cost-readout"]').exists()).toBe(false)
-	})
-
-	test("testnet: keeps Sponsored FPC as the default, no nudge", async () => {
-		mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+describe("FeeSettingsCard — the default and the identity guard", () => {
+	test("the sponsor is the default: no nudge, and the estimate row shows", async () => {
+		mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor", isProtocol: true }])
 		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
 
-		const w = mount(FeeSettingsCard, { props: baseProps({ network: testnet }), global: { stubs: STUBS } })
+		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
 		await flushPromises()
 
 		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
@@ -663,60 +768,30 @@ describe("FeeSettingsCard — per-network defaults + fee-juice nudge", () => {
 		expect(w.find('[data-testid="fee-cost-readout"]').exists()).toBe(true)
 	})
 
-	test("mainnet with NULL private fee juice (read failed / unregistered): no nudge — not a confirmed zero", async () => {
-		mocks.getFpcs.mockResolvedValue([{ id: "p1", type: 2, name: "Private FPC", isProtocol: true }])
-		// null = the private read failed or the FPC isn't registered — an unknown state,
-		// not a confirmed empty balance. We must NOT tell a possibly-funded user to bridge.
-		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: null })
-
-		const w = mount(FeeSettingsCard, { props: baseProps({ network: mainnet }), global: { stubs: STUBS } })
-		await flushPromises()
-
-		const needs = w.emitted<unknown[]>("update:needsFeeJuice") ?? []
-		expect(needs.some((e) => e[0] === true)).toBe(false)
-		expect(w.text()).not.toContain("You have no fee juice yet")
-		// No usable settings (can't send), but no misleading bridge instruction either.
-		expect(lastEmittedSettings(w)).toBeUndefined()
-	})
-
 	test("account+network switch mid-init: the stale completion is discarded (no cross-identity leak)", async () => {
-		// Account A (mainnet) resolves LATE; it would default to Private Fee Juice.
+		// Account A's saved pick is Private Fee Juice, and its balance read resolves LATE.
+		storageBacking[FEE_METHOD_LS_KEY] = { [account.address]: { type: "private_fpc" } }
 		const gasA = deferred<{ publicFeeJuice: string; privateFeeJuice: string | null }>()
 		mocks.getGasBalances.mockReturnValueOnce(gasA.promise)
 		// The switched-to identity (B) resolves normally.
 		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: "1000000000000000000" })
 		mocks.getFpcs.mockResolvedValue([
 			{ id: "p1", type: 2, name: "Private FPC", isProtocol: true },
-			{ id: "s1", type: 1, name: "Sponsor" },
+			{ id: "s1", type: 1, name: "Sponsor", isProtocol: true },
 		])
 
-		const w = mount(FeeSettingsCard, { props: baseProps({ network: mainnet }), global: { stubs: STUBS } })
+		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
 		await flushPromises() // A's init started, awaiting gasA
 
 		// Switch account (and network) BEFORE A resolves.
-		await w.setProps({ account: { id: "a2", address: "0xB" }, network: testnet })
+		await w.setProps({ account: { id: "a2", address: "0xB" }, network: { id: "n1", chainId: 424242 } })
 
-		// A's stale mainnet result lands now — the identity guard must discard it.
+		// A's stale result lands now — the identity guard must discard it.
 		gasA.resolve({ publicFeeJuice: "1000000000000000000", privateFeeJuice: "1000000000000000000" })
 		await flushPromises()
 
-		// Final state reflects B/testnet (Sponsored FPC s1), NOT A/mainnet (Private FPC p1).
+		// Final state reflects B (Sponsored FPC s1), NOT A's saved pick (Private FPC p1).
 		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
-	})
-
-	test("mainnet detected by chainId even WITHOUT `kind` (legacy/custom row): hides Sponsored, defaults Private", async () => {
-		mocks.getFpcs.mockResolvedValue([
-			{ id: "p1", type: 2, name: "Private FPC", isProtocol: true },
-			{ id: "s1", type: 1, name: "Sponsor" },
-		])
-		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: "5000000000000000000" })
-		// No `kind` field — only the mainnet chainId. This is the regression Codex flagged:
-		// a kind-less/restored/custom row on the mainnet chain must still get the mainnet policy.
-		const w = mount(FeeSettingsCard, { props: baseProps({ network: { id: "n1", chainId: 4248422646 } }), global: { stubs: STUBS } })
-		await flushPromises()
-
-		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "p1" } })
-		expect(w.find('[data-testid="pick-fpc"]').exists()).toBe(false)
 	})
 })
 
@@ -727,7 +802,7 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 		// with no error, no retry. A failed balance read must NOT discard the good
 		// FPC list — sponsored methods need no balance at all.
 		mocks.getGasBalances.mockRejectedValue(new Error("PXE unreachable"))
-		mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+		mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor", isProtocol: true }])
 
 		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
 		await flushPromises()
@@ -737,6 +812,26 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 		expect(w.find('[data-testid="fee-init-degraded"]').exists()).toBe(true)
 		// And never the misleading bridge nudge — the balance is UNKNOWN, not zero.
 		expect(w.text()).not.toContain("You have no fee juice yet")
+		w.unmount()
+	})
+
+	test("a whole read failing keeps the self-paid rows selectable, reading — FJ beside the retry notice", async () => {
+		mocks.getGasBalances.mockRejectedValue(new Error("PXE unreachable"))
+		mocks.getFpcs.mockResolvedValue([
+			{ id: "s1", type: 1, name: "Sponsored", isProtocol: true },
+			{ id: "p1", type: 2, name: "Private Fee Juice", isProtocol: true },
+		])
+
+		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+		await flushPromises()
+
+		expect(w.find('[data-testid="fee-init-degraded"]').exists()).toBe(true)
+		const row = (type: string) => w.find(`[data-testid="pick-${type}"]`)
+		for (const type of ["fj", "private_fpc"]) {
+			expect(row(type).attributes("data-disabled")).toBe("false")
+			expect(row(type).attributes("data-spend")).toBe("— FJ")
+		}
+		expect(row("fpc").attributes("data-spend")).toBe("free")
 		w.unmount()
 	})
 
@@ -771,7 +866,7 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 		vi.useFakeTimers()
 		try {
 			mocks.getGasBalances.mockReturnValue(new Promise(() => {}))
-			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor", isProtocol: true }])
 
 			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
 			await vi.advanceTimersByTimeAsync(0)
@@ -791,7 +886,7 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 			mocks.getGasBalances.mockRejectedValueOnce(new Error("boom"))
 			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
 			mocks.getFpcs.mockRejectedValueOnce(new Error("boom"))
-			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor", isProtocol: true }])
 
 			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
 			await vi.advanceTimersByTimeAsync(0)
@@ -824,7 +919,7 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 		vi.useFakeTimers()
 		try {
 			mocks.getGasBalances.mockImplementation(() => new Promise(() => {}))
-			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor", isProtocol: true }])
 
 			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
 			await vi.advanceTimersByTimeAsync(0)
@@ -851,7 +946,7 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 		vi.useFakeTimers()
 		try {
 			mocks.getGasBalances.mockImplementation(() => new Promise(() => {}))
-			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor", isProtocol: true }])
 
 			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
 			await vi.advanceTimersByTimeAsync(0)
@@ -878,7 +973,7 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 		vi.useFakeTimers()
 		try {
 			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
-			mocks.getFpcs.mockResolvedValueOnce([{ id: "s1", type: 1, name: "Sponsor" }])
+			mocks.getFpcs.mockResolvedValueOnce([{ id: "s1", type: 1, name: "Sponsor", isProtocol: true }])
 			mocks.getFpcs.mockRejectedValue(new Error("boom"))
 
 			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
@@ -900,7 +995,7 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 	test("identity switch mid-refresh closes the gate immediately — old snapshot never serves the new identity", async () => {
 		vi.useFakeTimers()
 		try {
-			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor", isProtocol: true }])
 			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
 
 			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
@@ -968,7 +1063,7 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 			mocks.getGasBalances.mockRejectedValueOnce(new Error("boom"))
 			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
 			mocks.getFpcs.mockRejectedValueOnce(new Error("boom"))
-			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor", isProtocol: true }])
 
 			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
 			await vi.advanceTimersByTimeAsync(0)
@@ -1052,7 +1147,7 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 				.mockImplementationOnce(() => new Promise((r) => (resolveOldGas = r)))
 				.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
 			mocks.getFpcs.mockImplementation(async (chainId: number) => [
-				{ id: chainId === 11155111 ? "s-old" : "s-new", type: 1, name: "Sponsor" },
+				{ id: chainId === 11155111 ? "s-old" : "s-new", type: 1, name: "Sponsor", isProtocol: true },
 			])
 
 			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
@@ -1380,9 +1475,8 @@ describe("FeeSettingsCard — null public balance (unknown wire slot)", () => {
 describe("FeeSettingsCard — Send: the fee source follows the transfer's origin", () => {
 	const SEND_KEY = "nulo:ui:sendFeePaymentMethods"
 	const HELD = "1000000000000000000"
-	const mainnet = { id: "n1", chainId: 4248422646, kind: "mainnet" }
 	const PRIVATE_FPC = { id: "p1", type: 2, name: "Private FPC", isProtocol: true }
-	const SPONSOR = { id: "s1", type: 1, name: "Sponsor" }
+	const SPONSOR = { id: "s1", type: 1, name: "Sponsor", isProtocol: true }
 	const accountB = { id: "a2", address: "0xacctB" }
 
 	/** Set to a deferred to hold every storage read open; reads hand back CLONES, as chrome does. */
@@ -1424,7 +1518,7 @@ describe("FeeSettingsCard — Send: the fee source follows the transfer's origin
 		test("private origin, private gas read as zero, public held → Fee Juice", async () => {
 			mocks.getFpcs.mockResolvedValue([PRIVATE_FPC])
 			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: HELD, privateFeeJuice: "0" })
-			const w = mountSend({ network: mainnet })
+			const w = mountSend()
 			await flushPromises()
 			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fj" } })
 		})
@@ -1440,7 +1534,7 @@ describe("FeeSettingsCard — Send: the fee source follows the transfer's origin
 		test("private gas unread, no sponsor → nothing selected, the honest line, no second read", async () => {
 			mocks.getFpcs.mockResolvedValue([PRIVATE_FPC])
 			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: HELD, privateFeeJuice: null })
-			const w = mountSend({ network: mainnet })
+			const w = mountSend()
 			await flushPromises()
 			expect(everEmittedSettings(w)).toEqual([])
 			expect(activeType(w)).toBeUndefined()
@@ -1471,10 +1565,10 @@ describe("FeeSettingsCard — Send: the fee source follows the transfer's origin
 		test("gas read rejected: nothing selected and the retrying line — or the sponsor when there is one", async () => {
 			mocks.getGasBalances.mockRejectedValue(new Error("boom"))
 			mocks.getFpcs.mockResolvedValue([PRIVATE_FPC])
-			const held = mountSend({ network: mainnet })
+			const held = mountSend({ network: { id: "n1", chainId: 424242 } })
 			await flushPromises()
 			expect(everEmittedSettings(held)).toEqual([])
-			expect(degradedText(held)).toBe("Couldn't load fee data — retrying in the background.")
+			expect(degradedText(held)).toBe("Couldn't load fee data. Retrying in the background.")
 			held.unmount()
 
 			mocks.getFpcs.mockResolvedValue([PRIVATE_FPC, SPONSOR])
@@ -1486,7 +1580,7 @@ describe("FeeSettingsCard — Send: the fee source follows the transfer's origin
 		test("public origin held on a healthy store: nothing selected and no promise of a retry nobody scheduled", async () => {
 			mocks.getFpcs.mockResolvedValue([PRIVATE_FPC])
 			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: null, privateFeeJuice: null })
-			const w = mountSend({ network: mainnet, originPrivacy: "public" })
+			const w = mountSend({ originPrivacy: "public" })
 			await flushPromises()
 			expect(everEmittedSettings(w)).toEqual([])
 			expect(activeType(w)).toBeUndefined()
@@ -1505,7 +1599,7 @@ describe("FeeSettingsCard — Send: the fee source follows the transfer's origin
 		test("both read as zero, no sponsor → the nudge and needsFeeJuice, with no method selected", async () => {
 			mocks.getFpcs.mockResolvedValue([PRIVATE_FPC])
 			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: "0" })
-			const w = mountSend({ network: mainnet })
+			const w = mountSend()
 			await flushPromises()
 			expect(lastNeedsFeeJuice(w)).toBe(true)
 			expect(w.find('[data-testid="send-fee-nudge"]').exists()).toBe(true)
@@ -1516,7 +1610,7 @@ describe("FeeSettingsCard — Send: the fee source follows the transfer's origin
 		test("one zero and one unread → neither the nudge nor needsFeeJuice", async () => {
 			mocks.getFpcs.mockResolvedValue([PRIVATE_FPC])
 			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: null, privateFeeJuice: "0" })
-			const w = mountSend({ network: mainnet })
+			const w = mountSend()
 			await flushPromises()
 			expect(lastNeedsFeeJuice(w)).toBe(false)
 			expect(w.find('[data-testid="send-fee-nudge"]').exists()).toBe(false)
@@ -1566,21 +1660,13 @@ describe("FeeSettingsCard — Send: the fee source follows the transfer's origin
 			expect(activeType(w)).toBe("fpc")
 			expect(activeTitle(w)).toBe("Sponsor")
 			expect(everEmittedSettings(w)).toEqual([])
+			// A preview pays nothing, so nothing may say what it costs.
+			expect(w.find('[data-testid="fee-cost-readout"]').exists()).toBe(false)
 
 			gas.resolve({ publicFeeJuice: HELD, privateFeeJuice: HELD })
 			await flushPromises()
 			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
-		})
-
-		test("no sponsor preview where sponsors are not offered", async () => {
-			const gas = deferred<unknown>()
-			mocks.getGasBalances.mockReturnValue(gas.promise)
-			storageBacking["nulo:ui:sendFeePaymentMethods"] = {
-				[account.address]: { private: { type: "fpc", fpc: { id: "s1", name: "Sponsor" } } },
-			}
-			const w = mountSend({ network: mainnet })
-			await flushPromises()
-			expect(activeType(w)).toBeUndefined()
+			expect(w.find('[data-testid="fee-cost-readout"]').exists()).toBe(true)
 		})
 	})
 
@@ -1692,7 +1778,7 @@ describe("FeeSettingsCard — Send: the fee source follows the transfer's origin
 			mocks.getFpcs.mockResolvedValue([PRIVATE_FPC])
 			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: null, privateFeeJuice: "0" })
 			storageBacking[SEND_KEY] = { [account.address]: { private: { type: "fj" } } }
-			const w = mountSend({ network: mainnet })
+			const w = mountSend()
 			await flushPromises()
 			expect(everEmittedSettings(w)).toEqual([])
 			expect(activeType(w)).toBeUndefined()
@@ -1704,7 +1790,7 @@ describe("FeeSettingsCard — Send: the fee source follows the transfer's origin
 				mocks.getFpcs.mockResolvedValue([PRIVATE_FPC])
 				mocks.getGasBalances.mockRejectedValueOnce(new Error("boom"))
 				mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: null, privateFeeJuice: "0" })
-				const w = mountSend({ network: mainnet })
+				const w = mountSend()
 				await vi.advanceTimersByTimeAsync(0)
 				// Another document saves a Fee Juice pick while this card is degraded.
 				storageBacking[SEND_KEY] = { [account.address]: { private: { type: "fj" } } }
@@ -1737,7 +1823,7 @@ describe("FeeSettingsCard — Send: the fee source follows the transfer's origin
 			mocks.getFpcs.mockResolvedValue([PRIVATE_FPC])
 			mocks.getGasBalances.mockResolvedValueOnce({ publicFeeJuice: HELD, privateFeeJuice: HELD })
 			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: "0" })
-			const w = mountSend({ network: mainnet })
+			const w = mountSend()
 			await flushPromises()
 			const emittedForA = everEmittedSettings(w).length
 			expect(emittedForA).toBe(1)
@@ -1784,7 +1870,7 @@ describe("FeeSettingsCard — Send: the fee source follows the transfer's origin
 			mocks.getFpcs.mockResolvedValue([PRIVATE_FPC])
 			mocks.getGasBalances.mockReturnValue(gas.promise)
 			storageBacking[SEND_KEY] = { [account.address]: { private: { type: "fj" } } }
-			const w = mountSend({ network: mainnet })
+			const w = mountSend()
 			await flushPromises()
 			expect(activeType(w)).toBe("fj")
 			expect(everEmittedSettings(w)).toEqual([])
@@ -1897,6 +1983,275 @@ describe("FeeSettingsCard — Send: the fee source follows the transfer's origin
 			expect(everEmittedSettings(w)).toEqual([])
 		})
 	})
+
+	describe("a sponsor that can't cover this fee", () => {
+		const NULO_AT = `0x${"0a".repeat(32)}`
+		const HAND_AT = `0x${"0b".repeat(32)}`
+		const EDITED_AT = `0x${"0c".repeat(32)}`
+		const NULO = { ...SPONSOR, address: NULO_AT }
+		const HAND = { id: "s2", type: 1, name: "Dev sponsor", isProtocol: false, address: HAND_AT }
+		const FEE = { maxFee: "1000", maxFeeFormatted: "0.000000000000001" }
+		const verdict = (funded: boolean, over: Record<string, unknown> = {}) => ({
+			...FEE,
+			sponsorFunding: { fpcId: "s1", address: NULO_AT, funded, ...over },
+		})
+		const PAYS_PUBLIC = "The sponsor can't cover this fee right now, so Public Fee Juice pays it."
+		const NO_PAYER = "The sponsor can't cover this fee right now."
+		const picked = (origin: string, id = "s1") => ({ [account.address]: { [origin]: { type: "fpc", fpc: { id } } } })
+		const row = (w: ReturnType<typeof mount>, id: string) => w.get(`[data-testid="pick-fpc"][data-fpc-id="${id}"]`)
+		const notice = (w: ReturnType<typeof mount>) => {
+			const n = w.find('[data-testid="fee-sponsor-short"]')
+			return n.exists() ? n.text() : null
+		}
+		const funding = (w: ReturnType<typeof mount>) => w.get('[data-testid="fee-settings-card"]').attributes("data-sponsor-funding")
+
+		/** Nulo's sponsor picked for a public send the account could pay itself. */
+		const pickedWithGas = async (over: Record<string, unknown> = {}) => {
+			mocks.getFpcs.mockResolvedValue([PRIVATE_FPC, NULO])
+			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: HELD, privateFeeJuice: "0" })
+			storageBacking[SEND_KEY] = picked("public")
+			const w = mountSend({ originPrivacy: "public", ...over })
+			await flushPromises()
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+			return w
+		}
+		const short = async (w: ReturnType<typeof mount>) => {
+			await w.setProps({ feeEstimate: verdict(false) })
+			await flushPromises()
+		}
+
+		test.each([
+			{
+				case: "no gas of its own, public origin",
+				origin: "public",
+				gas: { publicFeeJuice: "0", privateFeeJuice: "0" },
+				saved: false,
+				type: undefined,
+				text: NO_PAYER,
+			},
+			{
+				case: "picked, public Fee Juice funded, public origin",
+				origin: "public",
+				gas: { publicFeeJuice: HELD, privateFeeJuice: "0" },
+				saved: true,
+				type: "fj",
+				text: PAYS_PUBLIC,
+			},
+			{
+				case: "picked, public Fee Juice funded, private origin with private gas read zero",
+				origin: "private",
+				gas: { publicFeeJuice: HELD, privateFeeJuice: "0" },
+				saved: true,
+				type: "fj",
+				text: PAYS_PUBLIC,
+			},
+		])("short, $case: set aside, its row disabled, and the card says why", async ({ origin, gas, saved, type, text }) => {
+			mocks.getFpcs.mockResolvedValue([PRIVATE_FPC, NULO])
+			mocks.getGasBalances.mockResolvedValue(gas)
+			if (saved) storageBacking[SEND_KEY] = picked(origin)
+			const w = mountSend({ originPrivacy: origin })
+			await flushPromises()
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+
+			await short(w)
+			expect(activeType(w)).toBe(type)
+			expect(lastEmittedSettings(w)).toEqual(type ? { paymentMethod: { kind: type } } : undefined)
+			expect(notice(w)).toBe(text)
+			expect(row(w, "s1").attributes()).toMatchObject({ "data-disabled": "true", "data-reason": "can't pay now" })
+			expect(funding(w)).toBe("short")
+			expect(w.find('[data-testid="send-fee-nudge"]').exists()).toBe(type === undefined)
+		})
+
+		test("funded: marked funded, and nothing else moves", async () => {
+			const w = await pickedWithGas()
+			const emitted = w.emitted("update:modelValue")?.length
+			await w.setProps({ feeEstimate: verdict(true) })
+			await flushPromises()
+			expect(funding(w)).toBe("funded")
+			expect(activeType(w)).toBe("fpc")
+			expect(w.emitted("update:modelValue")?.length).toBe(emitted)
+			expect(notice(w)).toBeNull()
+			expect(row(w, "s1").attributes("data-disabled")).toBe("false")
+		})
+
+		test.each([
+			["no verdict", FEE],
+			["a verdict on a row the card does not list", verdict(false, { fpcId: "s9" })],
+			["a verdict on an address the row does not have", verdict(false, { address: EDITED_AT })],
+		])("%s: nothing changes", async (_case, estimate) => {
+			const w = await pickedWithGas()
+			await w.setProps({ feeEstimate: estimate })
+			await flushPromises()
+			expect(activeType(w)).toBe("fpc")
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+			expect(notice(w)).toBeNull()
+			expect(funding(w)).toBeUndefined()
+			expect(row(w, "s1").attributes("data-disabled")).toBe("false")
+		})
+
+		test("a hand-added sponsor's address edited while its estimate was out: the old address's verdict is discarded", async () => {
+			mocks.getFpcs.mockResolvedValue([PRIVATE_FPC, NULO, HAND])
+			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: HELD, privateFeeJuice: "0" })
+			storageBacking[SEND_KEY] = picked("public", "s2")
+			const w = mountSend({ originPrivacy: "public" })
+			await flushPromises()
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s2" } })
+
+			await fpcEvent("onFpcUpdated", { ...HAND, address: EDITED_AT })
+			await w.setProps({ feeEstimate: verdict(false, { fpcId: "s2", address: HAND_AT }) })
+			await flushPromises()
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s2" } })
+			expect(notice(w)).toBeNull()
+			expect(funding(w)).toBeUndefined()
+			expect(row(w, "s2").attributes("data-disabled")).toBe("false")
+		})
+
+		test("short, then its address edited: the row is offered again, the payer stays, and it is not reselected", async () => {
+			const w = await pickedWithGas()
+			await short(w)
+			expect(activeType(w)).toBe("fj")
+
+			await fpcEvent("onFpcUpdated", { ...NULO, address: EDITED_AT, isProtocol: false })
+			await flushPromises()
+			expect(row(w, "s1").attributes("data-disabled")).toBe("false")
+			expect(activeType(w)).toBe("fj")
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fj" } })
+			expect(notice(w)).toBeNull()
+		})
+
+		test("short, then renamed: the verdict still holds for the same transaction", async () => {
+			const w = await pickedWithGas()
+			await short(w)
+
+			await fpcEvent("onFpcUpdated", { ...NULO, name: "Renamed" })
+			await flushPromises()
+			expect(row(w, "s1").attributes("data-disabled")).toBe("true")
+			expect(activeType(w)).toBe("fj")
+			expect(notice(w)).toBe(PAYS_PUBLIC)
+		})
+
+		test("the fallback's own estimate, on the same transaction, keeps the row disabled", async () => {
+			const w = await pickedWithGas({ txShape: "t1" })
+			await short(w)
+			await w.setProps({ feeEstimate: null, isEstimating: true })
+			await w.setProps({ feeEstimate: FEE, isEstimating: false })
+			await flushPromises()
+			expect(activeType(w)).toBe("fj")
+			expect(row(w, "s1").attributes("data-disabled")).toBe("true")
+			expect(notice(w)).toBe(PAYS_PUBLIC)
+		})
+
+		test.each([
+			["the transaction", (w: ReturnType<typeof mount>) => w.setProps({ txShape: "t2" })],
+			["the priority", (w: ReturnType<typeof mount>) => w.get('[data-testid="pick-fast"]').trigger("click")],
+		])("%s changes: the row is offered again, the payer stays, and a tap makes it the payer", async (_case, change) => {
+			const w = await pickedWithGas({ txShape: "t1" })
+			await short(w)
+			await change(w)
+			await flushPromises()
+			expect(row(w, "s1").attributes("data-disabled")).toBe("false")
+			expect(activeType(w)).toBe("fj")
+			expect(notice(w)).toBeNull()
+
+			await row(w, "s1").trigger("click")
+			await flushPromises()
+			expect(activeType(w)).toBe("fpc")
+			expect(lastEmittedSettings(w)).toMatchObject({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+		})
+
+		test("an identity switch forgets the verdict; a replaced profile object with the same key does not", async () => {
+			const w = await pickedWithGas()
+			await short(w)
+			await w.setProps({ profile: { ...profile } })
+			await flushPromises()
+			expect(row(w, "s1").attributes("data-disabled")).toBe("true")
+			expect(activeType(w)).toBe("fj")
+
+			await w.setProps({ account: accountB })
+			await flushPromises()
+			expect(row(w, "s1").attributes("data-disabled")).toBe("false")
+			await w.setProps({ account })
+			await flushPromises()
+			expect(activeType(w)).toBe("fpc")
+			expect(notice(w)).toBeNull()
+			expect(funding(w)).toBeUndefined()
+		})
+
+		test("short on a public send, then the origin flipped to private with private gas to pay: no notice", async () => {
+			mocks.getFpcs.mockResolvedValue([PRIVATE_FPC, NULO])
+			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: HELD })
+			storageBacking[SEND_KEY] = picked("public")
+			const w = mountSend({ originPrivacy: "public" })
+			await flushPromises()
+			await short(w)
+			expect(activeType(w)).toBe("private_fpc")
+			expect(notice(w)).toBe("The sponsor can't cover this fee right now, so Private FPC pays it.")
+
+			await w.setProps({ originPrivacy: "private" })
+			await flushPromises()
+			expect(activeType(w)).toBe("private_fpc")
+			expect(notice(w)).toBeNull()
+		})
+
+		test("a private send whose private gas is unchecked, with the sponsor short: one notice, the sponsor's", async () => {
+			mocks.getFpcs.mockResolvedValue([PRIVATE_FPC, NULO])
+			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: HELD, privateFeeJuice: null })
+			const w = mountSend()
+			await flushPromises()
+			expect(activeType(w)).toBe("fpc")
+
+			await short(w)
+			expect(activeType(w)).toBeUndefined()
+			expect(notice(w)).toBe(NO_PAYER)
+			expect(degradedText(w)).toBeNull()
+		})
+	})
+})
+
+describe("FeeSettingsCard — a sponsor that can't cover this fee, outside Send", () => {
+	const NULO = { id: "s1", type: 1, name: "Sponsored", isProtocol: true, address: `0x${"0a".repeat(32)}` }
+	const HAND = { id: "s2", type: 1, name: "Dev sponsor", isProtocol: false, address: `0x${"0b".repeat(32)}` }
+	const shortOn = (row: { id: string; address: string }) => ({
+		maxFee: "1000",
+		maxFeeFormatted: "0.000000000000001",
+		sponsorFunding: { fpcId: row.id, address: row.address, funded: false },
+	})
+
+	test.each([
+		{ case: "Nulo's sponsor, chosen unasked", fpcs: [NULO], saved: undefined, row: NULO },
+		{ case: "a sponsor added by hand, picked", fpcs: [HAND], saved: { type: "fpc", fpc: HAND }, row: HAND },
+	])("$case: dropped to Select method with the saved pick kept, and a recovery does not reselect it", async ({ fpcs, saved, row }) => {
+		vi.useFakeTimers()
+		try {
+			if (saved) storageBacking[FEE_METHOD_LS_KEY] = { [account.address]: saved }
+			mocks.getFpcs.mockResolvedValue(fpcs)
+			mocks.getGasBalances.mockRejectedValueOnce(new Error("boom"))
+			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: null })
+			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: row.id } })
+
+			const active = () => w.get('[data-testid="fee-method-selector"]').attributes("data-active-type")
+			const notice = () => w.find('[data-testid="fee-sponsor-short"]')
+			await w.setProps({ feeEstimate: shortOn(row) })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(lastEmittedSettings(w)).toBeUndefined()
+			expect(active()).toBeUndefined()
+			expect(notice().text()).toBe("The sponsor can't cover this fee right now.")
+			expect(storageBacking[FEE_METHOD_LS_KEY]).toEqual(saved ? { [account.address]: saved } : undefined)
+
+			await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0])
+			await vi.advanceTimersByTimeAsync(0)
+			expect(mocks.getGasBalances).toHaveBeenCalledTimes(2)
+			expect(w.find('[data-testid="fee-init-degraded"]').exists()).toBe(false)
+			expect(lastEmittedSettings(w)).toBeUndefined()
+			expect(active()).toBeUndefined()
+			expect(notice().exists()).toBe(true)
+			w.unmount()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
 })
 
 describe("FeeSettingsCard — Send: the fee-source tag", () => {
@@ -1944,14 +2299,13 @@ describe("FeeSettingsCard — Send: the fee-source tag", () => {
 	test("the no-gas nudge speaks of private gas on a private send, and keeps its wording elsewhere", async () => {
 		mocks.getFpcs.mockResolvedValue([PRIVATE_FPC])
 		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: "0" })
-		const mainnet = { id: "n1", chainId: 4248422646, kind: "mainnet" }
-		const priv = mountSend({ network: mainnet })
+		const priv = mountSend()
 		await flushPromises()
 		expect(priv.find('[data-testid="send-fee-nudge"]').text()).toContain("You have no private gas yet")
 		expect(priv.find('[data-testid="send-fee-get-juice"]').text()).toBe("Get private gas")
 		priv.unmount()
 
-		const pub = mountSend({ network: mainnet, originPrivacy: "public", account: { id: "a2", address: "0xacctB" } })
+		const pub = mountSend({ originPrivacy: "public", account: { id: "a2", address: "0xacctB" } })
 		await flushPromises()
 		expect(pub.find('[data-testid="send-fee-nudge"]').text()).toContain("You have no fee juice yet")
 		expect(pub.find('[data-testid="send-fee-get-juice"]').text()).toBe("Get fee juice")
@@ -2006,7 +2360,10 @@ describe("FeeSettingsCard — Send: the payer model", () => {
 		expect(payer(none)).toBeNull()
 	})
 
-	test("a hand-added sponsor is reported unvouched; an identity switch withdraws the payer until the new read lands", async () => {
+	test("a hand-added sponsor, once picked, is reported unvouched; an identity switch withdraws the payer until the new read lands", async () => {
+		// It pays only once picked: both accounts saved it for a private send.
+		const picked = { private: { type: "fpc", fpc: { id: "s2" } } }
+		storageBacking["nulo:ui:sendFeePaymentMethods"] = { [account.address]: picked, [accountB.address]: picked }
 		mocks.getFpcs.mockResolvedValue([PRIVATE_FPC, HAND_ADDED])
 		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: "0" })
 		const w = mountSend()

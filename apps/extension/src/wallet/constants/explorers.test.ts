@@ -10,11 +10,7 @@ import { getTransactionExplorerUrl } from "./explorers"
 const TX = `0x${"ab".repeat(32)}`
 
 describe("getTransactionExplorerUrl", () => {
-	test("mainnet → aztecscan tx-effects URL (link renders)", () => {
-		expect(getTransactionExplorerUrl(CHAIN_IDS.MAINNET, "aztecscan", TX)).toBe(`https://aztecscan.xyz/tx-effects/${TX}`)
-	})
-
-	test("testnet → testnet aztecscan URL", () => {
+	test("testnet → testnet aztecscan tx-effects URL (link renders)", () => {
 		expect(getTransactionExplorerUrl(CHAIN_IDS.TESTNET, "aztecscan", TX)).toBe(`https://testnet.aztecscan.xyz/tx-effects/${TX}`)
 	})
 
@@ -23,6 +19,6 @@ describe("getTransactionExplorerUrl", () => {
 	})
 
 	test("explorer disabled (null) → null", () => {
-		expect(getTransactionExplorerUrl(CHAIN_IDS.MAINNET, null, TX)).toBeNull()
+		expect(getTransactionExplorerUrl(CHAIN_IDS.TESTNET, null, TX)).toBeNull()
 	})
 })

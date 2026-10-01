@@ -2,7 +2,7 @@
 
 **Re-verify (STEP 1, vs `dev-quality`):** VALID. Secret material (passhash, salt, master secret, ciphertext, guard, credential id, PRF output, user handle) is raw `ArrayBuffer`/`Uint8Array`/`Buffer`/`string`; `restore(profile, masterKey: string, …)` overloads `masterKey` (base64 master key for password, credentialId for passkey — `profile/spec.ts:250-262`).
 
-## Decision ledger ([codex leg](./plan-leg-codex.md) `blzvp7zzw` + main verification; opus Plan leg glitched-discarded)
+## Decision ledger ([codex leg](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/harden-quality-arc/findings/Q-06/plan-leg-codex.md) `blzvp7zzw` + main verification; opus Plan leg glitched-discarded)
 
 - **HARD-LIMIT / frozen oracle (codex corrected the path):** the frozen KDF/crypto oracle is **`apps/extension/src/wallet/crypto/key-vectors.test.ts`** (NOT `packages/wallet-crypto/...`). It pins `getPasshash`, PBKDF2 `600_000`, AES-GCM layout, passkey HKDF, signing-key derivation. **Never edit KDF/iterations/AES-GCM framing/HKDF labels/vectors.** Q-06 must keep it green + byte-UNEDITED.
 

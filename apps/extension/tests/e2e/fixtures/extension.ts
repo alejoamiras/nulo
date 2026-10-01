@@ -65,11 +65,13 @@ function isPrestoProbeNoise(msg: ConsoleMessage): boolean {
  *
  *  `legal` is the Terms-acceptance state the launch starts from. A fresh profile defaults to
  *  `current`, so a spec that is not about the gate never meets it; a reused profile defaults to
- *  `keep`, so whatever the previous launch left is what the relaunch boots over. */
+ *  `keep`, so whatever the previous launch left is what the relaunch boots over.
+ *
+ *  `fixedWindowSize: false` launches without the driver's fixed window size (`LaunchOptions`). */
 export async function launchExtension(
-	opts: { userDataDir?: string; waitForLiveness?: boolean; legal?: LegalSeed } = {},
+	opts: { userDataDir?: string; waitForLiveness?: boolean; legal?: LegalSeed; fixedWindowSize?: boolean } = {},
 ): Promise<ExtensionContext> {
-	const { userDataDir, waitForLiveness = true } = opts
+	const { userDataDir, waitForLiveness = true, fixedWindowSize } = opts
 	const extensionPath = inject("extensionPath")
 	// Read before Chrome writes the profile: `onInstalled` fires with reason "install" — the only
 	// reason that opens the first-run tab — exactly when the profile has never held the extension.
@@ -78,7 +80,7 @@ export async function launchExtension(
 
 	// HEADLESS=0 flips to windowed mode for local debugging.
 	const headless: boolean = process.env.HEADLESS !== "0"
-	const { browser, close } = await launchBrowser({ extensionPath, userDataDir, headless })
+	const { browser, close } = await launchBrowser({ extensionPath, userDataDir, headless, fixedWindowSize })
 
 	try {
 		const extensionId = await settleLaunchedExtension(browser, {
@@ -112,7 +114,7 @@ async function settleLaunchedExtension(
 	for (let attempt = 1; ; attempt++) {
 		let candidate: Page | undefined
 		try {
-			candidate = await openScratchPage(browser, extensionId, { freshProfile })
+			candidate = await openScratchPage(browser, extensionId)
 			patchPagePolling(candidate)
 			blankPage = candidate
 			break
@@ -288,9 +290,8 @@ export async function registerProfile(ctx: ExtensionContext): Promise<void> {
 		timeout: 30_000,
 	})
 
-	// Profile name is required at submit time (F1: pre-create explicit
-	// naming). Without typing, validateName() short-circuits the handler.
-	await replaceInputValue(page, '[data-testid="register-name-input"]', "Test Profile")
+	// A fresh install's first profile has no name field; it is created as "Main".
+	await expectNoNameField(page, "register-page", "register-name-input")
 
 	await page.waitForSelector('input[placeholder="Strong password"]', {
 		visible: true,
@@ -313,7 +314,7 @@ export async function registerProfile(ctx: ExtensionContext): Promise<void> {
  *   1) Open the playground (?test=1 disables HMR + persistence)
  *   2) Click `pg-btn-connect` — fires `WalletManager.getAvailableWallets`
  *   3) Approve at `/windows/discover` (testid `discover-allow-btn`)
- *   4) After ECDH key exchange, approve at `/windows/verify`
+ *   4) After ECDH key exchange, approve the emoji check the same window shows
  *   5) Wait for the playground status pill to flip to `connected`
  *
  * Returns the dApp Page so the caller can keep driving it; the caller is
@@ -324,7 +325,7 @@ export async function registerProfile(ctx: ExtensionContext): Promise<void> {
  */
 export async function connectPlayground(ctx: ExtensionContext): Promise<Page> {
 	const { openPlayground } = await import("./playground")
-	const { waitForPopup, approveDiscover, approveVerify } = await import("./popups")
+	const { waitForPopup, approveConnect, approveVerify } = await import("./popups")
 
 	// Internal phase-tag so the outer `[dappConnectedExtensionPerTest:connectPlayground]`
 	// error tells us WHICH step inside this function fails. Without this we
@@ -352,16 +353,7 @@ export async function connectPlayground(ctx: ExtensionContext): Promise<Page> {
 	await step("clickConnect", () => clickByTestId(dappPage, "pg-btn-connect"))
 
 	const discoverPage = await step("awaitDiscoverPopup", () => discoverP)
-	// Arm the verify popup wait BEFORE approveDiscover triggers the SW to
-	// create the verify window. Codex audit caught: approveDiscover only
-	// clicks (popups.ts:126), doesn't wait for close. If verify opens
-	// faster than the next waitForPopup, the snapshot at popups.ts:32
-	// treats the already-existing target as preExisting and ignores it —
-	// the test then hangs for 30s waiting for a NEW verify target that
-	// never appears. Race confirmed deterministic on shard 5.
-	const verifyP = waitForPopup(ctx, "verify", { timeout: 30_000 })
-	await step("approveDiscover", () => approveDiscover(discoverPage))
-	const verifyPage = await step("awaitVerifyPopup", () => verifyP)
+	const verifyPage = await step("approveConnect", () => approveConnect(ctx, discoverPage))
 	await step("approveVerify", () => approveVerify(verifyPage))
 
 	await step("waitForConnectedStatus", () =>
@@ -936,37 +928,9 @@ export const test = base.extend<{
 			})
 			await waitForHash(page, "#/popup/import", 5_000)
 
-			await page.waitForSelector('[data-testid="import-option-seed"]', { visible: true, timeout: 30_000 })
-			await clickByTestId(page, "import-option-seed")
-
-			await page.waitForSelector('[data-testid="import-seed-input"] input', { visible: true, timeout: 30_000 })
-			await page.evaluate(
-				({ seed, pwd }: { seed: string; pwd: string }) => {
-					const setVal = (sel: string, v: string) => {
-						const input = document.querySelector<HTMLInputElement>(sel)
-						if (!input) throw new Error(`input not found: ${sel}`)
-						const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set
-						setter?.call(input, v)
-						input.dispatchEvent(new Event("input", { bubbles: true }))
-					}
-					// F2: profile name is required at submit time.
-					setVal('[data-testid="import-name-input"] input', "Imported Profile")
-					setVal('[data-testid="import-seed-input"] input', seed)
-					setVal('[data-testid="import-password-input"] input', pwd)
-					setVal('[data-testid="import-password-confirm-input"] input', pwd)
-				},
-				{ seed: prefunded.words.join(" "), pwd: TEST_PASSWORD },
-			)
-
-			await page.waitForFunction(
-				() => {
-					const btn = document.querySelector<HTMLButtonElement>('[data-testid="import-seed-submit-btn"]')
-					return btn && !btn.disabled
-				},
-				{ timeout: 5_000, polling: 100 },
-			)
-			await clickByTestId(page, "import-seed-submit-btn")
-			await waitForHash(page, "#/popup/general", 30_000)
+			// Loaded at call time: the import drivers import this module.
+			const { importSeed, POPUP_IMPORT_SHELL } = await import("../helpers/import-drivers")
+			await importSeed(page, prefunded.words.join(" "), TEST_PASSWORD, POPUP_IMPORT_SHELL)
 
 			// Switch to Local Network — popup auto-creates a Local-chain account
 			// with the SAME address the script pre-funded.
@@ -1309,6 +1273,38 @@ export async function waitForHash(page: Page, expectedHash: string, timeout = 15
 	await page.waitForFunction((hash: string) => window.location.hash === hash, { timeout, polling: 200 }, expectedHash)
 }
 
+/** Waits for a profile-creating page, found by its root testid, to settle whether it shows the
+ *  Profile-name field: `hidden` for a first profile, `shown` for a later one. */
+export async function waitForNameField(page: Page, pageTestId: string, timeout = 15_000): Promise<"hidden" | "shown"> {
+	const handle = await withTimeoutMessage(
+		page.waitForFunction(
+			(id: string) => {
+				const state = document.querySelector(`[data-testid="${id}"]`)?.getAttribute("data-name-field")
+				return state === "hidden" || state === "shown" ? state : null
+			},
+			{ timeout, polling: 100 },
+			pageTestId,
+		),
+		`${pageTestId} never settled its name field`,
+	)
+	return (await handle.jsonValue()) as "hidden" | "shown"
+}
+
+/** A first profile: the page settles `hidden` and renders no name input. */
+export async function expectNoNameField(page: Page, pageTestId: string, nameInputTestId: string): Promise<void> {
+	const state = await waitForNameField(page, pageTestId)
+	if (state !== "hidden") throw new Error(`${pageTestId}: a first profile must show no name field, got "${state}"`)
+	if (await page.$(`[data-testid="${nameInputTestId}"]`)) throw new Error(`${pageTestId}: ${nameInputTestId} rendered on a first profile`)
+}
+
+/** A later profile: the page settles `shown` with the name input prefilled `expected`. */
+export async function expectNameFieldPrefill(page: Page, pageTestId: string, nameInputTestId: string, expected: string): Promise<void> {
+	const state = await waitForNameField(page, pageTestId)
+	if (state !== "shown") throw new Error(`${pageTestId}: a later profile must show the name field, got "${state}"`)
+	const value = await page.$eval(`[data-testid="${nameInputTestId}"] input`, (el) => (el as HTMLInputElement).value)
+	if (value !== expected) throw new Error(`${nameInputTestId}: expected the prefill "${expected}", got "${value}"`)
+}
+
 /** Type into an input found by placeholder.
  *
  *  History: previously used `elementHandle.click({ clickCount: 3 })` + `.type()`,
@@ -1464,7 +1460,7 @@ export async function clickByTestId(page: Page, testId: string, timeout = 10_000
 export const pickFileByTestId = (page: Page, testId: string, filePath: string): Promise<void> =>
 	pickFile(page, () => clickByTestId(page, testId), filePath)
 
-function isTargetDetachError(err: unknown): boolean {
+export function isTargetDetachError(err: unknown): boolean {
 	const messages: string[] = []
 	let current: unknown = err
 	let depth = 0

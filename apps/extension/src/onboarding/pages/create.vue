@@ -4,6 +4,8 @@
 
 <script setup lang="ts">
 /** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
+import { refuseRepeatEnter } from "@/composables/usePopupEntity"
 import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
 import { useProfileCreateFlow } from "@/composables/useProfileCreateFlow"
 
@@ -27,6 +29,7 @@ const { bootstrapActiveProfile } = useProfileBootstrap()
 const maxPasswordLength = 128
 
 const {
+	nameFieldState,
 	profileName,
 	nameError,
 	shakeName,
@@ -69,11 +72,11 @@ const {
 
 const submitLabel = computed(() => {
 	if (isCreating.value) return "Creating..."
-	return authMethod.value === "passkey" ? "Create with passkey" : "Create profile"
+	return authMethod.value === "passkey" ? "Create with passkey" : "Create wallet"
 })
 
 // Roving tablist for the method toggle: only the active tab is in the Tab order,
-// so Tab flows name → method (ONE stop) → password; ←/→ switch the method.
+// so the method is ONE stop before the password; ←/→ switch the method.
 const passwordTabRef = ref<HTMLButtonElement>()
 const passkeyTabRef = ref<HTMLButtonElement>()
 const onMethodKeydown = (e: KeyboardEvent) => {
@@ -83,19 +86,8 @@ const onMethodKeydown = (e: KeyboardEvent) => {
 	nextTick(() => (authMethod.value === "password" ? passwordTabRef.value : passkeyTabRef.value)?.focus())
 }
 
-// Onboarding keeps its own document-level Enter handler alongside the
-// `<form @submit.prevent>`; both are latch-protected by `isCreating`.
-function onKeydown(e: KeyboardEvent) {
-	if (e.key === "Enter" && !isCreating.value) handleSubmit()
-}
-
-onMounted(() => {
-	document.addEventListener("keydown", onKeydown)
-})
-
 onBeforeUnmount(() => {
 	dispose()
-	document.removeEventListener("keydown", onKeydown)
 	// Defense-in-depth: zero out secret material on unmount.
 	password.value = ""
 	confirm.value = ""
@@ -103,16 +95,17 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<OnboardingPage>
+	<OnboardingPage data-testid="onboarding-create-page" :data-name-field="nameFieldState">
 		<OnboardingBackLink testid="onboarding-create-back" />
 		<StepIndicator :current="2" />
 		<header :class="$style.hero">
-			<BrutalistTitle main="Create" sub="Profile" />
+			<BrutalistTitle main="Create" sub="Wallet" />
 			<div :class="$style.hero_bar" />
 		</header>
 
-		<form :class="$style.form" @submit.prevent="handleSubmit">
+		<form :class="$style.form" @submit.prevent="handleSubmit" @keydown.enter="refuseRepeatEnter">
 			<OnboardingProfileNameField
+				v-if="nameFieldState === 'shown'"
 				ref="nameInputRef"
 				v-model="profileName"
 				:error="nameError"
@@ -121,8 +114,8 @@ onBeforeUnmount(() => {
 			/>
 
 			<Flex direction="column" gap="12">
-				<Text size="11" weight="700" color="secondary" :class="$style.section_label">Authentication method</Text>
-				<Flex :class="$style.tabs" role="tablist" aria-label="Authentication method" @keydown="onMethodKeydown">
+				<Text size="11" weight="700" color="secondary" :class="$style.section_label">How you'll unlock Nulo</Text>
+				<Flex :class="$style.tabs" role="tablist" aria-label="How you'll unlock Nulo" @keydown="onMethodKeydown">
 					<button
 						ref="passwordTabRef"
 						type="button"
@@ -159,6 +152,7 @@ onBeforeUnmount(() => {
 						placeholder="Strong password"
 						autocomplete="new-password"
 						:maxLength="maxPasswordLength"
+						autofocus
 						data-testid="onboarding-password-input"
 					/>
 				</Flex>
@@ -171,6 +165,7 @@ onBeforeUnmount(() => {
 						autocomplete="new-password"
 						:maxLength="maxPasswordLength"
 						data-testid="onboarding-password-confirm"
+						inputTestid="onboarding-password-confirm-input"
 					/>
 				</Flex>
 				<Text v-if="passwordStrengthHint" size="12" color="secondary" height="150">
@@ -186,6 +181,7 @@ onBeforeUnmount(() => {
 			</div>
 
 			<Button
+				v-snack-footer
 				variant="cta"
 				size="large"
 				:disabled="!isAllowedToContinue || isCreating"

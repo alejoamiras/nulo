@@ -1,0 +1,4 @@
+# Owner-reviewed triage for the workspace commits (design package, codemod, dependencies),
+# audited on top of audit-allowlist.txt. Same key format.
+
+binary:c1d5db00f100  # MaterialSymbolsOutlined.woff2: Material Symbols (sha256 d7706dbc…), pinned by the third-party-notices font policy

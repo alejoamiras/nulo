@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
+import { createMemoryHistory, createRouter } from "vue-router"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { CHAIN_IDS } from "@/utils/chain-ids"
 import type { PriceState } from "@/wallet/services/price/spec"
@@ -28,10 +29,12 @@ vi.mock("@/wallet/services/price/client", () => ({
 const STUBS = {
 	Flex: { template: "<div><slot /></div>" },
 	Spinner: { template: '<i data-testid="stub-spinner" />' },
-	RouterLink: { template: '<a :href="to"><slot /></a>', props: ["to"] },
 	Icon: { template: '<span data-testid="stub-icon" :data-name="name" />', props: ["name", "size", "color"] },
 	Skeleton: { template: '<i data-testid="stub-skeleton" />', props: ["width", "height"] },
 }
+
+const makeRouter = () =>
+	createRouter({ history: createMemoryHistory(), routes: [{ path: "/:pathMatch(.*)*", component: { template: "<div />" } }] })
 
 const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
 
@@ -58,7 +61,7 @@ const factory = (overrides: Record<string, unknown> = {}, tokenOverrides: Record
 	}
 	return mount(TokenCard, {
 		props: { tokenBalance } as never,
-		global: { stubs: STUBS },
+		global: { stubs: STUBS, plugins: [makeRouter()] },
 	})
 }
 
@@ -163,7 +166,7 @@ describe("TokenCard", () => {
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 0.999857, fetchedAt: Date.now(), providerUpdatedAt: null } }
 		const w = factory(
 			{ updatedAt: 1, privateBalance: (1_000n * 10n ** 6n).toString(), publicBalance: (250n * 10n ** 6n).toString() },
-			{ chainId: CHAIN_IDS.MAINNET, contract: CUSD, decimals: 6, symbol: "cUSD" },
+			{ chainId: CHAIN_IDS.TESTNET, contract: CUSD, decimals: 6, symbol: "cUSD" },
 		)
 		await flushPromises()
 		const fiat = w.find('[data-testid="token-fiat"]')
@@ -183,10 +186,52 @@ describe("TokenCard", () => {
 		mockQuotes = {}
 		const w = factory(
 			{ updatedAt: 1, publicBalance: (250n * 10n ** 6n).toString() },
-			{ chainId: CHAIN_IDS.MAINNET, contract: CUSD, decimals: 6 },
+			{ chainId: CHAIN_IDS.TESTNET, contract: CUSD, decimals: 6 },
 		)
 		await flushPromises()
 		expect(w.find('[data-testid="token-fiat"]').exists()).toBe(false)
+	})
+})
+
+describe("TokenCard — the row is a link", () => {
+	async function mountLinked() {
+		const router = makeRouter()
+		await router.push("/popup/general")
+		const push = vi.spyOn(router, "push")
+		const w = mount(TokenCard, {
+			props: {
+				tokenBalance: { id: 42, token: tokenInfo, account: "0xacct", publicBalance: "0", privateBalance: "0", updatedAt: 1 },
+			} as never,
+			global: { stubs: STUBS, plugins: [router] },
+			attachTo: document.body,
+		})
+		return { w, router, push, row: w.find('[data-testid="tokens-card"]') }
+	}
+
+	test("an anchor to the token page, with no tabindex", async () => {
+		const { w, row } = await mountLinked()
+		expect(row.element.tagName).toBe("A")
+		expect(row.attributes("href")).toBe("/popup/tokens/1")
+		expect(row.attributes("tabindex")).toBeUndefined()
+		w.unmount()
+	})
+
+	test("Space navigates once and prevents the scroll; Shift+Space not at all", async () => {
+		const { w, router, push, row } = await mountLinked()
+		const plain = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true })
+		row.element.dispatchEvent(plain)
+		await flushPromises()
+		expect(plain.defaultPrevented).toBe(true)
+		expect(push).toHaveBeenCalledTimes(1)
+		expect(router.currentRoute.value.path).toBe("/popup/tokens/1")
+
+		push.mockClear()
+		const shifted = new KeyboardEvent("keydown", { key: " ", shiftKey: true, bubbles: true, cancelable: true })
+		row.element.dispatchEvent(shifted)
+		await flushPromises()
+		expect(shifted.defaultPrevented).toBe(false)
+		expect(push).not.toHaveBeenCalled()
+		w.unmount()
 	})
 })
 
@@ -203,7 +248,7 @@ describe("TokenCard — hostile rows", () => {
 
 	test("an absurd decimals value is treated the same way (no exponent is ever computed)", async () => {
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
-		const w = factory({ updatedAt: 1, publicBalance: "1" }, { chainId: CHAIN_IDS.MAINNET, contract: CUSD, decimals: 500 })
+		const w = factory({ updatedAt: 1, publicBalance: "1" }, { chainId: CHAIN_IDS.TESTNET, contract: CUSD, decimals: 500 })
 		await flushPromises()
 		expect(w.find('[data-malformed="true"]').text()).toBe("—")
 		expect(w.find('[data-testid="token-fiat"]').exists()).toBe(false)
@@ -230,7 +275,7 @@ describe("TokenCard — R5 layout (subtitle left, lock/globe split right)", () =
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 0.999857, fetchedAt: Date.now(), providerUpdatedAt: null } }
 		const w = factory(
 			{ updatedAt: 1, privateBalance: (1_000n * 10n ** 6n).toString(), publicBalance: (250n * 10n ** 6n).toString() },
-			{ chainId: CHAIN_IDS.MAINNET, contract: CUSD, decimals: 6, symbol: "cUSD" },
+			{ chainId: CHAIN_IDS.TESTNET, contract: CUSD, decimals: 6, symbol: "cUSD" },
 		)
 		await flushPromises()
 		expect(w.find('[data-testid="token-fiat"]').exists()).toBe(true)
@@ -243,6 +288,21 @@ describe("TokenCard — R5 layout (subtitle left, lock/globe split right)", () =
 		await flushPromises()
 		expect(w.text()).not.toContain("PRIVATE / PUBLIC")
 		expect(w.text()).toContain("Test Token")
+	})
+
+	test("a holding too long for the row keeps every whole digit: the total at 10 characters, each side at 6", async () => {
+		mockQuotes = {}
+		const w = factory({
+			updatedAt: 1,
+			privateBalance: (12_345_678_912n * 10n ** 16n).toString(),
+			publicBalance: (12_345n * 10n ** 17n).toString(),
+		})
+		await flushPromises()
+		// 123,458,023.62 in total, 123,456,789.12 private, 1,234.5 public.
+		expect(w.text()).toContain("123.45M")
+		expect(w.text()).toContain("123.4M")
+		expect(w.text()).toContain("1,234")
+		expect(w.text()).not.toContain("1,234.")
 	})
 
 	test("the split line renders a bone lock (private) and a grey globe (public) with both amounts", async () => {

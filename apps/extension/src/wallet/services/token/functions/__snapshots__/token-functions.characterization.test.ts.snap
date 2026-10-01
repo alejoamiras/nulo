@@ -28,13 +28,11 @@ exports[`token-functions characterization — real Token artifact > balanceOfPri
           "visibility": "private",
         },
       ],
-      "returnTypes": [
-        {
-          "kind": "integer",
-          "sign": "unsigned",
-          "width": 128,
-        },
-      ],
+      "returnType": {
+        "kind": "integer",
+        "sign": "unsigned",
+        "width": 128,
+      },
     },
     "impl": 0,
     "isStatic": false,
@@ -74,13 +72,11 @@ exports[`token-functions characterization — real Token artifact > balanceOfPub
           "visibility": "private",
         },
       ],
-      "returnTypes": [
-        {
-          "kind": "integer",
-          "sign": "unsigned",
-          "width": 128,
-        },
-      ],
+      "returnType": {
+        "kind": "integer",
+        "sign": "unsigned",
+        "width": 128,
+      },
     },
     "impl": 0,
     "isStatic": true,
@@ -103,13 +99,11 @@ exports[`token-functions characterization — real Token artifact > getDecimals:
       "isStatic": true,
       "name": "private_get_decimals",
       "parameters": [],
-      "returnTypes": [
-        {
-          "kind": "integer",
-          "sign": "unsigned",
-          "width": 8,
-        },
-      ],
+      "returnType": {
+        "kind": "integer",
+        "sign": "unsigned",
+        "width": 8,
+      },
     },
     "impl": 1,
     "isStatic": true,
@@ -125,13 +119,11 @@ exports[`token-functions characterization — real Token artifact > getDecimals:
       "isStatic": true,
       "name": "public_get_decimals",
       "parameters": [],
-      "returnTypes": [
-        {
-          "kind": "integer",
-          "sign": "unsigned",
-          "width": 8,
-        },
-      ],
+      "returnType": {
+        "kind": "integer",
+        "sign": "unsigned",
+        "width": 8,
+      },
     },
     "impl": 0,
     "isStatic": true,
@@ -154,20 +146,18 @@ exports[`token-functions characterization — real Token artifact > getName: can
       "isStatic": true,
       "name": "private_get_name",
       "parameters": [],
-      "returnTypes": [
-        {
-          "fields": [
-            {
-              "name": "value",
-              "type": {
-                "kind": "field",
-              },
+      "returnType": {
+        "fields": [
+          {
+            "name": "value",
+            "type": {
+              "kind": "field",
             },
-          ],
-          "kind": "struct",
-          "path": "compressed_string::field_compressed_string::FieldCompressedString",
-        },
-      ],
+          },
+        ],
+        "kind": "struct",
+        "path": "compressed_string::field_compressed_string::FieldCompressedString",
+      },
     },
     "impl": 1,
     "isStatic": true,
@@ -183,20 +173,18 @@ exports[`token-functions characterization — real Token artifact > getName: can
       "isStatic": true,
       "name": "public_get_name",
       "parameters": [],
-      "returnTypes": [
-        {
-          "fields": [
-            {
-              "name": "value",
-              "type": {
-                "kind": "field",
-              },
+      "returnType": {
+        "fields": [
+          {
+            "name": "value",
+            "type": {
+              "kind": "field",
             },
-          ],
-          "kind": "struct",
-          "path": "compressed_string::field_compressed_string::FieldCompressedString",
-        },
-      ],
+          },
+        ],
+        "kind": "struct",
+        "path": "compressed_string::field_compressed_string::FieldCompressedString",
+      },
     },
     "impl": 0,
     "isStatic": true,
@@ -212,20 +200,18 @@ exports[`token-functions characterization — real Token artifact > getName: can
       "isStatic": true,
       "name": "public_get_symbol",
       "parameters": [],
-      "returnTypes": [
-        {
-          "fields": [
-            {
-              "name": "value",
-              "type": {
-                "kind": "field",
-              },
+      "returnType": {
+        "fields": [
+          {
+            "name": "value",
+            "type": {
+              "kind": "field",
             },
-          ],
-          "kind": "struct",
-          "path": "compressed_string::field_compressed_string::FieldCompressedString",
-        },
-      ],
+          },
+        ],
+        "kind": "struct",
+        "path": "compressed_string::field_compressed_string::FieldCompressedString",
+      },
     },
     "impl": 0,
     "isStatic": true,
@@ -241,20 +227,18 @@ exports[`token-functions characterization — real Token artifact > getName: can
       "isStatic": true,
       "name": "private_get_symbol",
       "parameters": [],
-      "returnTypes": [
-        {
-          "fields": [
-            {
-              "name": "value",
-              "type": {
-                "kind": "field",
-              },
+      "returnType": {
+        "fields": [
+          {
+            "name": "value",
+            "type": {
+              "kind": "field",
             },
-          ],
-          "kind": "struct",
-          "path": "compressed_string::field_compressed_string::FieldCompressedString",
-        },
-      ],
+          },
+        ],
+        "kind": "struct",
+        "path": "compressed_string::field_compressed_string::FieldCompressedString",
+      },
     },
     "impl": 1,
     "isStatic": true,
@@ -277,20 +261,18 @@ exports[`token-functions characterization — real Token artifact > getSymbol: c
       "isStatic": true,
       "name": "private_get_symbol",
       "parameters": [],
-      "returnTypes": [
-        {
-          "fields": [
-            {
-              "name": "value",
-              "type": {
-                "kind": "field",
-              },
+      "returnType": {
+        "fields": [
+          {
+            "name": "value",
+            "type": {
+              "kind": "field",
             },
-          ],
-          "kind": "struct",
-          "path": "compressed_string::field_compressed_string::FieldCompressedString",
-        },
-      ],
+          },
+        ],
+        "kind": "struct",
+        "path": "compressed_string::field_compressed_string::FieldCompressedString",
+      },
     },
     "impl": 1,
     "isStatic": true,
@@ -306,20 +288,18 @@ exports[`token-functions characterization — real Token artifact > getSymbol: c
       "isStatic": true,
       "name": "public_get_symbol",
       "parameters": [],
-      "returnTypes": [
-        {
-          "fields": [
-            {
-              "name": "value",
-              "type": {
-                "kind": "field",
-              },
+      "returnType": {
+        "fields": [
+          {
+            "name": "value",
+            "type": {
+              "kind": "field",
             },
-          ],
-          "kind": "struct",
-          "path": "compressed_string::field_compressed_string::FieldCompressedString",
-        },
-      ],
+          },
+        ],
+        "kind": "struct",
+        "path": "compressed_string::field_compressed_string::FieldCompressedString",
+      },
     },
     "impl": 0,
     "isStatic": true,
@@ -335,20 +315,18 @@ exports[`token-functions characterization — real Token artifact > getSymbol: c
       "isStatic": true,
       "name": "public_get_name",
       "parameters": [],
-      "returnTypes": [
-        {
-          "fields": [
-            {
-              "name": "value",
-              "type": {
-                "kind": "field",
-              },
+      "returnType": {
+        "fields": [
+          {
+            "name": "value",
+            "type": {
+              "kind": "field",
             },
-          ],
-          "kind": "struct",
-          "path": "compressed_string::field_compressed_string::FieldCompressedString",
-        },
-      ],
+          },
+        ],
+        "kind": "struct",
+        "path": "compressed_string::field_compressed_string::FieldCompressedString",
+      },
     },
     "impl": 0,
     "isStatic": true,
@@ -364,20 +342,18 @@ exports[`token-functions characterization — real Token artifact > getSymbol: c
       "isStatic": true,
       "name": "private_get_name",
       "parameters": [],
-      "returnTypes": [
-        {
-          "fields": [
-            {
-              "name": "value",
-              "type": {
-                "kind": "field",
-              },
+      "returnType": {
+        "fields": [
+          {
+            "name": "value",
+            "type": {
+              "kind": "field",
             },
-          ],
-          "kind": "struct",
-          "path": "compressed_string::field_compressed_string::FieldCompressedString",
-        },
-      ],
+          },
+        ],
+        "kind": "struct",
+        "path": "compressed_string::field_compressed_string::FieldCompressedString",
+      },
     },
     "impl": 1,
     "isStatic": true,
@@ -426,7 +402,6 @@ exports[`token-functions characterization — real Token artifact > transferPriv
           "visibility": "private",
         },
       ],
-      "returnTypes": [],
     },
     "impl": 0,
     "isStatic": false,
@@ -491,7 +466,6 @@ exports[`token-functions characterization — real Token artifact > transferPriv
           "visibility": "private",
         },
       ],
-      "returnTypes": [],
     },
     "impl": 1,
     "isStatic": false,
@@ -533,7 +507,6 @@ exports[`token-functions characterization — real Token artifact > transferPriv
           "visibility": "private",
         },
       ],
-      "returnTypes": [],
     },
     "impl": 0,
     "isStatic": false,
@@ -598,7 +571,6 @@ exports[`token-functions characterization — real Token artifact > transferPriv
           "visibility": "private",
         },
       ],
-      "returnTypes": [],
     },
     "impl": 1,
     "isStatic": false,
@@ -663,7 +635,6 @@ exports[`token-functions characterization — real Token artifact > transferPriv
           "visibility": "private",
         },
       ],
-      "returnTypes": [],
     },
     "impl": 1,
     "isStatic": false,
@@ -705,7 +676,6 @@ exports[`token-functions characterization — real Token artifact > transferPriv
           "visibility": "private",
         },
       ],
-      "returnTypes": [],
     },
     "impl": 0,
     "isStatic": false,
@@ -777,7 +747,6 @@ exports[`token-functions characterization — real Token artifact > transferPriv
           "visibility": "private",
         },
       ],
-      "returnTypes": [],
     },
     "impl": 0,
     "isStatic": false,
@@ -842,7 +811,6 @@ exports[`token-functions characterization — real Token artifact > transferPriv
           "visibility": "private",
         },
       ],
-      "returnTypes": [],
     },
     "impl": 0,
     "isStatic": false,
@@ -907,7 +875,6 @@ exports[`token-functions characterization — real Token artifact > transferPriv
           "visibility": "private",
         },
       ],
-      "returnTypes": [],
     },
     "impl": 0,
     "isStatic": false,
@@ -979,7 +946,6 @@ exports[`token-functions characterization — real Token artifact > transferPubl
           "visibility": "private",
         },
       ],
-      "returnTypes": [],
     },
     "impl": 0,
     "isStatic": false,
@@ -1028,7 +994,6 @@ exports[`token-functions characterization — real Token artifact > transferPubl
           "visibility": "private",
         },
       ],
-      "returnTypes": [],
     },
     "impl": 0,
     "isStatic": false,
@@ -1070,7 +1035,6 @@ exports[`token-functions characterization — real Token artifact > transferPubl
           "visibility": "private",
         },
       ],
-      "returnTypes": [],
     },
     "impl": 0,
     "isStatic": false,
@@ -1135,7 +1099,6 @@ exports[`token-functions characterization — real Token artifact > transferPubl
           "visibility": "private",
         },
       ],
-      "returnTypes": [],
     },
     "impl": 1,
     "isStatic": false,
@@ -1200,7 +1163,6 @@ exports[`token-functions characterization — real Token artifact > transferPubl
           "visibility": "private",
         },
       ],
-      "returnTypes": [],
     },
     "impl": 1,
     "isStatic": false,
@@ -1265,7 +1227,6 @@ exports[`token-functions characterization — real Token artifact > transferPubl
           "visibility": "private",
         },
       ],
-      "returnTypes": [],
     },
     "impl": 1,
     "isStatic": false,
@@ -1307,7 +1268,6 @@ exports[`token-functions characterization — real Token artifact > transferPubl
           "visibility": "private",
         },
       ],
-      "returnTypes": [],
     },
     "impl": 0,
     "isStatic": false,

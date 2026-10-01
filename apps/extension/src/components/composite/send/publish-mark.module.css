@@ -1,20 +1,6 @@
 /* One vocabulary for the strip, the review sheet and the fee-source tag. The element carrying a
-   visibility class sets the ink; the mark inside draws in currentColor. Shape and word carry the
-   meaning (hollow = hidden, filled = public); colour only reinforces. */
-
-.mark {
-	display: inline-block;
-	flex: none;
-
-	width: 7px;
-	height: 7px;
-
-	border: 1px solid currentColor;
-}
-
-.filled {
-	background: currentColor;
-}
+   visibility class sets the ink; the glyph inside (`publishGlyph`: padlock hidden, globe public,
+   none unknown) draws in currentColor. Glyph and word carry the meaning; colour only reinforces. */
 
 .hidden {
 	color: var(--txt-tertiary);

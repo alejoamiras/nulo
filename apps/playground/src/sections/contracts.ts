@@ -6,9 +6,9 @@
  * registerContract needs a real ContractInstance which the test driver passes
  * via the `pg-input-contractInstance` textarea (JSON-stringified instance).
  */
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import type { Wallet } from "@aztec/aztec.js/wallet"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import type { Wallet } from "@aztec-labs/aztec.js/wallet"
 import { getWallet } from "../lib/wallet"
 import { logCall } from "../lib/log"
 import { getInput, getState, setState } from "../state"

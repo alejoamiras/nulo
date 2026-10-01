@@ -15,15 +15,15 @@
  *       `implementations-plan/key-model-v2/reference/`).
  *
  * Any accidental drift in a refactor here, or a silent upstream change
- * in `@aztec/foundation` or `@aztec/stdlib`, fails one of these tests
+ * in `@aztec-labs/foundation` or `@aztec-labs/stdlib`, fails one of these tests
  * before it bricks every existing wallet on disk.
  *
- * On upgrading `@aztec/*` — the ritual
+ * On upgrading the Aztec line — the ritual
  * ------------------------------------
  * Some vectors are Aztec-stack sensitive: V3 (`Fr.fromBufferReduce`),
  * V7a (`deriveSigningKeyFromSeed` = sha512-to-grumpkin-scalar + the
- * NULO_SIGNING_ROOT_SEP domain separator). When you bump `@aztec/foundation`,
- * `@aztec/stdlib`, or `@aztec/accounts`:
+ * NULO_SIGNING_ROOT_SEP domain separator). When you bump `@aztec-labs/foundation`,
+ * `@aztec-labs/stdlib`, or `@aztec-labs/accounts`:
  *
  *   1. Run `bun run test`.
  *   2. If any vector in this file fails, **do not blindly regenerate**.
@@ -46,7 +46,7 @@
  *   4. Document the decision in the commit message.
  *
  * Aztec-independent vectors (V1, V2, V6, V8, V9, P1) survive any
- * `@aztec/*` bump — they exercise Web Crypto or constants only.
+ * Aztec bump — they exercise Web Crypto or constants only.
  *
  * Break-it-to-prove-it
  * --------------------
@@ -57,7 +57,7 @@
  * Deferred vectors
  * ----------------
  * V4 (poseidon2Hash account secret), V10 (passkey → address full chain),
- * and P2 (Barretenberg Poseidon2 cross-check) require `@aztec/bb.js`
+ * and P2 (Barretenberg Poseidon2 cross-check) require `@aztec-foundation/bb.js`
  * WASM poseidon2, which crashes in the vitest jsdom environment with
  * `BBApiException: std::bad_cast` on the WASM boundary. The downstream
  * chain V7a feeds (signingKey → privacy secret → NuloAccount address —
@@ -69,7 +69,7 @@
  */
 
 import { describe, expect, test } from "vitest"
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { deriveSigningKeyFromSeed } from "@nulo/wallet-crypto"
 import { EncryptionKey } from "@nulo/wallet-crypto"
 import { PasskeyCredential } from "@nulo/wallet-crypto"

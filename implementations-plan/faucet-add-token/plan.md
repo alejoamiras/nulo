@@ -1,153 +1,312 @@
-# Faucet "Add USDC / ETH to Wallet" — one-click token registration via wallet-sdk
+# Faucet "Add USDC / ETH to Wallet" — plan-v2 (consolidated)
+
+Earlier revisions: [plan.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/faucet-add-token/plan.md).
+
+Supersedes [`plan.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/faucet-add-token/plan.md). Incorporates [`audit-opus.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/faucet-add-token/audit-opus.md) + [`audit-codex.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/faucet-add-token/audit-codex.md) findings and the user's four answers on open questions:
+
+- **Resolve token name/symbol in popup** before Allow/Deny → IN this PR (was filed as follow-up; promoted to BLOCKER per Codex H5 + Opus H4).
+- **No auto-fire on drip** → unchanged.
+- **No upstream `wallet_watchAsset` push** → struck from follow-ups.
+- **`simulate_views` op-kind deprecation** → separate follow-up plan (`deprecate-simulate-views`); current PR only drops the dApp-facing surface.
 
 ## 1. Summary
 
-Add a one-click button on the faucet's `TokenCard` (both USDC and ETH) that, once the user is connected, calls a Nulo-custom `registerToken` RPC over the existing `@aztec/wallet-sdk` encrypted channel. The extension shows a confirmation popup, then adds the token to the user's wallet popup token list (per-account, per-chain), so the user immediately sees the dripped balance without manually pasting the contract address.
+A one-click "Add to Wallet" button on the faucet's USDC and ETH TokenCards that calls a Nulo-custom `registerToken` RPC over the existing `@aztec/wallet-sdk` encrypted channel. The extension shows a popup carrying the **resolved token name, symbol, decimals, and contract address** (pre-fetched via PXE before the popup renders), gated behind the existing `accounts` capability. On Allow, the token is added to the **profile + chain** watchlist; the wallet's TokenBalanceService fans out per-account balance projections and the wallet popup's token list renders it for the current account.
 
-The wallet-bridge already has a `register_token` operation wired end-to-end (dispatcher → execution service → token service → popup confirmation card). The only thing missing is the dApp-side surface: the canonical `@aztec/wallet-sdk` `Wallet` proxy refuses unknown methods, so we have to re-introduce a minimal runtime extension of `WalletSchema` on **both** sides (faucet + extension). This was previously done via a single `schema_patch.ts` that was dropped in the "canonical refactor" — the current `register_token` plumbing in the dispatcher is dead code today.
-
-This PR resurrects only the `registerToken` surface, and **removes** the still-dead `getCompleteAddress` and `simulateViews` *dApp-facing* surfaces while keeping their internal operation uses (the balance projector still emits internal `simulate_views` operations — those stay).
-
-## 2. State of the world (recon)
+## 2. State of the world (revised recon)
 
 | Layer | File | Status |
 |---|---|---|
-| dApp Wallet proxy (`@aztec/wallet-sdk`) | upstream | `Proxy` validates each method against `WalletSchema` — unknown method names fall through and error |
-| Extension `BackgroundConnectionHandler` | upstream | Also validates `message.type` against `WalletSchema` and rejects unknown types |
-| `WalletSchema` mutability | upstream (`yarn-project/aztec.js/src/wallet/wallet.ts`) | Plain object, not frozen — third parties can extend at runtime with Zod `args(...).returns(...)` entries |
-| Dispatcher `registerToken` mapping | `packages/wallet-bridge/src/dispatcher.ts:165, 193, 723-767` | Wired. Requires the schema patch to be reachable. |
-| Capability gate (`registerToken` → `accounts`) | `packages/wallet-bridge/src/capability-map.ts:21` | Wired. `accounts` already mentions "register tokens" in the popup copy (`extension/src/wallet/services/dapp-session/capability-meta.ts:38`). |
-| Confirmation popup card for `register_token` | `packages/extension/src/popup/windows/execute/OperationCard.vue:193`, `windows/execute/index.vue:160` | Wired. AccessLevel = `AppState` (popup shown per call). |
-| Extension handler `executeRegisterToken` | `packages/extension/src/wallet/services/execution/service.ts:895, 1038-1059` | Wired. Parses token interface via PXE, calls `tokenService.addToken` with `opContext.origin: "dapp"` + `dappOrigin: <faucet origin>`. Idempotent — silently skips if the token is already registered. |
-| Faucet wallet integration | `packages/faucet/src/composables/useWalletConnection.ts:1-241`, `src/lib/capabilities.ts` | Full wallet-sdk flow already present. `accounts` capability is requested with `canGet: true, canCreateAuthWit: false`. No `registerToken` call site. |
-| Playground caller | `packages/playground/src/sections/contracts.ts:3` | Comment: "registerToken (Nulo-custom) was dropped in the canonical refactor." No button. |
+| dApp `Wallet` proxy | upstream `@aztec/wallet-sdk` | `ExtensionWallet` is a Proxy that does `schemaHasMethod(WalletSchema, prop)`; unknown methods error. |
+| Extension `BackgroundConnectionHandler` | upstream | **Does NOT validate against `WalletSchema`** (corrects v1 plan §2). Just decrypts + fires `onWalletMessage`. The extension schema patch is still needed for SDK proxy parity, NOT for routing. |
+| `WalletSchema` mutability | upstream | Plain mutable object; Zod entries can be added at runtime. |
+| `register_token` op kind | `packages/wallet-bridge/src/operation.ts:61`, `extension/src/wallet/services/execution/service.ts:895, 1038-1059` | Wired but unreachable on the dApp wire (schema not patched). Internal callers: none. |
+| **Popup gate for `register_token`** | `dispatcher.ts:243-252` + `dapp-interaction/service.ts:345-364` | **FICTION as v1 plan asserted.** Dispatcher routes non-`sendTx` ops straight to `executionService.executeOperations()`, bypassing the popup. Even if rerouted, `accessLevel(AppState=1) >= confirmationLevel(Transactions=5)` is false. **Must fix.** |
+| Account scoping | `dispatcher.ts:658-660, 764-767, 833-847` + `token/service.ts:149-159, 474-476` + `token-balance/service.ts:170-175` + `TokensView.vue:223-227` | The dApp-supplied account is IGNORED by the dispatcher (uses the first session-authorized account). Storage dedupe is `(profileId, chainId, contract)` — profile+chain, not per-account. `onTokenAdded` fans out a balance projection per account. UI filters by current account at render. **The v1 "per-account" copy was wrong.** |
+| `TokenImportRow` durability | `TokenImportRow.vue:4-11`, `TokensView.vue:37-40, 51-62` | Renders only in-flight or recently failed imports — disappears on success. The "Requested by <origin>" audit trail is NOT durable post-success (v1 plan §8 overstated this). |
+| Faucet vite dev server | `packages/faucet/vite.config.ts:12-18` | Hard-pinned to `5176` with `strictPort: true`. Not parallel-safe. |
+| Network e2e suite root | `packages/extension/vitest.e2e.network.config.ts:10-13` | Only includes `tests/e2e/network/**/*.test.ts`. v1 plan placed the new test at `tests/e2e/faucet-add-token.test.ts` — wrong path. |
+| Faucet's own e2e | `packages/faucet/tests/e2e/` | jsdom mock-based, not browser. Not reusable for the extension's network suite. |
 
-**Implication.** The `registerToken` machinery is intact on the extension side, but **the current code path is unreachable** because the `WalletSchema` validation rejects the method on both ends. Resurrecting it requires applying a small Zod schema patch on both ends *before* the wallet-sdk proxy or `BackgroundConnectionHandler` reads `WalletSchema`.
+## 3. Locked-in decisions (from clarifying)
 
-## 3. Architecture decisions (locked in)
-
-| # | Decision | Rationale |
+| # | Decision | Source |
 |---|---|---|
-| D1 | **Inline schema patch in both** (faucet + extension), no shared `@nulo/wallet-bridge` export, no new published package | User preference. The patch is a single Zod entry — drift surface is minimal and easy to pin with a contract test. Avoids exposing wallet-bridge to dApp consumers (it currently imports `wallet-core` + `extension-messaging` — keeping its consumer surface to the extension is a clean boundary). |
-| D2 | **Patch scope: only `registerToken`** | Smallest blast radius. `getCompleteAddress` and `simulateViews` *dApp-facing surfaces* are dead today and stay dead (deleted in this PR — see §6). Internal operation uses remain. |
-| D3 | **Schema patch is applied via top-of-module side-effect imports** on each side. Extension: `import "./nulo-schema-patch"` at the top of `extension/src/wallet/services/wallet-sdk/background.ts`. Faucet: `import "@/lib/nulo-schema-patch"` at the top of `faucet/src/composables/useWalletConnection.ts`. | Deterministic. Module-load order guarantees the patch is applied before any `WalletManager.configure` / `BackgroundConnectionHandler` construction reads `WalletSchema`. No runtime branching, no lazy paths. |
-| D4 | **Both USDC and ETH** get the button; **always visible** once connected; **per-token** click | Symmetric UX, matches the existing dual-token TokenCard layout. The extension's `tokenService.addToken` is idempotent (silently skips if the contract is already registered for this profile/chain). |
-| D5 | **Keep the AccessLevel.AppState popup confirmation** in the extension | Defense against silent token-list pollution and phishing tokens. Matches MetaMask's `wallet_watchAsset` UX. Cost is one extra click per token add — acceptable. |
-| D6 | **Add e2e network test** + **reinstate playground button** | Per-user-ask. E2E goes in the network suite (`e2e:agent`). Playground button reuses the patched schema. |
+| D1 | Inline schema patches in **three places** (extension, faucet, playground), no shared `@nulo/wallet-bridge` export, no new published package. | User clarifying. |
+| D2 | Patch scope: **only `registerToken`**. `getCompleteAddress` + `simulateViews` dApp-facing surfaces dropped. `simulate_views` *op kind* preserved (internal callers). `get_complete_address` *op kind* dropped entirely (no internal callers). | User clarifying + recon. |
+| D3 | Patch applied via **side-effect import** on each side, BEFORE `WalletManager.configure()` / `BackgroundConnectionHandler` construction reads `WalletSchema`. | User clarifying. |
+| D4 | Both USDC + ETH; button always visible once connected. | User clarifying. |
+| D5 | **Keep per-call popup confirmation** — must be rerouted properly (this is the v1 BLOCKER). | User clarifying. |
+| D6 | E2E test in `tests/e2e/network/` + playground button reinstated. | User clarifying. |
+| D7 (NEW) | **Resolve token name + symbol + decimals BEFORE Allow/Deny** — popup pre-fetches via PXE. | User clarifying #2. |
+| D8 (NEW) | **Reframe as "profile + chain"** (not per-account). Keep account arg in the API for journal/audit. | Codex B2. |
+| D9 (NEW) | `simulate_views` op-kind deprecation → **separate follow-up plan**. | User clarifying #4. |
 
-## 4. Component-level architecture
+## 4. Component-level architecture (revised)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ Faucet (packages/faucet, Vue + Vite SPA)                        │
+│ Faucet (Vue + Vite SPA, packages/faucet)                        │
 │                                                                  │
 │  TokenCard.vue                                                   │
-│    ├── existing: drip_to_public / drip_to_private buttons        │
-│    └── NEW: "Add USDC to Wallet" button                          │
-│          └─→ useFaucetAddToken composable                        │
-│                ├── reads wallet from useWalletConnection         │
-│                ├── calls (wallet as WalletWithRegisterToken)     │
-│                │       .registerToken(account, tokenAddress)     │
-│                └── normalises errors, exposes status to UI       │
+│    └── NEW "Add to wallet" button (USDC + ETH)                   │
+│        └─→ useFaucetAddToken composable                          │
+│             └── calls wallet.registerToken(account, tokenAddr)   │
+│                  via Wallet & { registerToken }                  │
+│                  cast (typed boundary)                           │
 │                                                                  │
-│  src/lib/nulo-schema-patch.ts          ← side-effect: extends    │
-│    └── patches WalletSchema.registerToken once                   │
-│        (imported once via useWalletConnection.ts top-of-file)    │
-└─────────────────────────────────────────────────────────────────┘
-                              │ wallet-sdk encrypted channel
-                              ▼
+│  src/lib/nulo-schema-patch.ts (side-effect, idempotent guard)   │
+└────────────────────────┬────────────────────────────────────────┘
+                         │  encrypted channel
+                         ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │ Extension (packages/extension)                                   │
 │                                                                  │
-│  wallet-sdk/nulo-schema-patch.ts       ← side-effect: extends    │
-│    └── patches WalletSchema.registerToken once                   │
-│        (imported once at the top of wallet-sdk/background.ts)    │
+│  wallet-sdk/nulo-schema-patch.ts                                 │
+│    (side-effect; imported in background.ts and any popup that    │
+│     uses ExtensionWallet directly — SDK proxy parity)            │
 │                                                                  │
-│  wallet-sdk/background.ts              ← unchanged behaviour     │
-│    └── BackgroundConnectionHandler.initialize() now sees the     │
-│        patched schema, accepts incoming "registerToken" type     │
+│  WalletSdkDispatcher.dispatch("registerToken", ...)              │
+│    └── NEW: route through DappInteractionService.execute()       │
+│         like handleSendTx — NOT straight to ExecutionService     │
 │                                                                  │
-│  wallet-bridge dispatcher              ← already wired           │
-│    └── METHOD_TO_KIND["registerToken"] = "register_token"        │
-│        capability gate: "accounts"                               │
-│        → buildAccountOperation → ExecutionService                │
+│  DappInteractionService.execute()                                │
+│    └── isConfirmationNeeded → ALWAYS true for register_token     │
+│        (new explicit case alongside the existing sendTx case)    │
 │                                                                  │
-│  execution/service.ts::executeRegisterToken                      │
-│    └── tokenService.parseTokenInterface(networkId, address)      │
-│        + tokenService.addToken(profileId, networkId,             │
-│           accountAddress, tokenInterface,                        │
-│           { origin: "dapp", dappOrigin: <faucet url> })          │
+│  popup windows/execute/index.vue                                 │
+│    └── On payload load, IF any op.kind === "register_token":     │
+│        fetch parseTokenInterface for each, render name+symbol    │
+│        +decimals+address in OperationCard while user decides     │
 │                                                                  │
-│  popup windows/execute/                ← already wired           │
-│    └── shows OperationCard for op.kind === "register_token"      │
-│       (renders the token address row + Allow / Deny buttons)     │
+│  popup windows/execute/OperationCard.vue                         │
+│    └── register_token template renders:                          │
+│        "<symbol> · <name> · <decimals> decimals"                 │
+│        "Contract address: 0x..."                                 │
+│        "Requested by <host-only origin>"                         │
+│                                                                  │
+│  ExecutionService.executeRegisterToken                            │
+│    └── Unchanged. Calls parseTokenInterface + tokenService.       │
+│        addToken({origin: "dapp", dappOrigin: <host>}).             │
+│        Idempotent on (profileId, chainId, contract).             │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## 5. File-by-file changes
+## 5. File-by-file changes (v2)
+
+The numbering below follows the implementation order I'll execute in.
 
 ### 5.1 NEW — `packages/extension/src/wallet/services/wallet-sdk/nulo-schema-patch.ts`
 
 ```ts
 /**
- * Runtime extension of the canonical `WalletSchema` for Nulo-custom RPC
- * methods. Mirrored by `packages/faucet/src/lib/nulo-schema-patch.ts`.
+ * Runtime extension of @aztec/wallet-sdk's WalletSchema with the Nulo-custom
+ * `registerToken` method. Mirrored verbatim by:
+ *   - packages/faucet/src/lib/nulo-schema-patch.ts
+ *   - packages/playground/src/lib/nulo-schema-patch.ts
  *
- * Why a local copy on each side (instead of a shared @nulo/wallet-bridge
- * export): the drift surface is one Zod entry. A pinned contract test in
- * dispatcher.test.ts verifies the registered shape; if the two copies
- * diverge, the e2e suite catches it before merge.
+ * Why inline copies instead of a shared @nulo/wallet-bridge export: wallet-bridge
+ * is extension-internal (depends on wallet-core + extension-messaging). Exposing
+ * it as a dApp dependency would acquire third-party consumers we don't want yet.
+ * The drift surface is one Zod entry; pinned by dispatcher.test.ts.
  *
- * Why side-effect only: WalletSchema is a plain object imported by both
- * `@aztec/wallet-sdk`'s ExtensionWallet proxy AND the
- * `BackgroundConnectionHandler`. Mutating it before either reads it makes
- * the new method appear in both directions of the encrypted channel.
+ * Why side-effect only: WalletSchema is read by @aztec/wallet-sdk's Proxy
+ * (ExtensionWallet.create) when the dApp calls wallet.<method>. Mutating it
+ * before any such call makes the new method routable.
  *
- * ⚠ Upstream contract: `WalletSchema` is currently not frozen. If a future
- * `@aztec/wallet-sdk` release freezes it, this throw fires at SW init
- * (loud failure beats silent regression). Pin the wallet-sdk version
- * (already exact-pinned in package.json) and re-evaluate on bump.
+ * The signature guard verifies the patch hasn't gone stale against upstream:
+ * if upstream ever ships a `registerToken` with a different shape, we throw at
+ * SW init instead of silently no-op'ing.
  */
 
 import { WalletSchema } from "@aztec/aztec.js/wallet"
 import { AztecAddressSchema } from "@aztec/aztec.js/addresses"
 import { z } from "zod"
 
-if (!("registerToken" in WalletSchema)) {
-  Object.assign(WalletSchema, {
-    // Signature mirrors the dispatcher's buildAccountOperation case:
-    //   registerToken(account: AztecAddress, token: AztecAddress) → void
-    registerToken: z
-      .function()
-      .args(AztecAddressSchema, AztecAddressSchema)
-      .returns(z.void()),
-  })
+const PATCHED_SCHEMA = z
+  .function()
+  .args(AztecAddressSchema, AztecAddressSchema)
+  .returns(z.void())
+
+if ("registerToken" in WalletSchema) {
+  // Already patched (idempotent re-import) OR upstream introduced its own.
+  // If upstream introduced its own, the signature MUST match.
+  // biome-ignore lint/suspicious/noExplicitAny: WalletSchema entries are zod-typed but the upstream type is internal
+  const existing = (WalletSchema as any).registerToken
+  if (existing !== PATCHED_SCHEMA) {
+    const existingParamCount = existing?.parameters?.()?.items?.length
+    if (existingParamCount !== 2) {
+      throw new Error(
+        `Nulo schema-patch: upstream WalletSchema.registerToken shape changed ` +
+          `(expected 2 params, found ${existingParamCount}). Update the patch ` +
+          `or remove it if upstream now provides registerToken.`,
+      )
+    }
+    // Upstream shape matches; leave as-is.
+  }
+} else {
+  // biome-ignore lint/suspicious/noExplicitAny: see above
+  ;(WalletSchema as any).registerToken = PATCHED_SCHEMA
 }
 ```
 
-- Side-effect file. **No exports.** Importing it once patches the global schema.
-- Uses `Object.assign` rather than a direct mutation to keep the patch idempotent (multi-import safe) and to fail loudly if `WalletSchema` is frozen in a future upstream.
-- The `AztecAddressSchema` import is the same Zod address validator already used by the rest of `WalletSchema` entries — keeps validation behaviour identical to the canonical methods.
+- Idempotent on re-import (no-ops if already present).
+- Loud failure on signature drift (Codex H4).
+- Single `biome-ignore` with rationale (passes the `noExplicitAny`-as-error lint).
 
 ### 5.2 NEW — `packages/faucet/src/lib/nulo-schema-patch.ts`
 
-Verbatim mirror of 5.1, with one change: it lives in the faucet package and uses the same `@aztec/aztec.js/wallet` + `@aztec/aztec.js/addresses` imports. Documented as a deliberate copy with a pointer to the extension's copy.
+Verbatim copy of 5.1 (imports + body identical). Documented as a deliberate copy with a cross-reference to the extension's file.
 
-### 5.3 MODIFIED — `packages/extension/src/wallet/services/wallet-sdk/background.ts`
+### 5.3 NEW — `packages/playground/src/lib/nulo-schema-patch.ts`
 
-Add a single side-effect import as the FIRST import (above the wallet-sdk imports), so the patch is applied before `BackgroundConnectionHandler` is constructed. Existing imports/logic untouched.
+Verbatim copy of 5.1. Lives next to `lib/wallet.ts` per Codex M1 — that file's first import becomes `import "./nulo-schema-patch"`.
+
+### 5.4 MODIFIED — `packages/extension/src/wallet/services/wallet-sdk/background.ts`
+
+Add `import "./nulo-schema-patch"` as the **first import** (before all `@aztec/wallet-sdk` imports), so the patch lands before `BackgroundConnectionHandler` is constructed. The patch is technically unnecessary for *routing* (BackgroundConnectionHandler doesn't validate against `WalletSchema`) but is needed for SDK proxy parity if any popup constructs an ExtensionWallet directly.
+
+### 5.5 MODIFIED — `packages/wallet-bridge/src/dispatcher.ts` — **B1 FIX**
+
+Add `registerToken` to the special-case list alongside `sendTx`. New routing in `dispatch()`:
 
 ```ts
-// Patch WalletSchema before any wallet-sdk code reads it.
-import "./nulo-schema-patch"
-
-import { BackgroundConnectionHandler, ... } from "@aztec/wallet-sdk/extension/handlers"
-// ... rest unchanged
+// Around line 240, before the METHOD_TO_KIND lookup:
+if (methodName === "registerToken") {
+  return this.handleRegisterToken(args, ctx)
+}
 ```
 
-### 5.4 NEW — `packages/faucet/src/composables/useFaucetAddToken.ts`
+And a new method modeled on `handleSendTx` (lines 349-392):
 
-A small composable that wraps the `wallet.registerToken(account, tokenAddress)` call with the same status + error-normalisation conventions used by `useFaucetDrip`:
+```ts
+private async handleRegisterToken(args: unknown[], ctx: SessionContext): Promise<unknown> {
+  const [network, account] = await this.resolveNetworkAndAccount(ctx)
+  const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(
+    ctx.origin,
+    String(ctx.chainId),
+  )
+  if (!dappSession) {
+    throw new Error(`No dApp session found for origin ${ctx.origin}`)
+  }
+
+  // args[0] is the dApp-supplied account; we pass it through to the op for
+  // journal/UI consistency but the dispatcher's resolved session account
+  // wins for storage scoping (which is profile+chain anyway).
+  const tokenAddress = String(args[1])
+
+  const op: RegisterTokenOperation = {
+    kind: "register_token",
+    networkId: network.id,
+    accountAddress: account.address, // session-authorized; matches existing behavior
+    address: tokenAddress,
+  }
+
+  const results = await this.dappInteractionService.execute({
+    sessionId: dappSession.id,
+    operations: [op],
+  })
+  return this.unwrapResult(results[0])
+}
+```
+
+ALSO: drop the `case "register_token":` branch from `buildAccountOperation` and remove `"register_token"` from `ACCOUNT_KINDS` — `register_token` is now special-cased like `sendTx`.
+
+Also (D2 deprecation sweep): drop `getCompleteAddress`, `simulateViews` from `METHOD_TO_KIND`; drop `get_complete_address`, `simulate_views` from `ACCOUNT_KINDS`; drop their `buildAccountOperation` switch cases.
+
+### 5.6 MODIFIED — `packages/extension/src/wallet/services/dapp-interaction/service.ts` — **B1 FIX**
+
+In `isConfirmationNeeded` (lines 345-364), add an explicit case:
+
+```ts
+// Token registration is always per-call confirmable — neither AccessLevel nor
+// fee-presence drive it. The popup carries the resolved token metadata.
+if (payload.params.operations.find((op) => op.kind === "register_token")) {
+  return true
+}
+```
+
+In `validateSession` (line 270): keep `case "register_token":` in the account-permission switch (already there). Drop `case "get_complete_address":` from the account-permission switch.
+
+In `getOperationAccessLevel` (line 376): keep `register_token → AppState` (for telemetry; the popup gate is no longer driven by this but by the explicit check above). Drop `case "get_complete_address":`.
+
+**Per Codex M1 / Opus M1+M2**: leave the `simulate_views` branches in `validateSession`, `getOperationAccessLevel`, `materialize.ts`, and `OperationCard.vue` untouched. The op kind is alive for legacy dApp-interaction path consumers AND for internal callers.
+
+### 5.7 MODIFIED — `packages/extension/src/popup/windows/execute/index.vue` — **D7 NEW**
+
+When the payload loads, if any op kind is `register_token`, kick off a metadata pre-fetch via the existing `tokenService` client. The OperationCard renders a loading state while pre-fetch is in-flight, then renders the resolved name/symbol/decimals/address. Approve gates on pre-fetch completion (Allow disabled until metadata resolves).
+
+Pseudocode:
+
+```ts
+// In setup():
+const tokenMetadata = ref<Map<string, { name: string; symbol: string; decimals: number }>>(new Map())
+const metadataLoading = ref(true)
+
+onMounted(async () => {
+  const payload = await useDappInteractionPayload(requestId).load()
+  const registerOps = payload.operations.filter((op) => op.kind === "register_token")
+  if (registerOps.length > 0) {
+    const tokenServiceClient = new TokenServiceClient()
+    for (const op of registerOps) {
+      try {
+        const ti = await tokenServiceClient.parseTokenInterface(op.networkId, op.address)
+        if (ti.name && ti.symbol && ti.decimals !== undefined) {
+          tokenMetadata.value.set(op.address, {
+            name: ti.name,
+            symbol: ti.symbol,
+            decimals: ti.decimals,
+          })
+        }
+      } catch {
+        // Leave the map entry blank; OperationCard falls back to address-only.
+      }
+    }
+    metadataLoading.value = false
+  } else {
+    metadataLoading.value = false
+  }
+})
+```
+
+Drop the `case "get_complete_address":` and `case "simulate_views":` branches (lines 159, 163) — `get_complete_address` is fully dropped; `simulate_views` stays in the operations-list typing but the popup never receives an internal-only op kind from the dApp wire (and the legacy dapp-interaction path doesn't open this popup).
+
+### 5.8 MODIFIED — `packages/extension/src/popup/windows/execute/OperationCard.vue` — **D7 NEW**
+
+Extend the `register_token` template (line 193) to render the resolved metadata when available:
+
+```vue
+<template v-else-if="op.kind === 'register_token'">
+  <template v-if="tokenMetadata?.get(op.address)">
+    <Flex :class="$style.prop">
+      <Text size="14" weight="600" color="primary" data-testid="register-token-symbol">
+        {{ tokenMetadata.get(op.address)!.symbol }}
+      </Text>
+      <Text size="12" color="secondary" data-testid="register-token-name">
+        {{ tokenMetadata.get(op.address)!.name }}
+      </Text>
+      <Text size="11" color="tertiary">
+        {{ tokenMetadata.get(op.address)!.decimals }} decimals
+      </Text>
+    </Flex>
+  </template>
+  <Flex :class="$style.prop">
+    <Text size="12" color="secondary">Contract address:</Text>
+    <AddressDisplay :address="op.address" />
+  </Flex>
+  <Flex :class="$style.prop" v-if="dappOriginHost">
+    <Text size="11" color="tertiary">
+      Requested by <Text weight="600" data-testid="register-token-origin">{{ dappOriginHost }}</Text>
+    </Text>
+  </Flex>
+</template>
+```
+
+Where `dappOriginHost` is the host portion of the dApp's `payload.session.dappMetadata.url` — host-only rendering per Opus H3 (no path, no scheme, no port). The host is rendered with `<Text weight="600">` so it visually distinguishes from the surrounding sentence, mitigating the "origin looks like a token name" attack.
+
+**Keep** the `simulate_views` template (line 234) per Opus M2 — it's reachable via the legacy dapp-interaction path.
+
+### 5.9 NEW — `packages/faucet/src/composables/useFaucetAddToken.ts`
 
 ```ts
 import type { Wallet } from "@aztec/aztec.js/wallet"
@@ -155,10 +314,6 @@ import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { ref } from "vue"
 import { type NormalizedError, normalizeError } from "@/lib/errors"
 
-// Local typed augmentation matching the side-effect patch in
-// src/lib/nulo-schema-patch.ts. The cast is the typed boundary — the
-// patch makes it true at runtime, this declaration makes it true at
-// compile time.
 type WalletWithRegisterToken = Wallet & {
   registerToken(account: AztecAddress, token: AztecAddress): Promise<void>
 }
@@ -167,7 +322,8 @@ export type AddTokenStatus =
   | { kind: "idle" }
   | { kind: "submitting" }
   | { kind: "ok" }
-  | { kind: "rejected" }   // user denied in extension popup
+  | { kind: "rejected" }
+  | { kind: "unsupported" }
   | { kind: "error"; error: NormalizedError }
 
 export function useFaucetAddToken() {
@@ -186,10 +342,19 @@ export function useFaucetAddToken() {
       status.value = { kind: "ok" }
     } catch (err) {
       const normalized = normalizeError(err)
-      // EIP-1193 4001 = user-rejected (per wallet-bridge README cancel recipe).
-      status.value = normalized.code === 4001
-        ? { kind: "rejected" }
-        : { kind: "error", error: normalized }
+      // normalizeError(...) already parses the wallet-bridge cancel envelope and
+      // sets category to "user-rejected" for 4001 (errors.ts:54-60).
+      if (normalized.category === "user-rejected") {
+        status.value = { kind: "rejected" }
+      } else if (normalized.message.includes("Unsupported wallet method")) {
+        // The dispatcher rejected the method by string. This means the schema
+        // patch on either end wasn't applied at the right time, or the wallet
+        // version doesn't have the dispatcher mapping. Surface distinctly so
+        // the user gets a clear "your wallet doesn't support this yet" message.
+        status.value = { kind: "unsupported" }
+      } else {
+        status.value = { kind: "error", error: normalized }
+      }
     }
   }
 
@@ -201,248 +366,298 @@ export function useFaucetAddToken() {
 }
 ```
 
-### 5.5 MODIFIED — `packages/faucet/src/components/TokenCard.vue`
+Notes:
+- Uses `normalized.category === "user-rejected"` (the actual `NormalizedError` shape per `errors.ts:21-25`), NOT the invented `normalized.code === 4001` (Codex H1).
+- Adds `"unsupported"` variant for the schema-mismatch case (Opus H5).
+- `rejected` is a terminal state of this call; the consumer (`TokenCard.vue`) is responsible for resetting via `reset()` after a delay (e.g. 3s timeout) or on next user interaction — design choice matches the existing toast UX for drip results.
 
-Add an "Add to Wallet" button next to (or below) the drip buttons. The button:
+### 5.10 MODIFIED — `packages/faucet/src/components/TokenCard.vue`
 
-- Is visible only when `walletConnection.status.value === "connected"`.
-- Calls `addToken(wallet.value, selectedAccount.value, tokenAddress)` from the new composable.
-- Surfaces status: `submitting` → spinner + disabled, `ok` → small ✓ confirmation in the status row, `rejected` → silent return to idle (matches the cancel recipe in wallet-bridge README), `error` → red text in the status row.
-- Idempotency UX: button stays visible after `ok`; clicking again triggers another popup, and the extension silently skips on duplicate add. We could hide on `ok` but that's lossy — if the user removes the token from the wallet, they'd have to refresh the faucet to see the button. Keep visible.
+Add the "Add to wallet" button to the existing `.actions` flex row. Visible only when `walletConnection.status.value === "connected"`. Status reflected in the existing status row via a new conditional branch.
 
-Layout: piggyback on the existing `actions` flex row. New element `<button data-testid="faucet-add-token-{symbol}">Add to wallet</button>`. testid pattern matches the existing `data-testid="drip-public-{symbol}"` / `drip-private-{symbol}` convention.
+```vue
+<!-- inside .actions, after the drip buttons -->
+<button
+  v-if="walletConnection.status === 'connected'"
+  type="button"
+  :disabled="addTokenStatus.kind === 'submitting'"
+  :data-testid="`faucet-add-token-${token.symbol}`"
+  @click="onAddToWallet"
+>
+  {{ addTokenStatus.kind === 'submitting' ? 'Adding…' : 'Add to wallet' }}
+</button>
+```
 
-### 5.6 MODIFIED — `packages/faucet/src/composables/useWalletConnection.ts`
-
-One change: add `import "@/lib/nulo-schema-patch"` as the FIRST import, so the patch is in place before the module imports `@aztec/wallet-sdk/manager`. Nothing else changes.
-
-### 5.7 MODIFIED — `packages/wallet-bridge/src/dispatcher.ts`
-
-Drop the `getCompleteAddress` and `simulateViews` *dApp-facing* mappings:
-
-- Remove `getCompleteAddress: "get_complete_address"` and `simulateViews: "simulate_views"` from `METHOD_TO_KIND` (lines 166-167).
-- Remove `"get_complete_address"` and `"simulate_views"` from `ACCOUNT_KINDS` (lines 194-195).
-- Remove the `case "get_complete_address"` and `case "simulate_views"` branches in `buildAccountOperation` (lines 768-780) and the `functionCallsToEncodedActions` helper if it becomes unused (verify; keep if shared).
-- Update the JSDoc comment block on `buildAccountOperation` (lines 717-725) to drop the dropped methods.
-- Update the file-header JSDoc on lines 6-9 to drop `registerToken` mentions if they reference the patched schema location (keep the `register_token` references — the OPERATION kind still flows for dApp-initiated calls).
-
-The dispatcher remains the choke point; the internal `simulate_views` operation kind type still exists in `operation.ts` because the balance projector emits it (see §6).
-
-### 5.8 MODIFIED — `packages/wallet-bridge/src/capability-map.ts`
-
-Remove `getCompleteAddress: "accounts"` (line 19) and `simulateViews: "simulation"` (line 34) from `METHOD_CAPABILITY_MAP`. The `registerToken: "accounts"` entry (line 21) stays.
-
-### 5.9 MODIFIED — `packages/wallet-bridge/src/scope-enforcement.ts`
-
-Remove the `simulateViews` entry in the `SCOPE_CHECKERS` record (line 299) and the `checkSimulateViews` function + its error messages (lines 153-171). Keep all other entries — `simulateTx`, `executeUtility`, `profileTx`, `sendTx`, `createAuthWit`, `registerToken` (verify a `registerToken` scope check exists; if not, document why one is not needed — the capability gate alone is sufficient because there's no per-call sub-scope).
-
-### 5.10 MODIFIED — `packages/wallet-bridge/src/operation.ts`
-
-Remove the `GetCompleteAddressOperation` type definition (the `get_complete_address` kind has no internal callers per recon). **Keep** `SimulateViewsOperation` (kind `simulate_views`) — the balance projector at `extension/src/wallet/services/token-balance/balance-projector.ts:123` emits it internally, and `executeSimulateViews` in `execution/service.ts:911` still runs.
-
-Add a comment on the `SimulateViewsOperation` kind explaining: "Internal-only operation. The dApp-facing `simulateViews` wallet-sdk method was retired; the `simulate_views` operation kind survives for internal callers (balance projector, etc.)."
-
-### 5.11 MODIFIED — `packages/extension/src/wallet/services/dapp-interaction/service.ts`
-
-In `validateSession` (lines 270, 291), drop the `case "get_complete_address":` and the `case "simulate_views":` branch IF the `simulate_views` operation is never received over the dApp wire path (it's internal — confirm before deleting). If it could still arrive via materialize replay or queued state, **keep** the branch.
-
-In `getOperationAccessLevel` (lines 378, 388-389), do the same — drop `get_complete_address`. Keep `simulate_views` if internal callers ever surface it through this path; otherwise drop.
-
-### 5.12 MODIFIED — `packages/extension/src/wallet/services/dapp-interaction/materialize.ts`
-
-Lines 90, 94 — drop the dropped methods' materialization branches. **Verify first** that no internal callsite materializes `simulate_views` ops. If the balance projector calls `executeOperations` directly (it does — `execution/service.ts:1510, 1538`), the materialize path is not on its critical line and the branch can go.
-
-### 5.13 MODIFIED — `packages/extension/src/wallet/services/execution/service.ts`
-
-Remove the `case "get_complete_address":` branch (line 883) and its `executeGetCompleteAddress` helper (lines 986-994). **Keep** the `case "simulate_views":` branch (line 911) and its `executeSimulateViews` helper — the balance projector at lines 1510 and 1538 still creates these operations internally.
-
-### 5.14 MODIFIED — `packages/extension/src/popup/windows/execute/index.vue`
-
-Drop the `case "get_complete_address":` and `case "simulate_views":` branches at lines 159, 163. Both methods never showed a meaningful UI in the popup; the cases were placeholders.
-
-### 5.15 MODIFIED — `packages/extension/src/popup/windows/execute/OperationCard.vue`
-
-Drop the `simulate_views` template branch (line 234). The `get_complete_address` kind has no template branch (no popup payload needed).
-
-### 5.16 MODIFIED — `packages/playground/src/sections/contracts.ts`
-
-Remove the leading comment about `registerToken` being "dropped". Add a `registerToken` button next to `registerContract` / `registerSender`, using the same `safe` wrapper:
+In `<script setup>`:
 
 ```ts
+const { status: addTokenStatus, addToken, reset: resetAddToken } = useFaucetAddToken()
+
+async function onAddToWallet() {
+  if (!wallet.value || !selectedAccount.value) return
+  await addToken(wallet.value, selectedAccount.value, props.tokenAddress)
+}
+
+// Auto-reset after success or rejection so the button label returns to
+// "Add to wallet" rather than freezing at a terminal state.
+watch(addTokenStatus, (s) => {
+  if (s.kind === "ok" || s.kind === "rejected" || s.kind === "unsupported" || s.kind === "error") {
+    setTimeout(resetAddToken, 3000)
+  }
+})
+```
+
+Status row gets new conditional branches: `ok` → small "Added to wallet ✓", `rejected` → no UI (per cancel recipe), `unsupported` → "Update your wallet to use this feature", `error` → red error text.
+
+### 5.11 MODIFIED — `packages/faucet/src/composables/useWalletConnection.ts`
+
+Add `import "@/lib/nulo-schema-patch"` as the FIRST import. Nothing else changes.
+
+### 5.12 MODIFIED — `packages/playground/src/lib/wallet.ts`
+
+Add `import "./nulo-schema-patch"` as the FIRST import. Nothing else changes (the existing `connect()` flow is unchanged).
+
+### 5.13 MODIFIED — `packages/playground/src/sections/contracts.ts`
+
+Drop the leading "registerToken was dropped" comment. Add a `registerToken` button using a typed cast (per Opus H1):
+
+```ts
+type WalletWithRegisterToken = Wallet & {
+  registerToken(account: AztecAddress, token: AztecAddress): Promise<void>
+}
+
 root.querySelector<HTMLButtonElement>('[data-testid="pg-btn-registerToken"]')?.addEventListener(
   "click",
   safe("registerToken", async () => {
-    const wallet = getWallet()!
-    const account = AztecAddress.fromString(getInput("accountAddress"))
+    const wallet = getWallet()! as WalletWithRegisterToken
+    const account = AztecAddress.fromString(getInput("accountAddress") || getInput("senderAddress"))
     const token = AztecAddress.fromString(getInput("tokenAddress"))
-    // biome-ignore lint/suspicious/noExplicitAny: schema-patched method
-    return (wallet as any).registerToken(account, token)
+    return wallet.registerToken(account, token)
   }),
 )
 ```
 
-Playground HTML gets a new `<button data-testid="pg-btn-registerToken">registerToken</button>` and an `accountAddress` input if not already present. **Caveat**: the playground must also import the schema patch — add `import "@/wallet-bridge-schema-patch"` (or however playground's existing init structures it) once at the top of `src/main.ts` (or the entry point). One inline copy lives in the playground too — same Zod entry. **Three** total copies, all pinned by the contract test in §7. (This is the cost of "inline copy" — accepted per D1.)
+HTML: add `<button data-testid="pg-btn-registerToken">registerToken</button>` to the existing `.pg-row` of contract buttons. If `accountAddress` input doesn't exist on this section, add it.
 
-### 5.17 MODIFIED — `packages/playground/src/sections/meta.ts` + `packages/playground/src/sections/simulation.ts`
+### 5.14 MODIFIED — `packages/playground/src/sections/meta.ts`, `simulation.ts`
 
-Drop the leading "dropped in the canonical refactor" comments — the deprecation is now durable and documented in the wallet-bridge README.
+Drop the leading "Nulo-custom was dropped" comments. The deprecation is now documented in `wallet-bridge/README.md`.
 
-### 5.18 NEW — Documentation update in `packages/wallet-bridge/README.md`
+### 5.15 MODIFIED — `packages/wallet-bridge/src/capability-map.ts`
 
-Add a section "Custom RPC methods (Nulo extensions)":
+Drop `getCompleteAddress: "accounts"` (line 19), `simulateViews: "simulation"` (line 34). Keep `registerToken: "accounts"` (line 21).
 
-> Nulo extends `@aztec/wallet-sdk`'s canonical `WalletSchema` with one custom method:
-> - `registerToken(account: AztecAddress, token: AztecAddress): Promise<void>` — gated by the `accounts` capability; shown to the user in the AppState confirmation popup. Idempotent (silently skips if the token is already in the user's list).
->
-> The schema extension is applied via a runtime patch on each side of the encrypted channel. The patch is **inline-copied** rather than shared:
-> - Extension: `packages/extension/src/wallet/services/wallet-sdk/nulo-schema-patch.ts`
-> - Faucet: `packages/faucet/src/lib/nulo-schema-patch.ts`
-> - Playground: `packages/playground/src/<entry-point>/nulo-schema-patch.ts`
->
-> Each copy is one Zod entry. Drift is pinned by the dispatcher contract test (`dispatcher.test.ts`). The shared-package alternative was deliberately rejected to keep `@nulo/wallet-bridge` from acquiring third-party dApp consumers.
->
-> Previously dropped Nulo-custom methods (intentionally not re-instated): `getCompleteAddress`, `simulateViews`. The `simulate_views` *operation kind* is still emitted internally by the balance projector — only the dApp-facing wire surface was removed.
+### 5.16 MODIFIED — `packages/wallet-bridge/src/scope-enforcement.ts`
 
-### 5.19 NEW — Top-level note in CLAUDE.md (project file)
+Drop `simulateViews` from `SCOPE_CHECKERS` (line 299). Drop `checkSimulateViews` function (lines 153-171). Keep all other entries.
 
-Add a short bullet under "Quality gates" or "Package boundaries":
+### 5.17 MODIFIED — `packages/wallet-bridge/src/operation.ts`
 
-> **Custom RPC schema patch**: The `registerToken` method is added to `WalletSchema` at runtime via three identical inline files (extension, faucet, playground). Each file's only export is a side-effect. Drift is caught by `wallet-bridge/src/dispatcher.test.ts` which pins the patched schema shape. Do NOT extend the patch surface without updating all three copies AND adding a new contract test case.
+Drop `GetCompleteAddressOperation` type (no internal callers per recon). **Keep** `SimulateViewsOperation` — internal callers verified at `balance-projector.ts:121-127` and `execution/service.ts:1509-1521, 1537-1549`. Add a comment on `SimulateViewsOperation` noting its internal-only status per D9.
 
-## 6. Deprecation summary
+### 5.18 MODIFIED — `packages/wallet-bridge/src/dapp-interaction-protocol.ts`
 
-| Method | dApp-facing wire surface (this PR) | Internal operation kind |
-|---|---|---|
-| `registerToken` | **Restored** (inline schema patch ×3) | `register_token` — keep |
-| `getCompleteAddress` | **Dropped** (no schema patch; capability map / dispatcher / popup cases removed) | `get_complete_address` — **drop** (no internal callers) |
-| `simulateViews` | **Dropped** (no schema patch; capability map / dispatcher / scope-enforcement entries removed) | `simulate_views` — **keep** (used by balance projector internally) |
+Drop `GetCompleteAddressRequest` (lines 42-72) from the request union and exports. **Keep** `SimulateViewsRequest` (lines 124-146) per D9.
 
-## 7. Tests
+### 5.19 MODIFIED — `packages/extension/src/wallet/services/dapp-interaction/spec.ts` and `packages/extension/src/wallet/services/execution/models/index.ts`
 
-### 7.1 Unit / component
+Drop `GetCompleteAddressRequest` re-exports. Keep `SimulateViewsRequest` re-exports.
 
-- `packages/wallet-bridge/src/dispatcher.test.ts` — **NEW** test cases:
-  - `dispatches registerToken to register_token operation with [accountAddress, tokenAddress]` — exercises `dispatch("registerToken", [account, token], ctx)` → asserts `executeOperations` was called with one op of kind `register_token`, correct addresses.
-  - `enforces accounts capability before registerToken` — the dispatcher's capability gate test pattern, asserting `CapabilityNotGrantedError` when accounts cap is absent.
-  - `does NOT dispatch getCompleteAddress / simulateViews` — asserts `dispatch("getCompleteAddress", ...)` throws `"Unsupported wallet method"` (regression guard against accidental re-introduction).
+### 5.20 MODIFIED — `packages/extension/src/wallet/services/dapp-interaction/materialize.ts`
 
-- `packages/wallet-bridge/src/scope-enforcement.test.ts` — drop the `simulateViews` test cases; add a one-liner test asserting that calling `enforceScope("simulateViews", ...)` is a no-op (no checker registered).
+Drop `case "get_complete_address":` branch (line 90). Keep `case "simulate_views":` (line 94).
 
-- `packages/wallet-bridge/src/dispatcher.test.ts` — **NEW** schema-patch contract test: imports `@aztec/aztec.js/wallet` `WalletSchema` and asserts `"registerToken" in WalletSchema === false` BEFORE patching, then imports the extension's `nulo-schema-patch` (or constructs the equivalent inline Zod) and asserts the patched shape — `WalletSchema.registerToken.parameters().items.length === 2` and both items are address schemas. This pins drift between the three inline copies.
+### 5.21 MODIFIED — `packages/extension/src/wallet/services/execution/service.ts`
 
-  Cleaner alternative: put the actual Zod entry into a single non-side-effect helper inside the test file, and have all three production copies import that helper... wait, that violates D1 (inline copy). Instead: the test asserts on the *shape*, not by importing the production copies. Each production copy independently produces the same shape; the test pins the shape's invariants.
+Drop `case "get_complete_address":` (line 883) and `executeGetCompleteAddress` (lines 986-994). Keep `case "simulate_views":` (line 911) and `executeSimulateViews`.
 
-- `packages/faucet/src/composables/useFaucetAddToken.test.ts` — **NEW**:
-  - happy path (`addToken` resolves → status becomes `ok`)
-  - rejected (`AbortError`/4001 → status becomes `rejected`, not `error`)
-  - error (network failure → status becomes `error`)
-  - re-entrancy guard (calling twice during `submitting` is ignored)
+### 5.22 MODIFIED — `packages/faucet/vite.config.ts` — **H2 FIX**
 
-- `packages/faucet/src/components/TokenCard.test.ts` — extend existing tests: button visibility under each `status` of `useWalletConnection`, button click invokes `useFaucetAddToken.addToken`, button disabled while `submitting`.
+Allow per-worktree port allocation when running under the e2e harness:
 
-### 7.2 E2E (network suite, `bun run e2e:agent`)
+```ts
+const FAUCET_DEV_PORT = Number(process.env.FAUCET_DEV_PORT) || 5176
 
-NEW spec: `packages/extension/tests/e2e/faucet-add-token.test.ts`. Parallel-safe per the suite conventions (`e2e:agent` allocates ephemeral ports + path-scoped cleanup — see `packages/extension/tests/e2e/README.md`).
+server: {
+  port: FAUCET_DEV_PORT,
+  // strictPort only in local DX; harness allocates and overrides via env.
+  strictPort: !process.env.FAUCET_DEV_PORT,
+  headers: COOP_COEP_HEADERS,
+},
+```
 
-Scenario:
+### 5.23 MODIFIED — `packages/extension/tests/e2e/global-setup.ts` and `fixtures/`
 
-1. Boot anvil + aztec sandbox + playground (already done by the `e2e:agent` global setup).
-2. Launch the extension + onboard a fresh wallet via the existing helpers.
-3. Open the faucet (use the faucet's `dev` server or the built artifact; the suite already supports per-worktree dev ports).
-4. Connect the wallet to the faucet (existing discovery + emoji + capabilities helpers from the faucet's own `tests/e2e/`).
+Add a faucet dev-server spawner mirroring the existing playground spawn (file:lines TBD — read on implementation). Expose `faucetUrl` in the test fixtures alongside `playgroundUrl`. Use the agent runner's port allocator to pick `FAUCET_DEV_PORT` per worktree.
+
+### 5.24 NEW — `packages/extension/tests/e2e/network/faucet-add-token.test.ts` — **H2 FIX (correct path)**
+
+Network suite (`vitest.e2e.network.config.ts` glob: `tests/e2e/network/**/*.test.ts`). Parallel-safe per the agent runner conventions. Scenario:
+
+1. Boot anvil + aztec + faucet (new) — handled by global-setup.
+2. Launch extension + onboard a fresh wallet via existing helpers.
+3. Open faucet via the new `faucetUrl` fixture.
+4. Connect via the existing discovery → emoji → capabilities sequence.
 5. Click `data-testid="faucet-add-token-USDC"`.
-6. Switch to the extension popup window (the wallet-sdk opens an execute window).
-7. Assert the OperationCard renders the token address.
-8. Click `data-testid="execute-approve"` (or whatever the existing approve button testid is).
-9. Switch back to faucet, assert the status row says ✓ added.
-10. Open the wallet popup, navigate to the tokens tab, assert the USDC token now appears.
-11. Repeat for ETH.
-12. Cancel path: same flow, click `data-testid="execute-reject"` instead, assert faucet status row becomes idle (no error UI).
+6. Switch to the extension popup window opened by `DappInteractionService.execute()`.
+7. Wait for `data-testid="register-token-symbol"` to render (metadata pre-fetch complete).
+8. Assert it shows "USDC", the name, "6 decimals", contract address, and "Requested by <host>".
+9. Click `data-testid="execute-approve"`.
+10. Switch back to faucet, assert status row shows ✓.
+11. Open wallet popup → tokens view → assert USDC row visible with correct balance (or 0 if no drip yet).
+12. Repeat for ETH.
+13. Cancel path: same flow but click Deny → assert faucet status row returns to idle (no error UI).
 
-### 7.3 Smoke
+### 5.25 NEW — Tests in `packages/wallet-bridge/src/dispatcher.test.ts`
 
-`bun run test:e2e` (smoke, no Aztec sandbox) doesn't apply — the feature requires network. Run smoke only to verify no regression on the existing UI flows.
+- **NEW**: Import `packages/extension/src/wallet/services/wallet-sdk/nulo-schema-patch` as a side-effect (workspace import). Assert `WalletSchema.registerToken.parameters().items.length === 2` AND both items pass `AztecAddressSchema.safeParse(<a valid address>).success === true`. This is the *real* reachability test — drift in the extension's patch breaks here.
+- **NEW**: `dispatches registerToken via DappInteractionService.execute` (not via executeOperations directly). Mock the injected `dappInteractionService`; assert `execute()` was called with one `register_token` op; assert `executionService.executeOperations` was NOT called by the dispatcher.
+- **NEW**: `enforces accounts capability before registerToken`. Asserts `CapabilityNotGrantedError` when accounts cap absent.
+- **NEW**: `does not dispatch getCompleteAddress` — asserts `dispatch("getCompleteAddress", ...)` throws "Unsupported wallet method".
+- **NEW**: `does not dispatch simulateViews` — same.
+- **NEW**: `getRequiredCapability("registerToken") === "accounts"` AND `getOperationAccessLevel("register_token") === AccessLevel.AppState` (Opus M7 — pin both).
+- **NEW**: `batch([{name: "registerToken", ...}])` rejects (Opus B3) — `BatchedMethodSchema` is built from `WalletMethodSchemas`, not `WalletSchema`, so the patched method is NOT in `batch`. Pin this so future "batch all the things" attempts fail loudly.
 
-### 7.4 Manual
+### 5.26 NEW — Tests in `packages/wallet-bridge/src/scope-enforcement.test.ts`
 
-Before merge:
-- Hit the faucet on `localhost:5173`, connect Nulo, drip USDC + ETH, click "Add to wallet" for both, verify the wallet popup shows both tokens with correct balance.
-- Repeat against alpha-testnet (the production faucet target).
-- Verify the playground's new `registerToken` button works.
-- Verify that the network-test-agent runs the new e2e test in parallel with at least two worktree agents (no port collisions).
+Drop the `simulateViews` test cases (lines 212-224). Add a one-liner: `enforceScope("simulateViews", ...)` is a no-op (no checker). Same for `getCompleteAddress`.
 
-## 8. Security & Adversarial Considerations
+### 5.27 NEW — Tests in `packages/extension/src/popup/windows/execute/humanize.test.ts`
 
-Drawn from the global `Security & Adversarial mindset` in user CLAUDE.md.
+Drop the `get_complete_address` test entries (lines 28-36 per Codex H3). Keep any `simulate_views` entries (the op kind is alive).
 
-### 8.1 Threat model
+### 5.28 NEW — `packages/faucet/src/composables/useFaucetAddToken.test.ts`
 
-| Actor | Goal | Surface |
-|---|---|---|
-| Malicious dApp (post-connect) | Spam the user's token list with junk / phishing tokens | `registerToken` RPC, capability already granted |
-| Malicious dApp (pre-connect) | Trick the user into adding a fake USDC that looks identical to real USDC | Connection / capability dialogs (out of scope — already audited) |
-| Compromised dependency (`@aztec/wallet-sdk`) | Bypass the schema-patch check or hijack the channel | Encrypted-channel layer (out of scope — upstream) |
-| Compromised dependency (a Vue package the faucet pulls in) | Inject a malicious `registerToken` call from inside the faucet | Supply chain — covered by `bunfig.toml`'s 7-day min-age gate + `bun.lock` |
+```
+- happy path → status becomes ok
+- user-rejected (NormalizedError with category="user-rejected") → status becomes rejected
+- unsupported method ("Unsupported wallet method" substring) → status becomes unsupported
+- network/other error → status becomes error
+- re-entrancy guard during submitting → second call is ignored
+```
 
-### 8.2 Defences in this PR
+### 5.29 NEW — `packages/faucet/src/components/TokenCard.test.ts` updates
 
-- **Confirmation popup per call** (D5) — every `registerToken` call shows the OperationCard with the *contract address* visible to the user. The malicious dApp cannot bypass this because `getOperationAccessLevel("register_token") = AccessLevel.AppState` (verified in recon).
-- **Capability gate** — `registerToken` requires the `accounts` capability. Sessions without the capability throw `CapabilityNotGrantedError` (4100) before any popup is shown.
-- **Origin tracking in the journal** — `executeRegisterToken` writes `opContext.dappOrigin = origin.name` to the operation journal entry. The wallet UI's `TokenImportRow` renders "Requested by <origin>" (verified in `execution/service.ts:1052-1058`), so the user has post-hoc forensic visibility.
-- **Per-(profileId, chainId) scoping** — tokens are stored against the active profile + active chain. A faucet on alpha-testnet cannot pollute the user's testnet or mainnet token lists.
-- **Idempotency** — `tokenService.addToken` short-circuits if `(profileId, chainId, contract)` already exists. A spam loop can't bloat storage.
-- **Strict argument shape** — the schema-patch Zod entry validates both arguments are addresses. A dApp passing garbage gets a wire-level rejection before any extension state mutates.
-- **Loud failure on schema freeze** — the patch file's `if (!("registerToken" in WalletSchema))` guard makes accidental re-application a no-op, AND the throw on `Object.assign` against a frozen target will fire at SW init, not at first-call time. CI catches it on every PR via the smoke / network suite.
+Extend existing TokenCard tests: button visibility under each `walletConnection.status`, button click invokes the composable, status-row branches render for `ok` / `error` / `unsupported`, `rejected` produces no status-row UI.
 
-### 8.3 Risks accepted
+### 5.30 MODIFIED — `packages/wallet-bridge/README.md`
 
-| Risk | Why we accept it |
-|---|---|
-| Token name/symbol are fetched by the extension via PXE — a malicious token contract can return arbitrary strings ("USDC", "USDT"…) | The user sees the contract address in the popup. The popup's responsibility is to surface this. Mitigation outside this PR: token-allow-list / collision-detection ("you already have a USDC at a different address") — filed as `tokens-collision-detection` follow-up. |
-| Three inline copies of the Zod patch may drift | Pinned by `dispatcher.test.ts` shape-assertion contract test (§7). The drift would be caught at unit-test time, not at runtime. |
-| Schema patch mutates a third-party global | The patch file documents this, the throw guard fails loudly on upstream change, and the wallet-sdk version is exact-pinned (`@aztec/wallet-sdk == 4.2.0`). A bump triggers an explicit re-evaluation. |
-| The popup confirmation may be confusing for users who don't know what "Token contract address" means | Mitigation outside this PR: improve the OperationCard's `register_token` template to show the resolved name / symbol AFTER PXE parse (`parseTokenInterface` already fetches them — surface them before the Allow / Deny). Filed as `register-token-popup-clarity` follow-up. |
+Add a new section after "Versioning" titled "Custom RPC methods (Nulo extensions)". Documents:
+- The `registerToken` method, its signature, capability gate, popup gate.
+- The inline-copy schema-patch pattern across three packages.
+- The `simulate_views` deprecation status (internal-only).
+- The dropped `getCompleteAddress` method.
+- Cross-reference to `dispatcher.test.ts` as the drift pin.
 
-### 8.4 Out of scope (deferred follow-ups)
+### 5.31 MODIFIED — `CLAUDE.md`
 
-- Pushing a canonical `wallet_watchAsset`-equivalent into `@aztec/wallet-sdk` upstream — long-term clean answer, blocks on upstream review/release. Tracked as `wallet-sdk-watchasset-upstream`.
-- Token-allow-list / phishing-token detection (collision with already-known names/symbols).
-- Auto-fire `registerToken` after a successful drip without user click — rejected during clarifying because it spawns extra popups.
-- Surface the resolved token name/symbol in the OperationCard (UX polish).
+Add a bullet under "Package boundaries" or "Quality gates":
+
+> **Custom RPC schema patch (`registerToken`)**: Added to `WalletSchema` at runtime via three identical inline files (`packages/extension/src/wallet/services/wallet-sdk/nulo-schema-patch.ts`, `packages/faucet/src/lib/nulo-schema-patch.ts`, `packages/playground/src/lib/nulo-schema-patch.ts`). Each is a side-effect-only file. Drift is pinned by `packages/wallet-bridge/src/dispatcher.test.ts` (reachability test imports the real extension copy). When adding a new Nulo-custom RPC, update all three copies and pin the new shape in the dispatcher test.
+
+### 5.32 MODIFIED — `packages/playground/README.md`
+
+Drop the `simulateViews` / `getCompleteAddress` references (line 55 per Codex H3).
+
+### 5.33 OPTIONAL — `packages/faucet/package.json`, `packages/playground/package.json`
+
+Per Codex M2: declare `zod` as a direct dep if either package imports it. Currently transitive via `@aztec/aztec.js`. The schema-patch files import `zod` directly — adding it as a direct dep avoids transitive-removal breakage. Check version pin matches the extension's pin.
+
+## 6. Deprecation summary (revised)
+
+| Method | dApp wire surface | Op kind | Internal callers |
+|---|---|---|---|
+| `registerToken` | **Restored** (inline patch ×3, schema mutation) | `register_token` — keep | none (dApp-driven) |
+| `getCompleteAddress` | **Dropped** | `get_complete_address` — **dropped entirely** | none |
+| `simulateViews` | **Dropped** | `simulate_views` — **kept** | `balance-projector.ts:121-127`, `execution/service.ts:1509, 1537` |
+
+## 7. Security & Adversarial Considerations (revised)
+
+Drawn from both audits + Opus + Codex consensus.
+
+### 7.1 Threat model
+
+| Actor | Goal | Surface | Mitigation in this PR |
+|---|---|---|---|
+| Malicious dApp post-connect | Add a phishing token that looks like real USDC | `registerToken` RPC after `accounts` cap is granted | Popup with **resolved name + symbol + contract address + decimals + host-only origin** before Allow (D7). Per-call confirmation (D5 + B1 fix). |
+| Malicious dApp post-connect | Token-list pollution / DoS | Repeated `registerToken` calls | Per-call popup; user can reject. **NEW**: short-circuit duplicate adds before journal write (Opus H2 fix in `executeRegisterToken`, see §5.34 below). |
+| Compromised upstream `@aztec/wallet-sdk` | Bypass schema check or rewrite handler | Encrypted-channel layer | Out of scope (upstream concern). Mitigation: 7-day npm min-age via `bunfig.toml`, exact-pinned `@aztec/wallet-sdk == 4.2.0`. |
+| Origin string spoofing in popup | Render an attacker-controlled string that looks like a token name | OperationCard "Requested by" rendering | **Host-only render**, separate visual treatment (D7 in §5.8). |
+
+### 7.2 Defences
+
+- **Popup gate works** (post-B1 fix in §5.5+§5.6): `register_token` always routes through `DappInteractionService.execute()` with explicit `isConfirmationNeeded` true.
+- **Capability gate**: `registerToken` requires the `accounts` capability — dApp must already be permissioned.
+- **Origin host-only rendering**: prevents "Requested by https://usdc.faucet-evil.com" from looking like the token name.
+- **Resolved metadata before Allow**: user sees the actual on-chain name/symbol/decimals, not just an address.
+- **Strict argument validation**: schema-patch Zod entry validates both args are addresses; signature drift throws at SW init.
+- **Idempotency** with early short-circuit (see §5.34): repeat-add of same contract returns silently without PXE traffic or journal writes.
+
+### 7.3 Risks accepted in this PR
+
+- **Token name/symbol forgery**: a malicious contract can return `"USDC"` for its name. The popup shows the contract address ALONGSIDE the name/symbol — the user is responsible for cross-checking. Follow-up: `register-token-name-collision-detection` plan (see §10).
+- **`TokenImportRow` disappears post-success** (Codex H5): the "Requested by" trail isn't durable. The journal entry persists internally but isn't surfaced in the tokens view after success. Follow-up: `token-import-history-persistence`.
+
+### 7.4 §5.34 NEW — DoS short-circuit in `executeRegisterToken` (Opus H2)
+
+Add an early-return in `tokenService.addToken` (or in `executeRegisterToken` before calling it): if `findToken(profileId, chainId, contract)` already returns a token, return immediately — NO journal entry write, NO PXE re-fetch.
+
+```ts
+// In tokenService.addToken, at the very top:
+const existing = this.findToken(profileId, chainId, tokenInterface.contract)
+if (existing) {
+  this.logDebug(`addToken: ${tokenInterface.contract} already registered, skipping`)
+  return existing
+}
+// Only THEN start the journal entry / parse / write.
+```
+
+This makes the function safely re-entrant under spam loads. Without this, a malicious dApp can force unbounded PXE traffic by passing junk addresses (each "new" address triggers `parseTokenInterface`).
+
+For junk addresses (i.e. unique address-per-call), the dedupe doesn't help — the popup is the only gate. The user can simply Deny. Filed as an additional follow-up: `register-token-rate-limit` if real-world abuse appears.
+
+### 7.5 Supply chain
+
+- **No new external deps.** `zod` is transitive via `@aztec/aztec.js`; promoting it to a direct dep in faucet/playground (§5.33) doesn't bypass the 7-day age gate (`bunfig.toml` `minimumReleaseAge`).
+- `bun audit` continues to run in CI; no new advisories expected.
+
+## 8. Tests (revised)
+
+Already covered in §5.25–§5.29 + §5.24. Summary:
+- **Unit/component**: dispatcher contract tests (capability + accessLevel + reachability via real patch import), composable behavior, TokenCard rendering, drift pin via real-patch import.
+- **E2E**: one parallel-safe network spec in `tests/e2e/network/` covering happy + cancel paths for both tokens.
+- **Smoke**: not applicable (no smoke regression expected).
+- **Manual**: alpha-testnet end-to-end on the deployed faucet.
 
 ## 9. Acceptance criteria
 
-A reviewer who pulls this branch should be able to verify all of:
+- [ ] `bun run audit:vue` passes.
+- [ ] `bun run e2e:agent` passes including the new `tests/e2e/network/faucet-add-token.test.ts`.
+- [ ] Parallel-safe: two `e2e:agent` worktree agents can run `faucet-add-token` concurrently without port collisions.
+- [ ] On alpha-testnet, "Add to wallet" results in both USDC and ETH appearing in the wallet popup's token list within ~3s.
+- [ ] Popup shows resolved name + symbol + decimals + address + host-only origin BEFORE Allow/Deny.
+- [ ] Cancel returns the faucet status row to idle within ~3s (no error UI).
+- [ ] Playground `registerToken` button works.
+- [ ] Calling `wallet.getCompleteAddress` or `wallet.simulateViews` throws "Unsupported wallet method".
+- [ ] `wallet.batch([{name: "registerToken", ...}])` rejects with a Zod validation error.
+- [ ] Dispatcher contract test pins capability + accessLevel + reachability.
 
-- [ ] `bun run audit:vue` passes (typecheck + unit + component tests + lint + build).
-- [ ] `bun run test:e2e` passes (no smoke regression).
-- [ ] `bun run e2e:agent` runs the new `faucet-add-token.test.ts` and passes (network suite, includes the full happy-path + cancel-path described in §7.2).
-- [ ] On alpha-testnet, connecting Nulo to the faucet + clicking "Add to wallet" for both USDC and ETH results in both tokens appearing in the wallet popup's token list within ~3s.
-- [ ] The wallet popup's TokenImportRow shows "Requested by <faucet-origin>" for both tokens.
-- [ ] Cancelling the popup leaves the faucet status row at idle (no error UI), per the wallet-bridge cancel recipe (4001 → silent).
-- [ ] The playground's `registerToken` button works end-to-end.
-- [ ] Calling `wallet.getCompleteAddress` or `wallet.simulateViews` from any code path throws "Unsupported wallet method" (regression guard).
-- [ ] The dispatcher contract test pins the patched `WalletSchema.registerToken` shape.
+## 10. Open questions / follow-ups (filed)
 
-## 10. Open questions / follow-ups
-
-- **Should the OperationCard fetch + display the token name / symbol BEFORE the Allow / Deny?** Currently it shows only the contract address. The PR ships as-is (address only), and the polish is filed as `register-token-popup-clarity`. If reviewer wants it bundled, swap §5.15 to extend the template and add a `tokenService.parseTokenInterface` pre-fetch on popup open.
-
-- **Should the faucet auto-prompt registerToken on first successful drip?** Rejected during clarifying; revisit if user metrics show low adoption.
-
-- **Push `wallet_watchAsset` upstream**? Filed as `wallet-sdk-watchasset-upstream` — separate, deferred. Would let us delete the schema-patch entirely.
-
-- **Sponsored token-add gas / fee path?** `registerToken` is purely off-chain (no tx, no fee, just PXE state). No fee model needed. Confirmed via reading `executeRegisterToken` — no `SendTransactionOperation` constructed.
+- `deprecate-simulate-views`: refactor balance-projector + gas-balance to use `aztec_simulateTx` + `aztec_executeUtility`; drop `simulate_views` op kind.
+- `register-token-name-collision-detection`: detect "wait, you have a USDC at a different address already" + warn the user.
+- `token-import-history-persistence`: keep "Requested by <origin>" visible in tokens view post-success.
+- `register-token-rate-limit`: per-origin rate limit on `registerToken` calls if real-world abuse emerges.
 
 ## 11. ASCII status (live)
 
 ```
 [✓] 0. Clarifying questions
-[▶] 1. Draft main plan
-[ ] 2. Dual audit (codex + opus)
-[ ] 3. Final codex review
-[ ] 4. Approval gate
-[ ] 5. Implementation
+[✓] 1. Draft main plan + ELI5
+[✓] 2. Dual audit (codex + opus)
+[—] 3. Final codex review (SKIPPED per user direction)
+[—] 4. Approval gate (SKIPPED per user direction)
+[▶] 5. Implementation
 [ ] 6. Post-impl codex review
 [ ] 7. Fix loop
 ```

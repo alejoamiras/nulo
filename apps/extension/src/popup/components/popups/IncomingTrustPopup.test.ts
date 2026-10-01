@@ -24,7 +24,7 @@ const openToastMock = vi.fn()
 const allowMock = vi.fn().mockResolvedValue(undefined)
 const rejectMock = vi.fn().mockResolvedValue(undefined)
 
-const contractAddress = `0x${"ab".repeat(32)}`
+const contractAddress = `0x${"0a".repeat(32)}`
 
 // reactive() so the popup's `tokenSymbol` computed re-evaluates when a test
 // models a mid-RPC identity switch (mutating incomingTrust). A plain object
@@ -32,7 +32,7 @@ const contractAddress = `0x${"ab".repeat(32)}`
 const cacheStoreState: {
 	incomingTrust: {
 		tokenSymbol: string
-		tokenDecimals: number
+		tokenDecimals?: number
 		amountRaw: string
 		contract: string
 		allow: () => Promise<void>
@@ -58,11 +58,7 @@ vi.mock("@/stores/popup.store", () => ({
 vi.mock("@/composables/toast", () => ({
 	useToast: () => ({
 		openToast: openToastMock,
-		TOAST_DURATION: { SHORT: 1500, DEFAULT: 2000, LONG: 4000 },
 	}),
-}))
-vi.mock("@/utils/amount.js", () => ({
-	balanceFormatted: (raw: string, _decimals: number, _max: number) => ({ value: raw }),
 }))
 vi.mock("@/utils/string", () => ({
 	trimAddress: (s: string, head: number, tail: number) => `${s.slice(0, head)}…${s.slice(-tail)}`,
@@ -115,7 +111,7 @@ describe("IncomingTrustPopup — contract verification surface", () => {
 
 		const trimmed = w.find('[data-testid="incoming-trust-contract"]')
 		expect(trimmed.exists()).toBe(true)
-		expect(trimmed.text()).toBe(`0xabab…abab`)
+		expect(trimmed.text()).toBe(`0x0a0a…0a0a`)
 
 		const expandBtn = w.find('[data-testid="incoming-trust-contract-expand"]')
 		expect(expandBtn.exists()).toBe(true)
@@ -184,7 +180,7 @@ describe("IncomingTrustPopup — contract verification surface", () => {
 		await flushPromises()
 
 		expect(writeText).toHaveBeenCalledExactlyOnceWith(contractAddress)
-		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ label: "Contract address copied" }), expect.any(Number))
+		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ kind: "success", label: "Contract address copied" }))
 	})
 
 	test("copy failure: clipboard throws → warning toast fires + no crash", async () => {
@@ -198,7 +194,7 @@ describe("IncomingTrustPopup — contract verification surface", () => {
 		await flushPromises()
 
 		expect(writeText).toHaveBeenCalled()
-		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ icon: "warning" }), undefined)
+		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ kind: "error" }))
 	})
 
 	test("state reset on close: open → expand → close → reopen reads collapsed", async () => {
@@ -217,6 +213,20 @@ describe("IncomingTrustPopup — contract verification surface", () => {
 		// to prevent state bleed across separate pending contracts.
 		expect(w.find("#incoming-trust-contract-full").attributes("style") ?? "").toContain("display: none")
 		expect(w.find('[data-testid="incoming-trust-contract-expand"]').attributes("aria-expanded")).toBe("false")
+	})
+})
+
+describe("IncomingTrustPopup — the first-receive sentence names no amount", () => {
+	test.each([
+		["18 decimals", 18],
+		["decimals 255", 255],
+		["no decimals", undefined],
+	])("a receipt reported at %s reads the symbol alone", async (_name, tokenDecimals) => {
+		cacheStoreState.incomingTrust.tokenDecimals = tokenDecimals
+		const w = mount(IncomingTrustPopup, { props: { show: true }, global: { stubs: STUBS } })
+		await flushPromises()
+		expect(w.text()).toContain("You received TST from a contract you haven't seen before.")
+		cacheStoreState.incomingTrust.tokenDecimals = 18
 	})
 })
 
@@ -301,7 +311,7 @@ describe("IncomingTrustPopup — one decision path for allow and reject", () => 
 		const w = await mountShown()
 		await clickReject(w)
 		await flushPromises()
-		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ label: "Hiding receives from TST", icon: "info" }))
+		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ kind: "success", label: "Hiding receives from TST" }))
 		expect(w.emitted("onClose")?.length).toBe(1)
 		await clickReject(w)
 		expect(rejectMock).toHaveBeenCalledTimes(2)
@@ -326,7 +336,7 @@ describe("IncomingTrustPopup — one decision path for allow and reject", () => 
 		const w = await mountShown()
 		await clickReject(w)
 		await flushPromises()
-		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ label: "Couldn't update trust state", icon: "warning" }))
+		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ kind: "error", label: "Couldn't update trust state" }))
 		expect(w.emitted("onClose")?.length).toBe(1)
 		await clickReject(w)
 		expect(rejectMock).toHaveBeenCalledTimes(2)

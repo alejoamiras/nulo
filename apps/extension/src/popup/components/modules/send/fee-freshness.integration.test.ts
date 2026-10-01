@@ -114,7 +114,7 @@ describe("Send's fresh read survives a failed forced read", () => {
 		expect(entry?.gas.verified).toEqual({ publicFeeJuice: "1000", privateFeeJuice: "55" })
 		const selection = resolveSendSelection(
 			"private",
-			{ fpcs: entry?.fpc.data as RegisteredFpc[], balances: entry?.gas.verified, allowSponsored: false },
+			{ fpcs: entry?.fpc.data as RegisteredFpc[], balances: entry?.gas.verified },
 			undefined,
 		)
 		expect(selection).toMatchObject({ kind: "selected", method: { type: "private_fpc" } })

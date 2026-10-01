@@ -20,6 +20,8 @@ Depends only on `wallet-core` for the `ILogger` interface and `Web Crypto` (avai
 | `src/constants.ts` | `ENCRYPTION_GUARD` (frozen by the V8 vector), `PASSKEY_PRF_LABEL`. |
 | `src/zeroize.ts` | `zeroize()` helper for explicit secret-buffer wipes. |
 | `src/index.ts` | Public exports. |
+| `src/public.ts` | The npm surface (`@alejoamiras/nulo-wallet-crypto`): `deriveNuloAccountKeys`, `deriveSigningKeyFromSeed`, `EncryptionKey`, `type Passhash`. Staged by [`scripts/publish/`](../../scripts/publish/README.md); widening it widens a published API. |
+| `tsconfig.publish.json` | Declaration-only emit for the published entry (comments stripped). |
 | [`ATTACK-SURFACE.md`](./ATTACK-SURFACE.md) | What an attacker who reads the disk actually gets, and the work factor to invert each artifact. Read this before changing a KDF cost, adding a persisted field, or arguing about whether something needs encrypting. |
 | `vectors/` | Vendored **official** BIP-39 test vectors + provenance — the external oracle for the mnemonic step. |
 
@@ -54,4 +56,4 @@ Treat that file as a contract. **A vector/KDF change is NOT an ordinary storage 
 - **Buffer ownership.** Secret material is allocated as `Uint8Array<ArrayBuffer>`, never `Buffer`. Callers own the lifecycle and call `zeroize()` on drop. The package never mutates a buffer it didn't allocate, and never returns a buffer it expects to keep alive.
 - **`PasswordSecretBox.seal()` and `unseal()` are not symmetric across the passhash boundary.** `seal()` produces both an `EncryptedProfileSecret` (the on-disk record) and a `passhash` (the silent-restore bearer). `unsealWithPasshash()` and `unseal(password, …)` produce the same plaintext via different routes; both must remain in lock-step with the V2/V8 vectors.
 - **WebAuthn PRF non-portability.** Passkey credentials are tied to the registering browser context (per Chromium's FrameTreeNode scope). Cross-extension export+import of a passkey-typed backup is not supported. See `implementations-plan/passkey-e2e/PRF-NON-PORTABLE.md`.
-- **No Chrome APIs, no Node I/O.** Only Web Crypto, `@aztec/foundation` math helpers, and pure bytes.
+- **No Chrome APIs, no Node I/O.** Only Web Crypto, `@aztec-labs/foundation` math helpers, and pure bytes.

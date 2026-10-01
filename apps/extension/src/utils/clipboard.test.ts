@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest"
-import { copyToClipboard } from "./clipboard"
+import { copyToClipboard, copyWithToast } from "./clipboard"
 
 const writeText = vi.fn<(t: string) => Promise<void>>()
 const openToast = vi.fn()
@@ -11,8 +11,8 @@ beforeEach(() => {
 })
 
 const OPTS = {
-	success: { label: "Copied!", icon: "copy" },
-	failure: { label: "Nope", icon: "warning", duration: 3_000 },
+	success: { label: "Copied!" },
+	failure: { label: "Nope" },
 }
 
 describe("copyToClipboard", () => {
@@ -25,34 +25,29 @@ describe("copyToClipboard", () => {
 		expect(openToast).not.toHaveBeenCalled() // a premature success toast would fail here
 		resolveWrite()
 		await result
-		expect(openToast).toHaveBeenCalledWith({ label: "Copied!", icon: "copy" }, undefined)
+		expect(openToast).toHaveBeenCalledWith({ kind: "success", label: "Copied!" })
 	})
 
-	test("success: success spec's label/icon/duration only after the write resolves", async () => {
+	test("success: a success snack with the success label, only after the write resolves", async () => {
 		await expect(copyToClipboard("abc", openToast, OPTS)).resolves.toBe(true)
 		expect(openToast).toHaveBeenCalledTimes(1)
-		expect(openToast).toHaveBeenCalledWith({ label: "Copied!", icon: "copy" }, undefined)
+		expect(openToast).toHaveBeenCalledWith({ kind: "success", label: "Copied!" })
 	})
 
-	test("success duration passes through when specified", async () => {
-		await copyToClipboard("abc", openToast, { ...OPTS, success: { label: "C", icon: "copy", duration: 1_500 } })
-		expect(openToast).toHaveBeenCalledWith({ label: "C", icon: "copy" }, 1_500)
-	})
-
-	test("failure: DISTINCT failure spec (label/icon/duration), returns false — never a false 'copied'", async () => {
+	test("failure: an error snack with the DISTINCT failure label, returns false — never a false 'copied'", async () => {
 		writeText.mockRejectedValue(new Error("denied"))
 		await expect(copyToClipboard("abc", openToast, OPTS)).resolves.toBe(false)
 		expect(openToast).toHaveBeenCalledTimes(1)
-		expect(openToast).toHaveBeenCalledWith({ label: "Nope", icon: "warning" }, 3_000)
+		expect(openToast).toHaveBeenCalledWith({ kind: "error", label: "Nope" })
 	})
 
-	test("failure icon defaults to warning; success icon defaults to copy", async () => {
+	test("the kind follows the outcome, never the spec", async () => {
 		writeText.mockRejectedValue(new Error("x"))
 		await copyToClipboard("a", openToast, { success: { label: "s" }, failure: { label: "f" } })
-		expect(openToast).toHaveBeenCalledWith({ label: "f", icon: "warning" }, undefined)
+		expect(openToast).toHaveBeenCalledWith({ kind: "error", label: "f" })
 		writeText.mockResolvedValue(undefined)
 		await copyToClipboard("a", openToast, { success: { label: "s" }, failure: { label: "f" } })
-		expect(openToast).toHaveBeenLastCalledWith({ label: "s", icon: "copy" }, undefined)
+		expect(openToast).toHaveBeenLastCalledWith({ kind: "success", label: "s" })
 	})
 
 	test("sanitize defaults FALSE: copied bytes are exactly the input (D2 pin)", async () => {
@@ -68,5 +63,16 @@ describe("copyToClipboard", () => {
 	test("guard-free: an empty string is written verbatim, not silently dropped", async () => {
 		await expect(copyToClipboard("", openToast, OPTS)).resolves.toBe(true)
 		expect(writeText).toHaveBeenCalledWith("")
+	})
+})
+
+describe("copyWithToast", () => {
+	test("shares the fleet failure label and forwards sanitize", async () => {
+		await copyWithToast("0xab‮cd", openToast, "Key copied", { sanitize: true })
+		expect(writeText).toHaveBeenCalledWith("0xabcd")
+		expect(openToast).toHaveBeenCalledWith({ kind: "success", label: "Key copied" })
+		writeText.mockRejectedValue(new Error("denied"))
+		await expect(copyWithToast("x", openToast, "Key copied")).resolves.toBe(false)
+		expect(openToast).toHaveBeenLastCalledWith({ kind: "error", label: "Couldn't copy" })
 	})
 })

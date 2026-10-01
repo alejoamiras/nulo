@@ -10,6 +10,7 @@ import {
 	recordOf,
 	resolveSendSelection,
 	type SendSelection,
+	type TransferSide,
 } from "./fee-privacy"
 
 const PRIVATE_FPC: RegisteredFpc = { id: "pfpc", type: FpcType.PrivateFpc, name: "Private Fee Juice", isProtocol: true }
@@ -19,11 +20,7 @@ const SPONSOR_2: RegisteredFpc = { id: "spon2", type: FpcType.DefaultSponsoredFp
 const balances = (publicFeeJuice: string | null, privateFeeJuice: string | null): GasBalances =>
 	({ publicFeeJuice, privateFeeJuice }) as GasBalances
 
-const know = (fpcs: RegisteredFpc[], b: GasBalances | undefined, allowSponsored = true): FeeKnowledge => ({
-	fpcs,
-	balances: b,
-	allowSponsored,
-})
+const know = (fpcs: RegisteredFpc[], b: GasBalances | undefined): FeeKnowledge => ({ fpcs, balances: b })
 
 /** "fj" | "private_fpc" | "fpc:<id>" | "hold" | "none" — one token per outcome keeps the tables readable. */
 const outcome = (s: SendSelection): string => {
@@ -118,11 +115,6 @@ describe("resolveSendSelection — private origin", () => {
 		expect(resolve(know([PRIVATE_FPC], balances("0", "0")))).toBe("none")
 		expect(resolve(know([PRIVATE_FPC], balances(null, "0")))).toBe("hold")
 	})
-
-	test("a sponsor the network disallows is not a payer", () => {
-		expect(resolve(know([PRIVATE_FPC, SPONSOR], balances("0", "0"), false))).toBe("none")
-		expect(resolve(know([SPONSOR], undefined, false))).toBe("hold")
-	})
 })
 
 describe("resolveSendSelection — public origin", () => {
@@ -149,6 +141,27 @@ describe("resolveSendSelection — public origin", () => {
 	})
 })
 
+describe("resolveSendSelection — which sponsor the walk reaches", () => {
+	const both = (k: FeeKnowledge, pick?: Parameters<typeof resolveSendSelection>[2]) => [
+		outcome(resolveSendSelection("private", k, pick)),
+		outcome(resolveSendSelection("public", k, pick)),
+	]
+
+	test("Nulo's sponsor, even listed after one added by hand, on either origin", () => {
+		expect(both(know([PRIVATE_FPC, SPONSOR_2, SPONSOR], balances("0", "0")))).toEqual(["fpc:spon", "fpc:spon"])
+	})
+
+	test("never one added by hand: the walk ends on its next step instead", () => {
+		expect(both(know([PRIVATE_FPC, SPONSOR_2], balances("0", "0")))).toEqual(["none", "none"])
+		expect(both(know([PRIVATE_FPC, SPONSOR_2], undefined))).toEqual(["hold", "hold"])
+	})
+
+	test("a saved pick of one added by hand still wins", () => {
+		const k = know([PRIVATE_FPC, SPONSOR, SPONSOR_2], balances("0", "0"))
+		expect(both(k, { type: "fpc", fpc: { id: "spon2" } })).toEqual(["fpc:spon2", "fpc:spon2"])
+	})
+})
+
 describe("resolveSendSelection — picks", () => {
 	test("an eligible pick beats the walk, on either origin", () => {
 		const k = know([PRIVATE_FPC, SPONSOR, SPONSOR_2], balances("9", "9"))
@@ -169,6 +182,44 @@ describe("resolveSendSelection — picks", () => {
 			"private_fpc",
 		)
 		expect(outcome(resolveSendSelection("public", know([PRIVATE_FPC], balances("9", "0")), { type: "private_fpc" }))).toBe("fj")
+	})
+})
+
+describe("resolveSendSelection — Nulo's sponsor found short", () => {
+	const SHORT = { shortSponsorIds: new Set(["spon"]), setAsideSponsorIds: new Set(["spon"]) }
+	const SET_ASIDE = { setAsideSponsorIds: new Set(["spon"]) }
+	const PICK = { type: "fpc", fpc: { id: "spon" } } as const
+	const resolve = (origin: TransferSide, k: FeeKnowledge, pick?: Parameters<typeof resolveSendSelection>[2]) =>
+		outcome(resolveSendSelection(origin, k, pick))
+	const knowing = (b: GasBalances, verdicts?: Partial<FeeKnowledge>): FeeKnowledge => ({
+		...know([PRIVATE_FPC, SPONSOR], b),
+		...verdicts,
+	})
+
+	test("the public walk with no gas of its own: none once both balances read zero, hold while one is unread", () => {
+		expect(resolve("public", knowing(balances("0", "0")))).toBe("fpc:spon")
+		expect(resolve("public", knowing(balances("0", "0"), SHORT))).toBe("none")
+		expect(resolve("public", knowing(balances("0", null), SHORT))).toBe("hold")
+		expect(resolve("public", knowing(balances(null, "0"), SHORT))).toBe("hold")
+	})
+
+	test("the private walk with private gas unread holds", () => {
+		expect(resolve("private", knowing(balances("9", null)))).toBe("fpc:spon")
+		expect(resolve("private", knowing(balances("9", null), SHORT))).toBe("hold")
+	})
+
+	test("a saved pick of it, public Fee Juice funded: Fee Juice, on either origin", () => {
+		const funded = balances("9", "0")
+		expect([resolve("private", knowing(funded), PICK), resolve("public", knowing(funded), PICK)]).toEqual(["fpc:spon", "fpc:spon"])
+		expect([resolve("private", knowing(funded, SHORT), PICK), resolve("public", knowing(funded, SHORT), PICK)]).toEqual(["fj", "fj"])
+	})
+
+	test("set aside but offered again: neither the walk nor its old pick selects it", () => {
+		const k = knowing(balances("0", "0"), SET_ASIDE)
+		for (const origin of ["private", "public"] as const) {
+			expect(resolve(origin, k)).toBe("none")
+			expect(resolve(origin, k, PICK)).toBe("none")
+		}
 	})
 })
 
@@ -206,22 +257,21 @@ describe("applyFpcEdits", () => {
 })
 
 describe("previewForPick", () => {
-	const loading = buildFeeMethods([], undefined, { allowSponsored: true })
+	const loading = buildFeeMethods([])
 
 	test("a row that exists is the preview", () => {
-		expect(previewForPick({ type: "fj" }, loading, true)?.type).toBe("fj")
-		expect(previewForPick({ type: "private_fpc" }, loading, true)?.type).toBe("private_fpc")
+		expect(previewForPick({ type: "fj" }, loading)?.type).toBe("fj")
+		expect(previewForPick({ type: "private_fpc" }, loading)?.type).toBe("private_fpc")
 	})
 
 	test("a sponsor pick with no row yet is drawn from its label, and carries nothing to pay with", () => {
-		const preview = previewForPick({ type: "fpc", fpc: { id: "spon", name: "My sponsor" } }, loading, true)
+		const preview = previewForPick({ type: "fpc", fpc: { id: "spon", name: "My sponsor" } }, loading)
 		expect(preview).toEqual({ type: "fpc", title: "My sponsor", subtitle: "sponsored" })
-		expect(previewForPick({ type: "fpc", fpc: { id: "spon" } }, loading, true)?.title).toBe("Sponsored FPC")
+		expect(previewForPick({ type: "fpc", fpc: { id: "spon" } }, loading)?.title).toBe("Sponsored")
 	})
 
-	test("nothing where sponsors are not offered, or for no pick", () => {
-		expect(previewForPick({ type: "fpc", fpc: { id: "spon", name: "My sponsor" } }, loading, false)).toBeUndefined()
-		expect(previewForPick(undefined, loading, true)).toBeUndefined()
+	test("nothing for no pick", () => {
+		expect(previewForPick(undefined, loading)).toBeUndefined()
 	})
 })
 

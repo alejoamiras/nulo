@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, test, vi } from "vitest"
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { asBase64CredentialId, asBase64SecretPrf, asHexUserHandle, type PasskeyCredential } from "@nulo/wallet-crypto"

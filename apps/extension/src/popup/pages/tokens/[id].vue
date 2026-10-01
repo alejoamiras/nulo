@@ -149,11 +149,11 @@ const handleTogglePin = async () => {
 	if (!token.value) return
 	if (isPinned.value) {
 		await pins.unpin(token.value.contract)
-		openToast({ label: "Unpinned from Home" })
+		openToast({ kind: "success", label: "Unpinned from Home" })
 		return
 	}
 	const result = await pins.pin(token.value.contract)
-	if (result === "pinned") openToast({ label: "Pinned to Home" })
+	if (result === "pinned") openToast({ kind: "success", label: "Pinned to Home" })
 	if (result === "full") await showHomeFull()
 }
 
@@ -162,7 +162,7 @@ const handleDeleteToken = () => {
 	cacheStore.confirm.callback = async () => {
 		await tokenService.deleteToken(token.value.id)
 		router.push("/popup/general")
-		openToast({ label: "Token successfully deleted" })
+		openToast({ kind: "success", label: "Token successfully deleted" })
 	}
 	popupStore.open("confirm")
 }

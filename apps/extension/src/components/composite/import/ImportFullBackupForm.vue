@@ -1,5 +1,7 @@
 <script setup>
 import { newPasswordHint } from "@/utils/password"
+import { COLLAPSING_HERO } from "../collapsing-hero"
+import { restoreWarningText } from "./restore-warning"
 /**
  * Renders the full-backup-restore form: file picker, error/warning
  * banners, decryption-password section (when the backup is encrypted),
@@ -10,6 +12,9 @@ const props = defineProps({
 	selectedBackup: { type: Object, default: null },
 	restoreStatus: { type: [String, null], default: "" },
 	isRestoreHasErrors: { type: Boolean, default: false },
+	/** Names of the networks a Retry replays; the warning names them. */
+	unrestoredNetworks: { type: Array, default: () => [] },
+	hasOtherErrors: { type: Boolean, default: false },
 	error: { type: Object, default: () => ({ type: "", title: "", tooltip: "" }) },
 	isCopied: { type: Boolean, default: false },
 	maxPasswordLength: { type: Number, default: 128 },
@@ -21,10 +26,28 @@ const decryptionPassword = defineModel("decryptionPassword", { default: "" })
 const password = defineModel("password", { default: "" })
 const repeatedPassword = defineModel("repeatedPassword", { default: "" })
 
+const hero = inject(COLLAPSING_HERO, null)
+
 const isPasswordType = ref(true)
 const isDecryptionPasswordType = ref(true)
+const warningRef = useTemplateRef("warningRef")
 
 const passwordHint = computed(() => newPasswordHint(password.value ?? "", repeatedPassword.value ?? ""))
+const showWarning = computed(() => props.restoreStatus === "finished" && props.isRestoreHasErrors)
+const warningText = computed(() => restoreWarningText(props.unrestoredNetworks, props.hasOtherErrors))
+
+// The errors screen's footer buttons appear with the warning and shorten the popup's scroller,
+// which leaves the warning below its edge.
+watch(
+	showWarning,
+	(shown) => {
+		const el = shown ? warningRef.value?.$el : null
+		if (!el) return
+		if (hero) hero.reveal(el)
+		else el.scrollIntoView({ block: "nearest" })
+	},
+	{ flush: "post" },
+)
 </script>
 
 <template>
@@ -62,7 +85,10 @@ const passwordHint = computed(() => newPasswordHint(password.value ?? "", repeat
 		</Flex>
 
 		<Flex
-			v-if="restoreStatus === 'finished' && isRestoreHasErrors"
+			v-if="showWarning"
+			ref="warningRef"
+			role="alert"
+			data-testid="import-full-backup-warning"
 			direction="column"
 			gap="4"
 			:class="$style.warning_block"
@@ -70,9 +96,7 @@ const passwordHint = computed(() => newPasswordHint(password.value ?? "", repeat
 		>
 			<Flex align="center" gap="8">
 				<span :class="[$style.error_tag, $style.error_tag_warning]">Warning</span>
-				<Text size="12" weight="600" height="120" color="yellow">
-					Profile import completed with some errors. You can review the details or continue.
-				</Text>
+				<Text size="12" weight="600" height="120" color="yellow">{{ warningText }}</Text>
 			</Flex>
 		</Flex>
 	</div>

@@ -80,7 +80,7 @@ export interface ScopeBannerCopy {
 	action?: string
 }
 
-const NO_WATCH = "This still executes — you just won't see it in your balances or activity."
+const NO_WATCH = "This still executes. You just won't see it in your balances or activity."
 
 /** Names are the rows' own `name`, so a user's rename reads back as their own label. */
 export function scopeBannerCopy(state: ScopeBannerState, view: ScopeView, active: { account: Account; network: Network }): ScopeBannerCopy {

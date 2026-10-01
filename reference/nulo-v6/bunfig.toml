@@ -1,0 +1,4 @@
+# This project sits outside the root workspace, so it states the repo's 7-day release-age gate
+# itself. No excludes: every version in bun.lock was at least 7 days old when it was resolved.
+[install]
+minimumReleaseAge = 604800

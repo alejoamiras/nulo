@@ -9,11 +9,22 @@
  */
 
 import { describe, expect, test, vi } from "vitest"
-import { JobCancelledError, OperationNotRecordedError, SessionEndedError } from "@nulo/extension-messaging/errors"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { Gas, GasFees, GasSettings } from "@aztec-labs/stdlib/gas"
+import { JobCancelledError, JournaledRejection, OperationNotRecordedError, SessionEndedError } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { TransferType } from "@/wallet/services/transaction/service"
+import type { ProveAndSendContext } from "./execution-coordinator"
 import type { TransferRequest } from "./operation-planner"
 import { TransferExecutor, type TransferExecutorDeps } from "./transfer-executor"
+
+// The balance slot's poseidon2 runs Barretenberg WASM, which crashes under jsdom; the slot itself is
+// pinned in fee-juice-balance.test.ts.
+vi.mock("@aztec-labs/protocol-contracts/fee-juice", async (importOriginal) => {
+	const { Fr } = await import("@aztec-labs/foundation/curves/bn254")
+	return { ...(await importOriginal<object>()), computeFeePayerBalanceStorageSlot: vi.fn(async () => new Fr(0x51n)) }
+})
 
 const TOKEN = { contract: "0xtoken", name: "Test", symbol: "TST", decimals: 18 }
 const FEE_SETTINGS = { paymentMethod: { kind: "fj" } } as never
@@ -94,6 +105,7 @@ function makeHarness(overrides: Partial<TransferExecutorDeps> = {}) {
 		transitionJournal: vi.fn(async () => ({})),
 		logDebug: vi.fn(),
 		logError: vi.fn(),
+		readPublicStorageOnce: vi.fn(async () => new Fr(0n)),
 		...overrides,
 	}
 	return { deps, task, built, proveAndSend, executor: new TransferExecutor(deps) }
@@ -206,8 +218,8 @@ describe("TransferExecutor.execute", () => {
 
 	test("build failure: journal → failed with normalized error, task.fail, controller cleanup", async () => {
 		const boom = new Error("estimate blew up")
-		const { executor, deps, task } = makeHarness({ buildAndEstimate: vi.fn(async () => Promise.reject(boom)) })
-		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toThrow("estimate blew up")
+		const { executor, deps, task, proveAndSend } = makeHarness({ buildAndEstimate: vi.fn(async () => Promise.reject(boom)) })
+		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toStrictEqual(new JournaledRejection(boom, "j1"))
 
 		expect(deps.transitionJournal).toHaveBeenCalledWith(
 			"j1",
@@ -216,6 +228,91 @@ describe("TransferExecutor.execute", () => {
 		)
 		expect(task.fail).toHaveBeenCalledWith(boom)
 		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")
+		expect(proveAndSend).not.toHaveBeenCalled()
+	})
+
+	test("the node refusing an unfunded fee payer: journal → failed as a transfer, the rejection names the record", async () => {
+		// A 5.2.0 node's words: `Invalid tx: ` and its gas validator's reason.
+		const refusal = new Error("Invalid tx: Insufficient fee payer balance (required=880, available=0)")
+		const { executor, deps, proveAndSend } = makeHarness()
+		proveAndSend.mockRejectedValueOnce(refusal)
+		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toStrictEqual(new JournaledRejection(refusal, "j1"))
+		expect(deps.transitionJournal).toHaveBeenCalledWith(
+			"j1",
+			{ stage: "failed" },
+			expect.objectContaining({ kind: "transfer", message: expect.stringContaining("Insufficient fee payer balance") }),
+		)
+	})
+
+	test("submitting is committed on the record with the primary endpoint, and a refused write rejects", async () => {
+		const refused = new Error("storage write failed")
+		const { executor, deps, proveAndSend } = makeHarness({
+			transitionJournal: vi.fn(async (_id: string, progress: { stage: string }) => {
+				if (progress.stage === "submitting") throw refused
+				return {}
+			}) as never,
+		})
+		proveAndSend.mockImplementationOnce(async (ctx) => {
+			const bound = ctx as unknown as ProveAndSendContext
+			expect(bound.submittedEndpointUrl).toBe("http://primary")
+			await bound.commitSubmitting({ txHash: "0xhash", submittedEndpointUrl: bound.submittedEndpointUrl })
+			throw new Error("unreachable: the refused write must reject")
+		})
+		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toStrictEqual(new JournaledRejection(refused, "j1"))
+		expect(deps.transitionJournal).toHaveBeenCalledWith("j1", {
+			stage: "submitting",
+			txHash: "0xhash",
+			submittedEndpointUrl: "http://primary",
+		})
+		expect(deps.logError).not.toHaveBeenCalledWith("Failed to update journal operation", refused)
+	})
+
+	test("recording the activity failing after the send: journal → failed as a transfer", async () => {
+		const lost = new Error("activity write failed")
+		const { executor, deps } = makeHarness({ addTransaction: vi.fn(async () => Promise.reject(lost)) })
+		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toStrictEqual(new JournaledRejection(lost, "j1"))
+		expect(deps.transitionJournal).toHaveBeenCalledWith("j1", { stage: "failed" }, expect.objectContaining({ kind: "transfer" }))
+	})
+
+	test("a failure the record could not take is thrown alone, naming no record", async () => {
+		const boom = new Error("estimate blew up")
+		const { executor, deps } = makeHarness({
+			buildAndEstimate: vi.fn(async () => Promise.reject(boom)),
+			transitionJournal: vi.fn(async (_id: string, progress: { stage: string }) => {
+				if (progress.stage === "failed") throw new Error("storage down")
+				return {}
+			}) as never,
+		})
+		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toBe(boom)
+		expect(deps.logError).toHaveBeenCalledWith("Failed to update journal operation", expect.any(Error))
+	})
+
+	test("two identical sends failing in reverse order each name their own record; one refused before its record names none", async () => {
+		let created = 0
+		const builds: Array<(error: Error) => void> = []
+		const createJournalOperation = vi.fn(async (input) => ({ id: `j${++created}`, ...input }) as never)
+		const { executor } = makeHarness({
+			createJournalOperation,
+			buildAndEstimate: vi.fn(
+				() =>
+					new Promise<never>((_resolve, reject) => {
+						builds.push(reject)
+					}),
+			),
+		})
+		const first = executor.execute(makeReq(), undefined, FENCE).catch((error: unknown) => error)
+		const second = executor.execute(makeReq(), undefined, FENCE).catch((error: unknown) => error)
+		await vi.waitFor(() => expect(builds).toHaveLength(2))
+		createJournalOperation.mockRejectedValueOnce(new Error("journal write failed"))
+		const refused = await executor.execute(makeReq(), undefined, FENCE).catch((error: unknown) => error)
+
+		const secondError = new Error("the second send fails first")
+		builds[1]?.(secondError)
+		expect(await second).toStrictEqual(new JournaledRejection(secondError, "j2"))
+		const firstError = new Error("the first send fails last")
+		builds[0]?.(firstError)
+		expect(await first).toStrictEqual(new JournaledRejection(firstError, "j1"))
+		expect(refused).toBeInstanceOf(OperationNotRecordedError)
 	})
 
 	test("cancel before pipeline: JobCancelledError surfaces, NO failed transition, task.cancel fires", async () => {
@@ -276,7 +373,9 @@ describe("TransferExecutor: the authorizing session", () => {
 			lane: { registerInFlight: vi.fn(() => ({ live: false })), deleteController: vi.fn() },
 			estimateReuse: { tryConsume: vi.fn(async () => snapshot()), stash: vi.fn() } as never,
 		})
-		await expect(executor.execute(makeReq(), "est-1", fence)).rejects.toBeInstanceOf(SessionEndedError)
+		await expect(executor.execute(makeReq(), "est-1", fence)).rejects.toStrictEqual(
+			new JournaledRejection(expect.any(SessionEndedError), "j1"),
+		)
 
 		expect(deps.estimateReuse.tryConsume).not.toHaveBeenCalled()
 		expect(deps.buildAndEstimate).not.toHaveBeenCalled()
@@ -307,7 +406,9 @@ describe("TransferExecutor: the authorizing session", () => {
 				return {} as never
 			}),
 		})
-		await expect(executor.execute(makeReq(), "est-1", fence)).rejects.toBeInstanceOf(SessionEndedError)
+		await expect(executor.execute(makeReq(), "est-1", fence)).rejects.toStrictEqual(
+			new JournaledRejection(expect.any(SessionEndedError), "j1"),
+		)
 
 		expect(isFenceLive).toHaveBeenCalledWith(fence)
 		expect(proveAndSend).not.toHaveBeenCalled()
@@ -323,7 +424,9 @@ describe("TransferExecutor: the authorizing session", () => {
 				stash: vi.fn(),
 			} as never,
 		})
-		await expect(executor.execute(makeReq(), "est-1", fence)).rejects.toBeInstanceOf(SessionEndedError)
+		await expect(executor.execute(makeReq(), "est-1", fence)).rejects.toStrictEqual(
+			new JournaledRejection(expect.any(SessionEndedError), "j1"),
+		)
 
 		expect(deps.planner.buildTransferOperation).not.toHaveBeenCalled()
 		expect(deps.buildAndEstimate).not.toHaveBeenCalled()
@@ -428,5 +531,68 @@ describe("TransferExecutor.estimateFee cancellation", () => {
 		await executor.estimateFee(makeReq(), controller.signal)
 		const call = (deps.buildAndEstimate as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
 		expect(call[4]).toBe(controller.signal)
+	})
+})
+
+describe("TransferExecutor.estimateFee sponsor funding", () => {
+	const SPONSOR = AztecAddress.fromNumberUnsafe(0x5f)
+	const FPC_SETTINGS = { paymentMethod: { kind: "fpc", fpcId: "fpc-9" } } as never
+
+	/** A sponsor-paid build with a real `GasSettings` (fee limit 2 × 100 + 3 × 200 = 800) and a
+	 *  node whose storage read must never be the probe's. */
+	function sponsorHarness(opts: { named?: boolean; balance?: bigint | Error } = {}) {
+		const readPublicStorageOnce = vi.fn(async () => {
+			if (opts.balance instanceof Error) throw opts.balance
+			return new Fr(opts.balance ?? 799n)
+		})
+		const h = makeHarness({ readPublicStorageOnce })
+		const node = { getPublicStorageAt: vi.fn() }
+		const gasSettings = new GasSettings(new Gas(100, 200), new Gas(10, 20), new GasFees(2n, 3n), new GasFees(0n, 0n))
+		Object.assign(h.built, {
+			node,
+			txRequest: { txContext: { gasSettings } },
+			...(opts.named === false ? {} : { sponsor: { fpcId: "fpc-9", address: SPONSOR } }),
+		})
+		return { ...h, readPublicStorageOnce, node }
+	}
+
+	test("a build naming a sponsor carries the probe's verdict, read through the one-shot reader", async () => {
+		const { executor, deps, built, readPublicStorageOnce, node } = sponsorHarness({ balance: 799n })
+
+		const result = await executor.estimateFee(makeReq({ feeSettings: FPC_SETTINGS }))
+
+		expect(result.sponsorFunding).toEqual({ fpcId: "fpc-9", address: SPONSOR.toString(), funded: false })
+		expect(result.maxFee).toBe("880")
+		expect(result.estimateId).toBeDefined()
+		expect(readPublicStorageOnce).toHaveBeenCalledTimes(1)
+		expect((readPublicStorageOnce.mock.calls[0] as unknown[])[0]).toBe(built.network)
+		expect(node.getPublicStorageAt).not.toHaveBeenCalled()
+		expect(deps.logDebug).toHaveBeenCalledWith("sponsor probe", { outcome: "short" })
+	})
+
+	test.each([
+		{ build: "a build naming no sponsor", named: false, balance: 0n, reads: 0 },
+		{ build: "a failed read", named: true, balance: new Error("Request to https://rpc.example timed out"), reads: 1 },
+	])("$build: no sponsorFunding key, the estimate otherwise whole", async ({ named, balance, reads }) => {
+		const { executor, readPublicStorageOnce } = sponsorHarness({ named, balance })
+
+		const result = await executor.estimateFee(makeReq({ feeSettings: FPC_SETTINGS }))
+
+		expect(result).not.toHaveProperty("sponsorFunding")
+		expect(result.maxFee).toBe("880")
+		expect(result.estimateId).toBeDefined()
+		expect(readPublicStorageOnce).toHaveBeenCalledTimes(reads)
+	})
+
+	test("a cancel landing during the probe rejects and stashes nothing", async () => {
+		const controller = new AbortController()
+		const { executor, deps, readPublicStorageOnce } = sponsorHarness()
+		readPublicStorageOnce.mockImplementation(async () => {
+			controller.abort()
+			return new Fr(800n)
+		})
+
+		await expect(executor.estimateFee(makeReq({ feeSettings: FPC_SETTINGS }), controller.signal)).rejects.toThrow(JobCancelledSentinel)
+		expect(deps.estimateReuse.stash).not.toHaveBeenCalled()
 	})
 })

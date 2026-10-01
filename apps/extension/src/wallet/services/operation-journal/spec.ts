@@ -93,7 +93,7 @@ export interface OperationRecord {
 	title?: string
 	subtitle?: string
 	/**
-	 * Phase 2 follow-up v4: raw transfer amount in base units, BigInt
+	 * Raw transfer amount in base units, BigInt
 	 * serialized as a string (BigInt doesn't JSON round-trip). Suffix
 	 * `Raw` matches the convention of `balanceFormatted(rawAmount, decimals, length)`.
 	 * Set by `executeTransfer` for UI-initiated transfers; undefined for
@@ -101,13 +101,12 @@ export interface OperationRecord {
 	 */
 	amountRaw?: string
 	/**
-	 * Phase 2 follow-up v4: transfer recipient address. Persisted on the
-	 * journal for future tx-detail views; not rendered on cards in this
-	 * phase. Undefined for non-transfer kinds.
+	 * Transfer recipient address, shown on the journal-detail page; no card
+	 * renders it. Undefined for non-transfer kinds.
 	 */
 	recipientAddress?: string
 	/**
-	 * Phase 2.5: token contract address for `kind: "token_import"` records.
+	 * Token contract address for `kind: "token_import"` records.
 	 * Identifies the in-flight import in the tokens view (where the journal
 	 * record drives the `TokenImportRow` until the token is added to the
 	 * watchlist and the normal `TokenCard` takes over). Undefined for
@@ -182,11 +181,32 @@ export const JobProgressSchema: z.ZodType<JobProgress> = z.discriminatedUnion("s
 	z.object({ stage: z.literal("pending") }),
 	z.object({ stage: z.literal("simulating") }),
 	z.object({ stage: z.literal("proving"), enteredProveAt: z.number(), backend: z.enum(["presto", "browser"]).optional() }),
-	z.object({ stage: z.literal("submitting"), txHash: z.string().optional() }),
+	z.object({ stage: z.literal("submitting"), txHash: z.string().optional(), submittedEndpointUrl: z.string().optional() }),
 	z.object({ stage: z.literal("succeeded"), txHash: z.string().optional() }),
-	z.object({ stage: z.literal("failed") }),
+	z.object({
+		stage: z.literal("failed"),
+		from: z.enum(["queued", "pending", "simulating", "proving", "submitting"]).optional(),
+		txHash: z.string().optional(),
+		submittedEndpointUrl: z.string().optional(),
+		check: z.enum(["sent", "reverted", "unconfirmed"]).optional(),
+	}),
 	z.object({ stage: z.literal("cancelled") }),
 ])
+
+/** May have reached the node: it failed at `submitting` with a hash, and not at the send line's
+ *  own liveness check, which throws before `node.sendTx`. */
+export function isSendCheckable(op: OperationRecord): boolean {
+	const { progress } = op
+	return progress.stage === "failed" && progress.from === "submitting" && !!progress.txHash && op.error?.kind !== "session_ended"
+}
+
+/** Proven not sent: it failed before `submitting`, or at that liveness check. A row with no
+ *  recorded stage proves nothing. */
+export function wasNeverSent(op: OperationRecord): boolean {
+	const { progress } = op
+	if (progress.stage !== "failed" || progress.from === undefined) return false
+	return progress.from !== "submitting" || op.error?.kind === "session_ended"
+}
 
 /**
  * Narrowed initial-stage schema for `createOperation` callers. Only the
@@ -235,10 +255,6 @@ export const OperationRecordSchema: z.ZodType<OperationRecord> = z.object({
  * card correctly (RecentActivityView.journalRecordInScope filters by
  * accountAddress + networkId from the dapp side) and the per-session cap
  * can't apply (no sessionId to count against).
- *
- * Codex + opus post-impl reviews flagged the un-refined version as too
- * permissive — it admitted records like `{kind:"transfer", initialStage:"queued"}`
- * that would never render in the activity feed.
  */
 export const NewOperationInputSchema: z.ZodType<NewOperationInput> = z
 	.object({

@@ -9,7 +9,7 @@ import { nodePolyfills } from "vite-plugin-node-polyfills"
  *  2) Disable HMR so saves don't fire `chrome.tabs.onUpdated` and terminate
  *     live dApp sessions mid-test.
  *
- * Node polyfills are required because @aztec/aztec.js + @aztec/wallet-sdk
+ * Node polyfills are required because @aztec-labs/aztec.js + @aztec-labs/wallet-sdk
  * pull in `util`, `buffer`, `events` etc. that reference `process` /
  * `Buffer` at module-eval time. Without these the bundle ReferenceError's
  * before main.ts ever runs.
@@ -37,6 +37,6 @@ export default defineConfig({
 	},
 	clearScreen: false,
 	optimizeDeps: {
-		exclude: ["@aztec/bb.js", "@aztec/noir-acvm_js", "@aztec/noir-noirc_abi"],
+		exclude: ["@aztec-foundation/bb.js", "@aztec-foundation/noir-acvm_js", "@aztec-foundation/noir-noirc_abi"],
 	},
 })

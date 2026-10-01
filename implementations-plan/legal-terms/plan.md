@@ -13,7 +13,7 @@ Closes release blockers 1–3 of [`legal/README.md`](../../legal/README.md) and 
 third-party attribution found while answering blocker 4. Read [`recon.md`](recon.md) first; the
 design below is a consequence of its first section. The alternative shape is in
 [`competing-outline.md`](competing-outline.md); round-1 audits and their adjudication are in
-[`audit-codex.md`](audit-codex.md), [`audit-fable.md`](audit-fable.md) and
+[`audit-codex.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/legal-terms/audit-codex.md), [`audit-fable.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/legal-terms/audit-fable.md) and
 [`decisions.md`](decisions.md). **This is revision 2** — Codex rejected revision 1 over a confirmed
 broadcast path outside the guards; the fix is the first item under Architecture.
 

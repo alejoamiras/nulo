@@ -1,13 +1,16 @@
 import { EncryptionKey } from "@nulo/wallet-crypto"
+import { MaterialIcon } from "@nulo/design"
 import { MAX_BACKUP_FILE_BYTES } from "@/utils/full-backup-helpers"
 import { createTestingPinia } from "@pinia/testing"
-import { flushPromises, mount } from "@vue/test-utils"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { flushPromises, mount, type VueWrapper } from "@vue/test-utils"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { pressOn } from "../../../../../../tests/helpers/press-key"
+import SubPageHeader from "@/components/ui/SubPageHeader.vue"
 import { useAppStore } from "@/stores/app.store"
 import FullExportPage from "./full.vue"
 
 /**
- * Component pins for the export page's re-entry latch, error boundary, and
+ * Component pins for the export page's re-entry latch, Enter handling, error boundary, and
  * sealed-artifact contract. Client modules are mocked at the import level
  * (the useFullBackupImport.test.ts pattern); the assembler is REAL — the
  * single-execution proof counts the per-slice backup() calls through it.
@@ -130,8 +133,9 @@ beforeEach(() => {
 	}
 })
 
+const router = vi.hoisted(() => ({ go: vi.fn(), push: vi.fn(), back: vi.fn() }))
 vi.mock("vue-router", () => ({
-	useRouter: () => ({ go: vi.fn(), push: vi.fn() }),
+	useRouter: () => router,
 }))
 
 const allClients = () => [
@@ -146,8 +150,11 @@ const allClients = () => [
 	configClient,
 ]
 
+const wrappers: VueWrapper[] = []
+
 function mountPage() {
-	return mount(FullExportPage, {
+	const wrapper = mount(FullExportPage, {
+		attachTo: document.body,
 		global: {
 			plugins: [
 				createTestingPinia({
@@ -157,10 +164,8 @@ function mountPage() {
 					stubActions: false,
 				}),
 			],
+			components: { MaterialIcon, SubPageHeader },
 			stubs: {
-				CollapsingHeroLayout: {
-					template: "<div><slot /><slot name='bottom' /></div>",
-				},
 				SecretUnlockSection: {
 					props: ["modelValue", "error"],
 					emits: ["update:modelValue", "clearError"],
@@ -177,6 +182,8 @@ function mountPage() {
 			},
 		},
 	})
+	wrappers.push(wrapper)
+	return wrapper
 }
 
 async function reachUnlockAndSubmit(wrapper: ReturnType<typeof mountPage>) {
@@ -184,6 +191,21 @@ async function reachUnlockAndSubmit(wrapper: ReturnType<typeof mountPage>) {
 	await wrapper.find("[data-testid='unlock-password-input']").setValue("pw")
 	await wrapper.find("[data-testid='unlock-submit-btn']").trigger("click")
 }
+
+async function reachBackupReady(wrapper: ReturnType<typeof mountPage>) {
+	await reachUnlockAndSubmit(wrapper)
+	await vi.waitFor(() => expect(wrapper.find("[data-testid='protect-password-btn']").exists()).toBe(true))
+}
+
+/** Holds encryption at its first await: `EncryptionKey.getPasshash` never settles. */
+function holdEncryption() {
+	return vi.spyOn(EncryptionKey, "getPasshash").mockReturnValue(new Promise<never>(() => {}) as never)
+}
+
+afterEach(() => {
+	vi.restoreAllMocks()
+	for (const w of wrappers.splice(0)) if (!w.vm.$.isUnmounted) w.unmount()
+})
 
 const material = { masterKey: "mk", entropy: "ent", importedKeysDek: "dek" }
 
@@ -203,19 +225,14 @@ beforeEach(() => {
 })
 
 describe("export/full.vue — re-entry latch", () => {
-	it("a second click and double Enter during the KDF window start nothing", async () => {
+	it("Create Backup unrenders as it starts, so the KDF window runs one export end to end", async () => {
 		const kdf = deferred<typeof material>()
 		exportBackupMaterial.mockReturnValue(kdf.promise)
 		const wrapper = mountPage()
 		await reachUnlockAndSubmit(wrapper)
 
-		// Latch is closed while the KDF pends: the CTA has already unrendered
-		// (status flipped synchronously — THAT is the click-side guard) and
-		// double Enter is a no-op.
-		const again = wrapper.find("[data-testid='unlock-submit-btn']")
-		expect(again.exists()).toBe(false)
-		document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }))
-		document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }))
+		// The status flipped synchronously, so the CTA is gone before the KDF settles.
+		expect(wrapper.find("[data-testid='unlock-submit-btn']").exists()).toBe(false)
 		await flushPromises()
 		expect(exportBackupMaterial).toHaveBeenCalledTimes(1)
 
@@ -227,33 +244,62 @@ describe("export/full.vue — re-entry latch", () => {
 		expect(accountClient.backupImportedKeys).toHaveBeenCalledTimes(1)
 	})
 
-	it("Enter during 'progress' does not re-invoke; Enter during 'encrypting' does not re-invoke", async () => {
-		const slice = deferred<unknown>()
-		profileClient.backup.mockReturnValue(slice.promise)
+	it("two clicks on Protect in one tick start one encryption", async () => {
 		const wrapper = mountPage()
-		await reachUnlockAndSubmit(wrapper)
+		await reachBackupReady(wrapper)
+		const passhash = holdEncryption()
+		// Both land before Vue re-renders the button disabled: only `isBusy` stops the second.
+		const protect = wrapper.get("[data-testid='protect-password-btn']").element as HTMLElement
+		protect.click()
+		protect.click()
 		await flushPromises()
+		expect(passhash).toHaveBeenCalledTimes(1)
+	})
+})
 
-		// In the slice loop now (status "progress"): Enter must be a no-op.
-		document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }))
+describe("export/full.vue — Enter does what the focused control says", () => {
+	it("before export, Enter on the back arrow goes back and exports nothing", async () => {
+		const wrapper = mountPage()
+		await wrapper.find("[data-testid='agree-continue-btn']").trigger("click")
+		await wrapper.find("[data-testid='unlock-password-input']").setValue("pw")
+		// With no history behind the page, SubPageHeader pushes its backTo.
+		expect(window.history.length).toBe(1)
+		pressOn(wrapper.get("[data-testid='subpage-back']").element as HTMLElement, "Enter")
 		await flushPromises()
-		expect(exportBackupMaterial).toHaveBeenCalledTimes(1)
+		expect(router.push).toHaveBeenCalledWith("/popup/settings/security/export")
+		expect(exportBackupMaterial).not.toHaveBeenCalled()
+	})
 
-		slice.resolve([])
-		await vi.waitFor(() => expect(wrapper.find("[data-testid='protect-password-btn']").exists()).toBe(true))
+	it("at the backup-ready stage, Enter on Download Backup downloads and does not encrypt", async () => {
+		const wrapper = mountPage()
+		await reachBackupReady(wrapper)
+		const passhash = holdEncryption()
+		pressOn(wrapper.get("[data-testid='download-backup-btn']").element as HTMLElement, "Enter")
+		await flushPromises()
+		expect(downloadFile).toHaveBeenCalledTimes(1)
+		expect(downloadFile.mock.calls[0][0].filename).toMatch(/^NuloBackup_/)
+		expect(passhash).not.toHaveBeenCalled()
+	})
 
-		// Now "finished" → first Enter starts encryption (sync flip to
-		// "encrypting"), second Enter must be a no-op.
-		const passhashSpy = vi.spyOn(EncryptionKey, "getPasshash")
-		const passhash = deferred<never>()
-		passhashSpy.mockReturnValue(passhash.promise as never)
-		document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }))
-		document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }))
+	it("at the backup-ready stage, a repeat Enter on Download Backup downloads and encrypts nothing", async () => {
+		const wrapper = mountPage()
+		await reachBackupReady(wrapper)
+		const passhash = holdEncryption()
+		pressOn(wrapper.get("[data-testid='download-backup-btn']").element as HTMLElement, "Enter", { repeat: true })
 		await flushPromises()
-		expect(passhashSpy).toHaveBeenCalledTimes(1)
-		passhash.reject(new Error("test done"))
+		expect(downloadFile).not.toHaveBeenCalled()
+		expect(passhash).not.toHaveBeenCalled()
+	})
+
+	it("at the backup-ready stage, an Enter with nothing focused starts nothing", async () => {
+		const wrapper = mountPage()
+		await reachBackupReady(wrapper)
+		const passhash = holdEncryption()
+		;(document.activeElement as HTMLElement | null)?.blur()
+		document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))
 		await flushPromises()
-		passhashSpy.mockRestore()
+		expect(passhash).not.toHaveBeenCalled()
+		expect(downloadFile).not.toHaveBeenCalled()
 	})
 })
 
@@ -262,9 +308,7 @@ describe("export/full.vue — error boundary", () => {
 		tokenClient.backup.mockRejectedValue(new Error("slice boom"))
 		const wrapper = mountPage()
 		await reachUnlockAndSubmit(wrapper)
-		await vi.waitFor(() =>
-			expect(openToast).toHaveBeenCalledWith({ label: "Failed to create the backup", icon: "warning" }, expect.anything()),
-		)
+		await vi.waitFor(() => expect(openToast).toHaveBeenCalledWith({ kind: "error", label: "Failed to create the backup" }))
 		// Recoverable: the create CTA is rendered again (status reset to "").
 		await vi.waitFor(() => expect(wrapper.find("[data-testid='unlock-submit-btn']").exists()).toBe(true))
 		// Every constructed client torn down. The account mock is shared by the
@@ -287,10 +331,9 @@ describe("export/full.vue — error boundary", () => {
 		configClient.backup.mockResolvedValue(["x".repeat(MAX_BACKUP_FILE_BYTES + 2048)])
 		const wrapper = mountPage()
 		await reachUnlockAndSubmit(wrapper)
-		await vi.waitFor(
-			() => expect(openToast).toHaveBeenCalledWith({ label: "Backup is too large to create", icon: "warning" }, expect.anything()),
-			{ timeout: 30_000 },
-		)
+		await vi.waitFor(() => expect(openToast).toHaveBeenCalledWith({ kind: "error", label: "Backup is too large to create" }), {
+			timeout: 30_000,
+		})
 		await vi.waitFor(() => expect(wrapper.find("[data-testid='unlock-submit-btn']").exists()).toBe(true))
 		expect(wrapper.find("[data-testid='download-backup-btn']").exists()).toBe(false)
 	}, 45_000)

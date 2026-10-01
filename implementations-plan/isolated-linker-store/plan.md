@@ -1,7 +1,7 @@
 # Plan — isolated-linker-store (Arc B of the Bun 1.4 adoption goal) — v2, dual-audit-consolidated
 
 **Tier**: `/blueprint mid` · **Worktree/branch**: `worktree-isolated-linker-store` off dev @ 27935013 · **eli5_mode**: Artifact
-**Gate protocol**: codex-convergence (owner-delegated) · **Recon**: [recon.md](recon.md) · **Audits**: [audit-codex.md](audit-codex.md) + [audit-fable.md](audit-fable.md) — both conditional-approve round 1; ALL conditions adopted (dispositions in the Audit log)
+**Gate protocol**: codex-convergence (owner-delegated) · **Recon**: [recon.md](recon.md) · **Audits**: [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/isolated-linker-store/audit-codex.md) + [audit-fable.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/isolated-linker-store/audit-fable.md) — both conditional-approve round 1; ALL conditions adopted (dispositions in the Audit log)
 
 Adopt Bun's isolated linker + global virtual store for install speed across ~30 worktrees, WITHOUT breaking layout-sensitive tooling: consumers become layout-agnostic first (on hoisted), store semantics get probed in scratch BEFORE the repo ever touches them, the flip happens on the UNCHANGED v1 lockfile (layout-only risk), and the lockfile regeneration is its own wallet-grade-reviewed event. The abort path ships value anyway (B1 stands alone).
 

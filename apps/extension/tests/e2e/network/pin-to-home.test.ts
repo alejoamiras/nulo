@@ -6,10 +6,11 @@
  */
 
 import { expect, inject } from "vitest"
-import { test, openPopup, waitForHash } from "../fixtures/extension"
+import { test as base, openPopup, waitForHash } from "../fixtures/extension"
+import { extraTokensFixture } from "../fixtures/extra-tokens"
 import {
+	clearPinnedTokens,
 	clickNavTab,
-	importTokenAndWaitForBalance,
 	navigateToTokenDetail,
 	pinFromTokenPage,
 	readPinState,
@@ -21,6 +22,10 @@ const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
 
 const ONE = 10n ** 18n
+
+const test = base.extend<{ extraTokens: Record<string, string> }>({
+	extraTokens: extraTokensFixture([{ symbol: "ALT", amount: 25n * ONE }]),
+})
 
 const homeSymbols = (page: Awaited<ReturnType<typeof openPopup>>) =>
 	page.$$eval('[data-testid="tokens-card"] [data-testid="token-symbol"]', (els) => els.map((el) => (el as HTMLElement).dataset.symbol))
@@ -38,15 +43,11 @@ const waitForHomeOrder = (page: Awaited<ReturnType<typeof openPopup>>, order: st
 test.skipIf(!hasConfig)(
 	"pin to home: the pinned token leads Home, survives a reopen, and unpin restores the order",
 	{ timeout: 420_000 },
-	async ({ tokenReadyExtension }) => {
-		const { deployExtraTokensForAccount } = await import("../fixtures/aztec")
-		const addresses = await deployExtraTokensForAccount(aztecConfig!, tokenReadyExtension.accountAddress, [
-			{ symbol: "ALT", amount: 25n * ONE },
-		])
-
+	async ({ tokenReadyExtension, extraTokens: _extraTokens }) => {
 		let page = await openPopup(tokenReadyExtension)
 		await waitForHash(page, "#/popup/general")
-		await importTokenAndWaitForBalance(page, tokenReadyExtension.accountAddress, addresses.ALT, (25n * ONE).toString())
+		// A retry inherits whatever pin a failed attempt left.
+		await clearPinnedTokens(page)
 
 		await seedUsdQuoteAndReload(page)
 		await waitForHomeOrder(page, "TST,ALT")

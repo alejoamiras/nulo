@@ -5,12 +5,11 @@ import { join } from "node:path"
 /**
  * Theme contrast helper — resolves the design-system token graph for a given theme and computes
  * WCAG contrast ratios for an ASSERTED pairing table. This is deliberately NOT a CSS-cascade
- * resolver: jsdom can't resolve the var cascade across SFC styles + specificity (the tools app's
- * `app.css.parity.test.ts` documents the same limit), so we resolve only the token-reference graph
- * inside `base.css` (token -> token -> literal, with `:root` + `[theme]` override on one element) and
- * pair foreground tokens against EXPLICITLY-NAMED background tokens. It is only as complete as its
- * pairing table — that is the accepted trade-off, with the Storybook matrix + manual smoke covering
- * what an assertion table cannot.
+ * resolver: jsdom can't resolve the var cascade across SFC styles + specificity, so we resolve only
+ * the token-reference graph inside `base.css` (token -> token -> literal, with `:root` + `[theme]`
+ * override on one element) and pair foreground tokens against EXPLICITLY-NAMED background tokens.
+ * It is only as complete as its pairing table — that is the accepted trade-off, with the Storybook
+ * matrix + manual smoke covering what an assertion table cannot.
  */
 
 export type Rgba = { r: number; g: number; b: number; a: number }

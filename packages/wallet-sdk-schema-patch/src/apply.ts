@@ -1,17 +1,16 @@
 /**
- * Nulo-custom extension of `@aztec/wallet-sdk`'s `WalletSchema` with the
+ * Nulo-custom extension of `@aztec-labs/wallet-sdk`'s `WalletSchema` with the
  * `registerToken`, `isTokenRegistered`, and `grantPublicAuthwit` methods.
  *
- * This is the single source of truth — the extension, tools, and playground all
- * activate it via the sibling `./register` side-effect entry. (It used to be three
- * byte-identical inline copies; the drift risk is gone now that there is one.)
+ * This is the single source of truth — the extension and the playground both
+ * activate it via the sibling `./register` side-effect entry.
  *
- * ## Why a private package (not a wallet-bridge export)
+ * ## Why a separate package (not a wallet-bridge export)
  *
- * `wallet-bridge` is extension-internal — exposing it to tools/playground would
- * give third-party dApp surfaces a path to its dispatcher/protocol internals. A
- * dedicated PRIVATE package keeps the patch Nulo-internal while giving all three
- * apps one source.
+ * `wallet-bridge` is extension-internal — exposing it to the playground would
+ * give a dApp surface a path to its dispatcher/protocol internals. A dedicated
+ * package gives both apps one source without that path; this body is also
+ * published on npm.
  *
  * ## zod v4 entry shape (5.0)
  *
@@ -22,13 +21,13 @@
  *
  * ## Signature-drift guard
  *
- * If a future upstream `@aztec/wallet-sdk` ships its own `registerToken` (etc.),
+ * If a future upstream `@aztec-labs/wallet-sdk` ships its own `registerToken` (etc.),
  * we throw rather than silently no-op. The guard checks arg types + output type
  * (not just arity), so a same-arity-but-different-shape upstream method is caught.
- * Pinned upstream version: `@aztec/wallet-sdk == 5.2.0`; revisit on bump.
+ * Pinned upstream version: `@aztec-labs/wallet-sdk == 6.0.0-rc.1`; revisit on bump.
  */
 
-import { schemas } from "@aztec/stdlib/schemas"
+import { schemas } from "@aztec-labs/stdlib/schemas"
 import { z } from "zod"
 
 const PATCHED_SCHEMA = z.function({ input: z.tuple([schemas.AztecAddress, schemas.AztecAddress]), output: z.void() })
@@ -57,7 +56,7 @@ export function applyNuloSchemaPatch(schema: object): void {
 	patchOrVerifyEntry(schema, "getWalletFeatures", WALLET_FEATURES_SCHEMA, isWalletFeaturesShape, "() => string[]")
 }
 
-// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entries are upstream-typed but the per-key shape is internal to @aztec/aztec.js.
+// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entries are upstream-typed but the per-key shape is internal to @aztec-labs/aztec.js.
 type SchemaEntry = any
 
 /** Install `patched` under `key` when absent; when present and not ours, accept

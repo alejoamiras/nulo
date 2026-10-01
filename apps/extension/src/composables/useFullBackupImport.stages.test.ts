@@ -193,7 +193,7 @@ import { readLiveness } from "@/utils/background-liveness"
 async function buildBackup(overrides: Record<string, unknown> = {}) {
 	const { data: dataOverride, ...bodyOverrides } = overrides
 	const body = {
-		"compat-epoch": 4,
+		"compat-epoch": 5,
 		"backup-schema-version": 1,
 		"master-key": Buffer.from(new Uint8Array(32)).toString("base64"),
 		// Epoch-4 password blobs REQUIRE the entropy field. The composable checks only
@@ -240,7 +240,8 @@ function makeOpts(o: MakeOpts = {}) {
 	const clearError = vi.fn()
 	const pickFile = vi.fn()
 	const completeImport = vi.fn()
-	return { password, repeatedPassword, fillError, clearError, pickFile, completeImport }
+	const resolveProfileName = vi.fn(async (backupName: string | null): Promise<string | null> => backupName ?? "Main")
+	return { password, repeatedPassword, fillError, clearError, pickFile, completeImport, resolveProfileName }
 }
 
 // ── Setup ───────────────────────────────────────────────────────────────────
@@ -619,17 +620,22 @@ describe("pickBackupFile / decryptBackup behavior pins", () => {
 		expect(c.parsedBackupName.value).toBe("EncName")
 	})
 
-	it("sticky name: a nameless decrypt keeps the previously published name", async () => {
+	it("a nameless decrypt or pick clears the previous backup's name", async () => {
 		const inner = { data: { profile: { type: "password" } } }
 		const key = await EncryptionKey.fromPassword("pw12345678")
 		const sealed = Buffer.from(await key.encrypt(new TextEncoder().encode(JSON.stringify(inner)))).toString("base64")
 		const opts = makeOpts()
 		const c = useFullBackupImport(opts)
-		c.parsedBackupName.value = "Kept"
+		c.parsedBackupName.value = "Previous"
 		c.selectedBackup.value = { name: "e.txt", backup: sealed, type: "encrypted", profileType: null }
 		c.decryptionPassword.value = "pw12345678"
 		await c.decryptBackup()
-		expect(c.parsedBackupName.value).toBe("Kept")
+		expect(c.parsedBackupName.value).toBeNull()
+
+		c.parsedBackupName.value = "Previous"
+		opts.pickFile.mockResolvedValue(new File([JSON.stringify(inner)], "b.json", { type: "application/json" }))
+		await c.pickBackupFile()
+		expect(c.parsedBackupName.value).toBeNull()
 	})
 })
 

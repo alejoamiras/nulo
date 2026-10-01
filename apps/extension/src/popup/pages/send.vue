@@ -19,6 +19,7 @@ import SendTypesCard from "@/components/composite/send/SendTypesCard.vue"
 /** Services */
 import { ContactServiceClient } from "@/wallet/services/contact/client"
 import { ExecutionServiceClient } from "@/wallet/services/execution/client"
+import { OperationJournalServiceClient } from "@/wallet/services/operation-journal/client"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
 import { TokenServiceClient } from "@/wallet/services/token/client"
 import { PriceServiceClient } from "@/wallet/services/price/client"
@@ -29,7 +30,7 @@ import { TransferType } from "@/wallet/services/transaction/client"
 import { managers } from "@/utils/core"
 import { LEGAL_DISMISSED_KEY } from "@/utils/legal-sheet"
 import { isValidHex } from "@/utils/string"
-import { FEE_JUICE_BRIDGE_URL } from "@/popup/components/modules/send/fee-helpers"
+import { FEE_JUICE_BRIDGE_URL, feeLine } from "@/popup/components/modules/send/fee-helpers"
 import { validateSendAmount } from "@/popup/pages/send-amount"
 import { applyBalanceAdd, applyBalanceUpdate } from "@/popup/pages/send-balance-events"
 import { evaluateFiatGate } from "@/popup/pages/send-fiat-gate"
@@ -41,6 +42,7 @@ import { useToast } from "@/composables/toast.js"
 import { useFeeEstimation } from "@/composables/useFeeEstimation"
 import { useLegalAcceptance } from "@/composables/useLegalAcceptance"
 import { usePrices } from "@/composables/usePrices"
+import { vSnackFooter } from "@/composables/snackInset"
 import { useSendReview } from "@/composables/useSendReview"
 import { useTicker } from "@/composables/ticker"
 const { openToast } = useToast()
@@ -74,6 +76,7 @@ const payer = ref(null)
  *  When true, the primary CTA becomes "Get fee juice" (C) and the fee card
  *  shows the explainer banner (A). */
 const needsFeeJuice = ref(false)
+const feeDisplay = ref(null)
 
 /** Open the fee-juice bridge in a new tab. */
 const openFeeJuiceBridge = () => {
@@ -85,9 +88,28 @@ const awaitingNewToken = ref(false)
 const tokenService = new TokenServiceClient()
 tokenService.onTokenAdded.add(onTokenAdded)
 tokenService.onTokenDeleted.add(onTokenDeleted)
-function onTokenAdded(token) {
-	tokens.value.push(token)
+let tokenAddedDuringLoad = false
+/** Fires for any profile's or chain's add, so it re-reads the current identity's tokens rather
+ *  than appending one; an add during an identity fetch makes that fetch read them again, and one
+ *  after a refused fetch retries it, since its balances and contacts are missing too. */
+function onTokenAdded() {
+	if (tokensLoading.value) {
+		tokenAddedDuringLoad = true
+		return
+	}
+	if (tokensFailed.value) return retryTokens()
+	reloadTokens().catch(onReadFailed)
 }
+/** Bumped by each token re-read and identity fetch; a re-read lands only if none began after it. */
+let tokenReadSeq = 0
+async function reloadTokens() {
+	if (!appStore.profile?.id || !appStore.network?.id || !appStore.account?.address) return
+	const myRead = ++tokenReadSeq
+	const list = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
+	if (myRead !== tokenReadSeq) return
+	tokens.value = list
+}
+const onReadFailed = (error) => console.debug("send page read failed", { error })
 function onTokenDeleted(token) {
 	const idx = tokens.value.findIndex((t) => t.id === token.id)
 	if (idx === -1) return
@@ -101,12 +123,16 @@ function onTokenDeleted(token) {
 		return
 	}
 
-	openToast({ label: "The last token has just been deleted" })
+	openToast({ kind: "success", label: "The last token has just been deleted" })
 
 	leaveSend()
 }
 
 const tokens = ref([])
+/** True while the current identity's tokens are being read; the token card waits on it. */
+const tokensLoading = ref(true)
+/** The current identity's fetch was refused; the token card offers a Retry. */
+const tokensFailed = ref(false)
 const activeToken = computed(() => tokens.value?.find((t) => t.id === cacheStore.activeTokenIdx))
 const isBlockedTransfer = computed(() => !activeToken.value?.hasPrivateTransfers && !activeToken.value?.hasPublicTransfers)
 
@@ -125,7 +151,8 @@ const tokenBalance = computed(() => {
 	return tokenBalances.value?.find((b) => b?.token.id === cacheStore.activeTokenIdx)
 })
 const tokenBalanceByType = computed(() => {
-	if (!tokenBalance.value) return 0
+	// A balance can land before its token (an event during an identity fetch).
+	if (!tokenBalance.value || !activeToken.value) return 0
 	return selectedSendType.value === "private"
 		? tokenBalance.value.privateBalance / 10 ** activeToken.value.decimals
 		: tokenBalance.value.publicBalance / 10 ** activeToken.value.decimals
@@ -187,6 +214,8 @@ const searchTerm = ref("")
 const recipientCandidates = computed(() => [...contacts.value, ...appStore.accounts])
 
 const amountTerm = ref()
+/** The card's own resting text, whose commas the validator reads as its grouping. */
+const amountRested = ref(null)
 
 const isValidAddress = computed(() => isValidHex(searchTerm.value))
 
@@ -204,6 +233,7 @@ const balanceRaw = computed(() => {
 const amountValidation = computed(() =>
 	validateSendAmount({
 		input: typeof amountTerm.value === "string" ? amountTerm.value : amountTerm.value?.toString(),
+		rested: amountRested.value,
 		tokenDecimals: activeToken.value?.decimals,
 		balanceRaw: balanceRaw.value,
 	}),
@@ -282,7 +312,7 @@ const openReview = () => {
 const closeReview = () => popupStore.close(REVIEW_KEY)
 
 const amountText = computed(() => (amountTerm.value ? String(amountTerm.value) : undefined))
-const feeText = computed(() => (feeEstimate.value ? `~${feeEstimate.value.maxFeeFormatted} FJ` : undefined))
+const feeText = computed(() => feeLine(feeDisplay.value))
 
 const transferType = computed(() => {
 	if (selectedSendType.value === "private" && selectedReceiverType.value === "private") return TransferType.Private
@@ -291,6 +321,11 @@ const transferType = computed(() => {
 	if (selectedSendType.value === "public" && selectedReceiverType.value === "public") return TransferType.Public
 	return undefined
 })
+
+/** The transfer the fee is for, less its fee settings: the transaction a sponsor verdict describes. */
+const feeTxShape = computed(() =>
+	JSON.stringify([activeToken.value?.id, transferType.value, searchTerm.value, amountValidation.value.integerized?.toString()]),
+)
 
 const executionService = new ExecutionServiceClient()
 // B-30: executionService opens a live SW port as soon as fee estimation runs
@@ -334,7 +369,7 @@ const {
 	},
 	onError: (err) => {
 		console.error(`[send:${sendInstanceId}] estimateTransferFee failed:`, err)
-		openToast({ label: "Couldn't estimate fee — retry.", icon: "warning", color: "red" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Couldn't estimate fee. Try again." })
 	},
 })
 const isSending = ref(false)
@@ -403,6 +438,9 @@ function snapshotTransfer() {
 		feeSettings: feeSettings.value,
 		precomputedEstimateId,
 		contract: activeToken.value.contract,
+		symbol: activeToken.value.symbol,
+		decimals: activeToken.value.decimals,
+		epoch: appStore.scopeEpoch,
 	}
 }
 
@@ -410,6 +448,18 @@ const submitDeps = {
 	executeTransfer: (...args) => executionService.executeTransfer(...args),
 	awaiting: { add: appStore.addAwaitingTransaction, remove: appStore.removeAwaitingTransaction },
 	openToast,
+	isCurrent: (epoch) => appStore.isLogined && appStore.scopeEpoch === epoch,
+	viewTransaction: (hash) => router.push(`/popup/tx/${hash}`),
+	// A failure lands after the page has left, so the read opens and closes its own port.
+	readJournal: async (id) => {
+		const journal = new OperationJournalServiceClient()
+		try {
+			return await journal.getOperation(id)
+		} finally {
+			journal.disconnect()
+		}
+	},
+	viewJournal: (id) => router.push(`/popup/journal/${id}`),
 	onSettled: () => {
 		submitInFlight = false
 		disconnectExecution()
@@ -470,50 +520,101 @@ watch(
 	{ deep: true },
 )
 
-// P11 E1 fix: refetch identity-scoped state (tokens, tokenBalances,
-// contacts) whenever the active appStore triple changes. Sequence
-// counter guards against stale-resolve races. Post-impl audit High #2:
-// the activeTokenIdx is global (cacheStore) — when the new token set
-// doesn't contain the old id, reset to tokens[0] so activeToken stays
-// resolvable. Re-run the send/receiver init logic so the form state
-// matches the new active token.
+// The contact travels in the URL so a row opened in a new tab preselects it too. Applied after each
+// contacts load rather than at mount: a cold tab's identity settles after the page is up, and the
+// first load finds no contacts. Consumed once it matches; an id that is not one of this profile's
+// contacts selects nothing.
+let queryContactApplied = false
+function applyQueryContact() {
+	if (queryContactApplied || selectedContact.value || searchTerm.value) return
+	const id = typeof route.query.contact === "string" ? route.query.contact : null
+	const preselected = id === null ? undefined : contacts.value.find((c) => String(c.id) === id)
+	if (!preselected) return
+	queryContactApplied = true
+	selectedContact.value = preselected
+	searchTerm.value = preselected.address
+}
+
+// A newer identity fetch supersedes an older one, and only the current fetch ends `tokensLoading`
+// or marks the fetch failed.
+// `activeTokenIdx` is global (cache store): a new token set without it moves it to the first token,
+// or `activeToken` resolves to nothing. The send and receiver types are then re-validated for it.
 let identityFetchSeq = 0
 async function refetchIdentityScopedState() {
 	const mySeq = ++identityFetchSeq
+	const isCurrent = () => mySeq === identityFetchSeq
+	tokenReadSeq++
+	tokensFailed.value = false
 	if (!appStore.profile?.id || !appStore.network?.id || !appStore.account?.address) {
-		if (mySeq === identityFetchSeq) {
+		if (isCurrent()) {
 			tokens.value = []
 			tokenBalances.value = []
 			contacts.value = []
+			tokensLoading.value = false
 		}
 		return
 	}
-	const [t, tb, c] = await Promise.all([
-		tokenService.getTokens(appStore.profile.id, appStore.network.chainId),
-		tokenBalanceService.getTokenBalances(undefined, appStore.account.address),
-		contactService.getContacts(),
-	])
-	if (mySeq !== identityFetchSeq) return
-	tokens.value = t
-	tokenBalances.value = tb
-	contacts.value = c
-
-	// Reset activeTokenIdx if the prior selection isn't in the new token
-	// set (e.g. profile switch). Without this, `activeToken` computed
-	// returns undefined and downstream send / fee-estimation flows break.
-	if (!t.some((tok) => tok.id === cacheStore.activeTokenIdx)) {
-		cacheStore.activeTokenIdx = t[0]?.id ?? undefined
+	const profileId = appStore.profile.id
+	const chainId = appStore.network.chainId
+	// Cleared before the read, so a switch never shows the previous identity's token or balance.
+	tokens.value = []
+	tokenBalances.value = []
+	tokensLoading.value = true
+	tokenAddedDuringLoad = false
+	try {
+		const [first, tb, c] = await Promise.all([
+			tokenService.getTokens(profileId, chainId),
+			tokenBalanceService.getTokenBalances(undefined, appStore.account.address),
+			contactService.getContacts(),
+		])
+		let t = first
+		while (tokenAddedDuringLoad && isCurrent()) {
+			tokenAddedDuringLoad = false
+			t = await tokenService.getTokens(profileId, chainId)
+		}
+		if (!isCurrent()) return
+		tokens.value = t
+		tokenBalances.value = tb
+		contacts.value = c
+		// The tokens watch makes the first token added to an empty list the active one. A refused
+		// load must not arm it, or the Retry's list would lose the active or requested token.
+		awaitingNewToken.value = t.length === 0
+		applyQueryContact()
+		if (!t.some((tok) => tok.id === cacheStore.activeTokenIdx)) {
+			cacheStore.activeTokenIdx = t[0]?.id ?? undefined
+		}
+		applyQueryToken()
+		initSendType()
+		initReceiverType()
+	} catch (error) {
+		if (isCurrent()) tokensFailed.value = true
+		throw error
+	} finally {
+		if (isCurrent()) tokensLoading.value = false
 	}
-	// Re-validate the form state for the (possibly new) active token.
-	initSendType()
-	initReceiverType()
+}
+
+/** The token card's Retry: all three reads again, since the page cannot send without any of them. */
+function retryTokens() {
+	refetchIdentityScopedState().catch(onReadFailed)
+}
+
+// `?tokenId=` survives the unmount of tokens/[id], which clears `activeTokenIdx`. It is consumed by
+// the first load that succeeds, matching or not: a cold tab's identity settles after mount, and a
+// refused first load leaves it to the Retry.
+let queryTokenApplied = false
+function applyQueryToken() {
+	if (queryTokenApplied) return
+	queryTokenApplied = true
+	const id = route.query.tokenId ? Number(route.query.tokenId) : null
+	if (id && tokens.value.some((tok) => tok.id === id)) cacheStore.activeTokenIdx = id
 }
 
 watch(
 	() => [appStore.profile?.id, appStore.network?.id, appStore.account?.address],
 	() => {
 		closeReview()
-		refetchIdentityScopedState()
+		refetchIdentityScopedState().catch(onReadFailed)
 	},
 	{ immediate: false },
 )
@@ -524,26 +625,7 @@ onMounted(async () => {
 	// Route mount fetch through the shared refetch so it inherits the
 	// sequence guard AND the null-triple defense AND the
 	// activeTokenIdx-rebind logic.
-	await refetchIdentityScopedState()
-
-	// Query-param preselect survives the unmount of tokens/[id] (which clears
-	// cacheStore.activeTokenIdx on its onBeforeUnmount). Falls through to
-	// whatever activeTokenIdx may still be set, then to tokens[0].
-	const queryTokenId = route.query.tokenId ? Number(route.query.tokenId) : null
-	if (queryTokenId && tokens.value.some((tok) => tok.id === queryTokenId)) {
-		cacheStore.activeTokenIdx = queryTokenId
-		initSendType()
-		initReceiverType()
-	}
-
-	if (cacheStore.preselectedContactToSend) {
-		selectedContact.value = cacheStore.preselectedContactToSend
-		searchTerm.value = cacheStore.preselectedContactToSend.address
-	}
-
-	if (!tokens.value.length) {
-		awaitingNewToken.value = true
-	}
+	await refetchIdentityScopedState().catch(onReadFailed)
 })
 
 onBeforeUnmount(() => {
@@ -573,7 +655,6 @@ onBeforeUnmount(() => {
 	awaitingNewToken.value = false
 
 	cacheStore.preselectedBalanceType = "private"
-	cacheStore.preselectedContactToSend = null
 })
 </script>
 
@@ -610,7 +691,7 @@ onBeforeUnmount(() => {
 						<span :class="$style.section_label">Select Asset</span>
 						<span :class="$style.section_meta">Network: {{ getChainName(appStore.network?.chainId) }}</span>
 					</Flex>
-					<SelectTokenCard :token="activeToken" />
+					<SelectTokenCard :token="activeToken" :loading="tokensLoading" :failed="tokensFailed" @retry="retryTokens" />
 				</div>
 
 				<!-- Section: Transaction Amount -->
@@ -619,6 +700,7 @@ onBeforeUnmount(() => {
 					<AmountCard
 						ref="amountCardRef"
 						v-model="amountTerm"
+						v-model:rested="amountRested"
 						v-model:fiatMode="fiatMode"
 						v-model:fiatGuard="fiatGuard"
 						:token="activeToken"
@@ -647,14 +729,16 @@ onBeforeUnmount(() => {
 						:originPrivacy="selectedSendType"
 						:destinationPrivacy="selectedReceiverType"
 						:payerNoticeShape="facts.noticeShape"
+						:txShape="feeTxShape"
 						v-model="feeSettings"
 						v-model:needsFeeJuice="needsFeeJuice"
 						v-model:payer="payer"
+						v-model:feeDisplay="feeDisplay"
 					/>
 				</div>
 			</Flex>
 
-			<Flex direction="column" gap="10" :class="$style.bottom">
+			<Flex v-snack-footer direction="column" gap="10" :class="$style.bottom" data-testid="send-footer">
 				<PublishStrip v-if="!isBlockedTransfer" :facts="facts" @open="openReview" />
 				<Button
 					v-if="needsFeeJuice"

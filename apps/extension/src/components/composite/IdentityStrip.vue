@@ -26,7 +26,7 @@ withDefaults(
 	<Flex align="center" justify="between" gap="12" :class="$style.identity_strip">
 		<Flex align="center" gap="8">
 			<span :class="[$style.status_dot, $style[`status_${status}`]]" />
-			<span :class="$style.identity_account">{{ accountLabel }}</span>
+			<span data-testid="identity-account" :class="$style.identity_account">{{ accountLabel }}</span>
 			<template v-if="networkLabel !== undefined">
 				<span :class="$style.identity_sep">·</span>
 				<span data-testid="identity-network" :class="[$style.identity_network, warn && $style.identity_warn]">{{ networkLabel }}</span>
@@ -76,9 +76,11 @@ withDefaults(
 	max-width: 140px;
 }
 
+/* Chrome's normal line box here; Firefox's is 15px, a pixel over the drawn 35px strip. */
 .identity_sep {
 	font-family: var(--font-mono);
 	font-size: 11px;
+	line-height: 14px;
 	color: var(--nulo-outline);
 }
 

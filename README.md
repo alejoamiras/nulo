@@ -5,16 +5,16 @@
 > **Nulo is a demo for evaluation and feedback. It is not a production wallet.**
 >
 > - **No security audit.** The code has not been reviewed by an external security firm.
-> - **Aztec mainnet is the default network, and assets on it have real value.** Use only what you can afford to lose entirely. Treat any key material you import as compromised.
+> - **The Aztec testnet is the default network.** Its assets are for testing; a mainnet network you add may carry real value. Use only what you can afford to lose entirely. Treat any key material you import as compromised.
 > - **Storage format is unstable.** Profiles, sessions, and on-disk schemas may change between builds. Expect data wipes and full reseeds.
 > - **Interfaces will change without notice.** dApp surface, popup UX, and message shapes are still in flux.
 > - **No uptime, support, or recovery guarantees.** This is a preview of work in progress, published so people can try it, file bugs, and follow along.
 >
-> If you are looking for a production Aztec wallet, this is not it — come back later, or follow [`implementations-plan/`](./implementations-plan/README.md) to track readiness.
+> If you are looking for a production Aztec wallet, this is not it — come back later, or follow [`implementations-plan/index.md`](./implementations-plan/index.md) to track readiness.
 
 A self-custody wallet for the [Aztec network](https://aztec.network), packaged as a Chrome and Firefox extension. Nulo runs the Aztec [Private Execution Environment](https://docs.aztec.network/aztec/protocol/circuits/pxe) locally so transactions are simulated and signed on the user's machine; no node operator sees the contents.
 
-The extension exposes the canonical `@aztec/wallet-sdk` surface to dApps and uses the upstream `@aztec/accounts/schnorr` account contract — there is no custom Noir source in this repo.
+The extension exposes the canonical `@aztec-labs/wallet-sdk` surface to dApps and uses the upstream `@aztec-labs/accounts/schnorr` account contract — there is no custom Noir source in this repo.
 
 ## Status
 
@@ -24,7 +24,7 @@ The extension exposes the canonical `@aztec/wallet-sdk` surface to dApps and use
 - dApp surface: discover, connect, capability bundles, sendTx, simulateTx, registerContract, getPrivateEvents.
 - Local testing: a playground dApp and parallel-safe e2e suite per worktree.
 
-What's still in flight is tracked in [`implementations-plan/`](./implementations-plan/README.md).
+What's still in flight is tracked in [`implementations-plan/index.md`](./implementations-plan/index.md).
 
 ## Quick start
 
@@ -42,7 +42,7 @@ For Firefox, `bun run build:firefox` → `apps/extension/dist/firefox/`.
 | Package | Purpose |
 |---|---|
 | [`@nulo/extension`](./apps/extension/) | The Chrome/Firefox MV3 extension — service worker, popup UI, content script, offscreen PXE host. |
-| [`@nulo/wallet-bridge`](./packages/wallet-bridge/) | dApp-facing dispatcher: `@aztec/wallet-sdk` capability map, scope enforcement. |
+| [`@nulo/wallet-bridge`](./packages/wallet-bridge/) | dApp-facing dispatcher: `@aztec-labs/wallet-sdk` capability map, scope enforcement. |
 | [`@nulo/aztec-runtime`](./packages/aztec-runtime/) | PXE lifecycle, `NuloAccount` adapter, class-id verification, payload chunking. |
 | [`@nulo/extension-messaging`](./packages/extension-messaging/) | Typed RPC plumbing across service worker, popup, and offscreen. |
 | [`@nulo/wallet-crypto`](./packages/wallet-crypto/) | Password + passkey KDF, `PasswordSecretBox`, derivation chain (vector-locked). |
@@ -57,7 +57,7 @@ The package layer hierarchy (`wallet-core` → … → `extension`) is enforced 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — process boundaries, message flow, storage versioning, offscreen lifecycle, session model, concurrency, account contract, test taxonomy.
 - Each `packages/<name>/README.md` — purpose, file map, scripts, testing, key invariants.
 - [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md) — e2e suite layout, parallel-safe agent runner.
-- [`implementations-plan/README.md`](./implementations-plan/README.md) — what the planning archive is, when to add to it, the milestone-vocabulary key.
+- [`implementations-plan/README.md`](./implementations-plan/README.md) — the planning standard: what a plan commits and what stays local, how a plan closes, the milestone-vocabulary key.
 - [`CLAUDE.md`](./CLAUDE.md) — operating rules for AI assistants working in this repo (layer model, SFC ordering, cleanup order, comment style).
 
 ## Build & dev
@@ -71,7 +71,7 @@ bun run e2e:agent             # Extension network e2e — owns anvil + aztec + p
 bun run audit:vue             # One-shot pre-PR gate: typecheck → test → lint → build
 bun run lint                  # biome check
 bun run format                # biome format --write
-bun run typecheck             # vue-tsc across all packages
+bun run typecheck:all         # every workspace's typecheck
 ```
 
 ## Quality gates

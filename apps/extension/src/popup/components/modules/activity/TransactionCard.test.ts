@@ -19,7 +19,7 @@ import { flushPromises } from "@vue/test-utils"
 // TransactionCard only reads `network.chainId` + `defaultExplorer` for the
 // explorer URL computed; nothing in the chip-render path needs the store.
 vi.mock("@/stores/app.store", () => ({
-	useAppStore: () => ({ network: { chainId: CHAIN_IDS.MAINNET }, defaultExplorer: "aztecscan" }),
+	useAppStore: () => ({ network: { chainId: CHAIN_IDS.TESTNET }, defaultExplorer: "aztecscan" }),
 }))
 
 // Controllable price feed for the D2 fiat case.
@@ -35,6 +35,7 @@ vi.mock("@/wallet/services/price/client", () => ({
 	}),
 }))
 
+import { RowAction } from "@nulo/design"
 import TransactionCard from "./TransactionCard.vue"
 
 const STUBS = {
@@ -64,6 +65,7 @@ const STUBS = {
 			"txTransferTypeLabel",
 			"txStatus",
 			"txHash",
+			"to",
 		],
 	},
 }
@@ -90,7 +92,8 @@ const dappTransferTx = {
 	origin: { type: OriginType.DAPP, name: "example.dapp.io" },
 }
 
-const mountCard = (tx: Record<string, unknown>) => mount(TransactionCard, { props: { tx }, global: { stubs: STUBS } })
+const mountCard = (tx: Record<string, unknown>, props: Record<string, unknown> = {}) =>
+	mount(TransactionCard, { props: { tx, ...props }, global: { stubs: STUBS, components: { RowAction } } })
 
 describe("modules/activity/TransactionCard (settled)", () => {
 	test("dApp-initiated transfer renders BOTH transferTypeLabel and originLabel chips (codex PR #96 regression pin)", () => {
@@ -100,6 +103,51 @@ describe("modules/activity/TransactionCard (settled)", () => {
 		// originLabel from tx.origin.name — must NOT be silently dropped by
 		// the `||` template when the call shape ALSO produces a transferType.
 		expect(w.text()).toContain("example.dapp.io")
+	})
+
+	describe("a dApp's mint, as the wire carries it", () => {
+		const field = (n: bigint) => `0x${n.toString(16).padStart(64, "0")}`
+		const TOKEN = `0x${"0a".repeat(32)}`
+		const RECIPIENT = `0x${"0c".repeat(32)}`
+		const tokens = [
+			{ id: 1, chainId: CHAIN_IDS.TESTNET, contract: TOKEN, name: "Test", symbol: "TST", decimals: 18, hasDecimals: true },
+		]
+		const mintTx = (...amounts: bigint[]) => ({
+			hash: "0xmint1",
+			status: TxStatus.Proposed,
+			calls: amounts.map((a) => ({ contract: TOKEN, method: "mint_to_public", args: [RECIPIENT, field(a)] })),
+			origin: { type: OriginType.DAPP, name: "example.dapp.io" },
+		})
+
+		test("of a listed 18-decimal token reads 1 and its symbol", () => {
+			const w = mountCard(mintTx(10n ** 18n), { tokens })
+			expect(w.find(".amount").text()).toBe("1")
+			expect(w.find(".symbol").text()).toBe("TST")
+		})
+
+		test("of an unlisted token shows no amount", () => {
+			const w = mountCard(mintTx(10n ** 18n))
+			expect(w.find(".amount").text()).toBe("")
+		})
+
+		test("of 1,234,567 tokens reads the compact form", () => {
+			const w = mountCard(mintTx(1_234_567n * 10n ** 18n), { tokens })
+			expect(w.find(".amount").text()).toBe("1.23M")
+		})
+
+		test("with two mint calls shows no amount", () => {
+			const w = mountCard(mintTx(10n ** 18n, 10n ** 18n), { tokens })
+			expect(w.find(".amount").text()).toBe("")
+		})
+	})
+
+	test("`to` reaches the layout, and the explorer link is a named action opening a new tab", () => {
+		const w = mountCard(dappTransferTx, { to: "/popup/tx/0xabcd1234abcd1234" })
+		expect(w.findComponent(STUBS.TransactionCardLayout).props("to")).toBe("/popup/tx/0xabcd1234abcd1234")
+		const explorer = w.find('a[aria-label="Open in block explorer"]')
+		expect(explorer.attributes("target")).toBe("_blank")
+		expect(explorer.attributes("rel")).toBe("noopener noreferrer")
+		expect(explorer.attributes("href")).toContain("0xabcd1234abcd1234")
 	})
 })
 

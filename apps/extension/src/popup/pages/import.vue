@@ -11,6 +11,7 @@
 <script setup>
 /** Composables */
 import { completeImportWithRecovery } from "@/composables/completeImportWithRecovery"
+import { isPopupSubmitKey, refuseRepeatEnter } from "@/composables/usePopupEntity"
 import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
 import { useProfileImportFlow } from "@/composables/useProfileImportFlow"
 import { useToast } from "@/composables/toast"
@@ -73,15 +74,16 @@ const completeImport = async (profile) => {
 		timeoutMs: 30_000,
 	})
 	if (outcome === "active") {
-		openToast({ label: "Profile imported", icon: "check-circle" })
+		openToast({ kind: "success", label: "Profile imported" })
 		router.push("/popup/general")
 	} else {
-		openToast({ label: "Profile imported — unlock to continue", icon: "info" }, TOAST_DURATION.LONG)
+		openToast({ kind: "success", label: "Profile imported. Unlock to continue" })
 		router.push("/popup/auth")
 	}
 }
 
 const {
+	nameFieldState,
 	profileName,
 	nameError,
 	shakeName,
@@ -102,9 +104,14 @@ const {
 	decryptionPassword,
 	restoreStatus,
 	restoreStage,
-	importedProfile,
 	isAllowedToImportBackup,
 	isRestoreHasErrors,
+	canRetryAccountState,
+	unrestoredNetworkNames,
+	hasOtherRestoreErrors,
+	isRetryingAccountState,
+	retryAccountState,
+	continueImport,
 	pickBackupFile,
 	decryptBackup,
 	restoreBackup,
@@ -143,25 +150,21 @@ const {
 
 /** Listeners — popup-only full-backup Enter shortcut. */
 const onKeydown = (e) => {
-	if (e.key !== "Enter") return
+	if (e.defaultPrevented || !isPopupSubmitKey(e)) return
 	const action = resolveFullBackupEnterAction({
 		selectedBackup: selectedBackup.value,
 		restoreStatus: restoreStatus.value,
 		isRestoreHasErrors: isRestoreHasErrors.value,
+		isRetrying: isRetryingAccountState.value,
 	})
 	if (action === "decrypt") decryptBackup()
 	else if (action === "restore") restoreBackup()
-	else if (action === "continue") completeImport(importedProfile.value)
+	else if (action === "continue") continueImport()
 }
 
 /** Lifecycle */
-onMounted(() => {
-	document.addEventListener("keydown", onKeydown)
-})
-
 onBeforeUnmount(() => {
 	dispose()
-	document.removeEventListener("keydown", onKeydown)
 })
 </script>
 
@@ -171,9 +174,12 @@ onBeforeUnmount(() => {
 		heroSub="Profile"
 		:collapsingLabel="type === 'recovery' ? 'Recover Profile' : 'Import Profile'"
 		:backTo="backTo"
+		data-testid="import-page"
+		:data-name-field="nameFieldState"
 		:data-restore-stage="restoreStage"
+		@keydown="onKeydown"
 	>
-		<div :class="$style.name_section">
+		<div v-if="nameFieldState === 'shown'" :class="$style.name_section">
 			<span :class="$style.section_label">Profile name</span>
 			<div :class="[shakeName && $style.shake]">
 				<Input
@@ -209,6 +215,8 @@ onBeforeUnmount(() => {
 			:selectedBackup="selectedBackup"
 			:restoreStatus="restoreStatus"
 			:isRestoreHasErrors="isRestoreHasErrors"
+			:unrestoredNetworks="unrestoredNetworkNames"
+			:hasOtherErrors="hasOtherRestoreErrors"
 			:error="error"
 			:isCopied="isCopied"
 			:maxPasswordLength="maxPasswordLength"
@@ -236,6 +244,7 @@ onBeforeUnmount(() => {
 					<Button
 						v-if="selectedBackup?.type === 'encrypted' && !selectedBackup?.profileType"
 						@click="decryptBackup"
+						@keydown.enter="refuseRepeatEnter"
 						:disabled="!decryptionPassword"
 						data-testid="import-full-backup-decrypt-btn"
 						variant="cta"
@@ -245,6 +254,7 @@ onBeforeUnmount(() => {
 					<Button
 						v-if="selectedBackup?.profileType && restoreStatus !== 'finished'"
 						@click="restoreBackup"
+						@keydown.enter="refuseRepeatEnter"
 						:disabled="!isAllowedToImportBackup || restoreStatus === 'failed' || restoreStatus === 'progress'"
 						data-testid="import-full-backup-submit-btn"
 						variant="cta"
@@ -265,8 +275,19 @@ onBeforeUnmount(() => {
 						Finishing import…
 					</Button>
 					<Button
+						v-if="canRetryAccountState"
+						@click="retryAccountState"
+						:disabled="isRetryingAccountState"
+						data-testid="import-full-backup-retry-btn"
+						variant="cta_outline"
+					>
+						{{ isRetryingAccountState ? "Retrying…" : "Retry" }}
+					</Button>
+					<Button
 						v-if="restoreStatus === 'finished' && isRestoreHasErrors"
-						@click="completeImport(importedProfile)"
+						@click="continueImport"
+						@keydown.enter="refuseRepeatEnter"
+						:disabled="isRetryingAccountState"
 						data-testid="import-full-backup-continue-btn"
 						variant="cta"
 					>
@@ -275,6 +296,7 @@ onBeforeUnmount(() => {
 					<Button
 						v-if="restoreStatus === 'finished' && isRestoreHasErrors"
 						@click="showRestoreErrorLog"
+						:disabled="isRetryingAccountState"
 						data-testid="import-full-backup-view-errors-btn"
 						variant="cta_outline"
 					>
@@ -293,7 +315,7 @@ onBeforeUnmount(() => {
 					Use Recovery Phrase
 				</Button>
 
-				<Button @click="handleBack" :disabled="restoreStatus === 'progress'" variant="cta_outline">Back</Button>
+				<Button @click="handleBack" :disabled="restoreStatus === 'progress' || isRetryingAccountState" variant="cta_outline">Back</Button>
 			</Flex>
 		</template>
 

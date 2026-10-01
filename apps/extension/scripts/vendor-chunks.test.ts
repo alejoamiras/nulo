@@ -1,12 +1,12 @@
 import { describe, expect, test } from "vitest"
 import { artifactChunkName, packageChunkName } from "./vendor-chunks"
 
-const ISOLATED = "/repo/node_modules/.bun/@aztec+stdlib@5.2.0+c1edb6f0/node_modules/@aztec/stdlib/dest/abi/abi.js"
+const ISOLATED = "/repo/node_modules/.bun/@aztec-labs+stdlib@6.0.0-rc.1+c1edb6f0/node_modules/@aztec-labs/stdlib/dest/abi/abi.js"
 
 describe("packageChunkName", () => {
 	// The isolated linker nests the package under a `.bun/<pkg>@<ver>` directory of another name.
 	test("names a heavy package by its last node_modules segment", () => {
-		expect(packageChunkName(ISOLATED)).toBe("aztec-stdlib")
+		expect(packageChunkName(ISOLATED)).toBe("aztec-labs-stdlib")
 		expect(packageChunkName("/repo/node_modules/@noir-lang/acvm_js/web/acvm_js.js?v=1")).toBe("noir-lang-acvm-js")
 	})
 
@@ -16,18 +16,18 @@ describe("packageChunkName", () => {
 	})
 
 	// Its chunk is web-accessible to every page through the content script.
-	test("never regroups @aztec/wallet-sdk", () => {
-		const sdk = "/repo/node_modules/.bun/@aztec+wallet-sdk@5.2.0/node_modules/@aztec/wallet-sdk/dest/crypto.js"
+	test("never regroups @aztec-labs/wallet-sdk", () => {
+		const sdk = "/repo/node_modules/.bun/@aztec-labs+wallet-sdk@6.0.0-rc.1/node_modules/@aztec-labs/wallet-sdk/dest/crypto.js"
 		expect(packageChunkName(sdk)).toBeNull()
 		expect(artifactChunkName(sdk.replace("crypto.js", "schema.json"))).toBeNull()
 	})
 })
 
 describe("artifactChunkName", () => {
-	const token = "/repo/node_modules/@aztec/noir-contracts.js/artifacts/token_contract-Token.json"
+	const token = "/repo/node_modules/@aztec-labs/noir-contracts.js/artifacts/token_contract-Token.json"
 
 	test("gives each json module of a heavy package a chunk of its own", () => {
-		expect(artifactChunkName(token)).toBe("aztec-noir-contracts-js-artifacts-token-contract-Token")
+		expect(artifactChunkName(token)).toBe("aztec-labs-noir-contracts-js-artifacts-token-contract-Token")
 		expect(artifactChunkName(token.replace("token_contract-Token", "nft_contract-NFT"))).not.toBe(artifactChunkName(token))
 	})
 

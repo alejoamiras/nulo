@@ -7,7 +7,7 @@
  *
  * Fonts are package-owned (`src/fonts`, referenced package-relative from base.css); the consumer's
  * Vite bundles them. There is NO auto-import in this package — every component, Vue API, and helper
- * uses explicit imports (consumers like the tools app have no unplugin-auto-import).
+ * uses explicit imports, so it compiles under any consumer's Vite config, auto-import or not.
  *
  * Presentational only: components take their data + any `data-testid` via props.
  * They never import app-specific utilities, stores, or service clients.
@@ -31,6 +31,7 @@ export { default as FieldWarning } from "./ui/FieldWarning.vue"
 export { default as Input } from "./ui/Input.vue"
 export { default as LoadingState } from "./ui/LoadingState.vue"
 export { default as Popover } from "./ui/Popover.vue"
+export { default as RowAction } from "./ui/RowAction.vue"
 export { default as SectionLabel } from "./ui/SectionLabel.vue"
 export { default as Skeleton } from "./ui/Skeleton.vue"
 export { default as Spinner } from "./ui/Spinner.vue"
@@ -38,7 +39,7 @@ export { default as Spinner } from "./ui/Spinner.vue"
 export { default as SubPageHeaderBase } from "./ui/SubPageHeaderBase.vue"
 export { default as Tag } from "./ui/Tag.vue"
 export { default as Toast } from "./ui/Toast.vue"
-/** Extension's transient single-toast region (distinct from the tools app's `Toast` item). */
+/** Extension's transient single-toast region (distinct from the `Toast` item). */
 export { default as ToastManagerBase } from "./ui/ToastManagerBase.vue"
 export { default as Toggle } from "./ui/Toggle.vue"
 export { default as Tooltip } from "./ui/Tooltip.vue"

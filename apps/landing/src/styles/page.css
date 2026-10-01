@@ -64,6 +64,7 @@ p {
 	user-select: none;
 	-webkit-user-select: none;
 	pointer-events: none;
+	transform-origin: 0 0;
 }
 
 .grain {
@@ -357,25 +358,6 @@ footer {
 	font-size: 11px;
 }
 
-.pause {
-	position: absolute;
-	right: 66px;
-	top: 60px;
-	z-index: 2;
-	font-family: var(--font-mono);
-	font-size: 11px;
-	letter-spacing: 0.12em;
-	text-transform: uppercase;
-	color: var(--txt-body);
-	background: var(--app-bg);
-	border: 1px solid var(--line);
-	padding: 6px 10px;
-}
-
-.pause:hover {
-	color: var(--txt-primary);
-}
-
 .hero__plate {
 	position: absolute;
 	left: max(32px, calc(50% - 560px));
@@ -664,7 +646,7 @@ footer .wrap a:hover {
 		height: 640px;
 	}
 
-	/* The plate fills most of the short hero; keep REC and Pause visible above it, drop the bottom labels. */
+	/* The plate fills most of the short hero; keep REC visible above it, drop the bottom labels. */
 	.hero__plate {
 		left: 24px;
 		top: auto;
@@ -692,19 +674,9 @@ footer .wrap a:hover {
 		display: none;
 	}
 
-	.pause {
-		top: 20px;
-		right: 66px;
-	}
-
 	.slug.ts {
 		display: none;
 	}
-}
-
-.is-paused .slug.rec i,
-.is-paused .rec-pan .dot {
-	animation-play-state: paused;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,10 +1,15 @@
 <script setup lang="ts">
 /** Components */
 import EmojiGrid from "@/components/composite/general/EmojiGrid.vue"
+import ConnectStepBar from "../ConnectStepBar.vue"
 
 /** Vendor */
 import { onMounted, onUnmounted } from "vue"
-import { hashToEmoji } from "@aztec/wallet-sdk/crypto"
+import { hashToEmoji } from "@aztec-labs/wallet-sdk/crypto"
+
+/** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
+import { refuseRepeatEnter } from "@/composables/usePopupEntity"
 
 /** Services */
 import { DappSessionServiceClient, type DappSession, type DappMetadata } from "@/wallet/services/dapp-session/client"
@@ -12,9 +17,11 @@ import { type Account, AccountServiceClient } from "@/wallet/services/account/cl
 import { NetworkServiceClient, type Network } from "@/wallet/services/network/client"
 import { parseCaipAccount, resolveNetworkByChainId } from "@/wallet/utils/caip"
 
+/** Utils */
+import { verifyHeaderLabels } from "./header-labels"
+
 /** Store */
 import { useAppStore } from "@/stores/app.store"
-import { trimAddress } from "@/utils/string"
 const appStore = useAppStore()
 
 type UIDappMetadata = DappMetadata & {
@@ -30,25 +37,17 @@ const emojis = ref("")
 const isReconnect = ref(false)
 const alwaysTrust = ref(false)
 
-/** Signer resolution for the identity strip. */
 const signerAccounts = ref<Account[]>([])
-const signerDisplay = computed(() => {
-	if (signerAccounts.value.length === 1) return signerAccounts.value[0].name
-	if (signerAccounts.value.length > 1) return `${signerAccounts.value.length} accounts`
-	// Fallback: trimmed address from first CAIP string
-	const first = session.value?.accounts?.[0]
-	if (!first) return "No account"
-	const addr = first.split(":")[2] ?? ""
-	return trimAddress(addr, 6, 4, "...")
-})
-const signerNetwork = computed(() => {
-	if (signerAccounts.value.length === 1) {
-		const acc = signerAccounts.value[0]
-		return typeof acc.chainId === "number" ? `chain ${acc.chainId}` : String(acc.chainId ?? "")
-	}
-	if (signerAccounts.value.length > 1) return "MIXED"
-	return ""
-})
+const header = computed(() =>
+	session.value
+		? verifyHeaderLabels({
+				sessionChainId: session.value.chainId,
+				sharedAccounts: session.value.accounts ?? [],
+				resolvedAccounts: signerAccounts.value,
+				networks: appStore.networks,
+			})
+		: undefined,
+)
 
 /** Anti-phishing: normalized hostname + IDN / punycode flag. */
 const dappHostname = computed(() => {
@@ -157,13 +156,11 @@ onMounted(async () => {
 			emojis.value = hashToEmoji(displayHash)
 		}
 
-		// Hydrate dApp logo
 		dapp.value = session.value.dappMetadata
 		if (dapp.value?.logo) {
 			dapp.value.logoBlobUrl = dapp.value.logo
 		}
 
-		// Resolve wallet-local signer name(s) for the identity strip
 		await resolveSigners()
 	} catch {
 		closeWindow()
@@ -178,21 +175,16 @@ onUnmounted(() => {
 <template>
 	<Flex v-if="session" direction="column" :class="$style.wrapper">
 		<!-- Identity strip: anti-phishing trust anchor. Status is always ready on verify. -->
-		<IdentityStrip
-			:accountLabel="signerDisplay"
-			:networkLabel="signerNetwork || undefined"
-			:warn="signerAccounts.length > 1"
-		/>
+		<IdentityStrip v-if="header" :accountLabel="header.account" :networkLabel="header.network" :warn="header.warn" />
+		<ConnectStepBar v-if="!isReconnect" :step="2" />
 
 		<Flex direction="column" :class="$style.scroll_area">
-			<!-- dApp identity block -->
 			<DappIdentityBlock
 				:dapp="dapp"
 				:hostname="dappHostname"
 				:hostnameSuspicious="hostnameHasNonAscii"
 				:actionLabel="isReconnect ? 'Reconnected' : 'Connection established'"
 			/>
-			<!-- Verification section -->
 			<Flex v-if="emojis" direction="column" gap="12" :class="$style.verification">
 				<SectionLabel label="Connection verification" />
 
@@ -205,8 +197,7 @@ onUnmounted(() => {
 			</Flex>
 		</Flex>
 
-		<!-- Footer: trust toggle + OK -->
-		<Flex direction="column" gap="12" :class="$style.footer">
+		<Flex v-snack-footer direction="column" gap="12" :class="$style.footer">
 			<Flex align="center" justify="between" gap="12" wide>
 				<Flex direction="column" gap="4">
 					<Text size="13" weight="600" color="primary">Always trust</Text>
@@ -215,7 +206,15 @@ onUnmounted(() => {
 				<div data-testid="verify-always-trust-toggle"><Toggle :modelValue="alwaysTrust" @update:modelValue="(v: boolean) => (alwaysTrust = v)" /></div>
 			</Flex>
 
-			<Button data-testid="verify-confirm-btn" @click="handleConfirm" wide variant="primary" size="medium" :disabled="!session">
+			<Button
+				data-testid="verify-confirm-btn"
+				@click="handleConfirm"
+				@keydown.enter="refuseRepeatEnter"
+				wide
+				variant="primary"
+				size="medium"
+				:disabled="!session"
+			>
 				<Text size="13" color="inverse">OK</Text>
 			</Button>
 		</Flex>

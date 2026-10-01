@@ -42,6 +42,7 @@ const backTo = computed(() => String(route.query.from || "/popup/register"))
 const maxPasswordLength = 128
 
 const {
+	nameFieldState,
 	profileName,
 	nameError,
 	shakeName,
@@ -79,23 +80,24 @@ const {
 	},
 })
 
-// Quirk 2: only submit on Enter from a text field, so Enter on a focused
-// button doesn't double-fire alongside its native click.
 const onKeydown = makeCreateKeydownHandler(handleCreate)
-
-onMounted(() => {
-	document.addEventListener("keydown", onKeydown)
-})
 
 onBeforeUnmount(() => {
 	dispose()
-	document.removeEventListener("keydown", onKeydown)
 })
 </script>
 
 <template>
-	<CollapsingHeroLayout heroMain="Create" heroSub="Profile" collapsingLabel="Create Profile" :backTo="backTo">
-		<div :class="$style.section_last">
+	<CollapsingHeroLayout
+		heroMain="Create"
+		heroSub="Profile"
+		collapsingLabel="Create Profile"
+		:backTo="backTo"
+		data-testid="register-page"
+		:data-name-field="nameFieldState"
+		@keydown="onKeydown"
+	>
+		<div v-if="nameFieldState === 'shown'" :class="$style.section_last">
 			<span :class="$style.section_label">Profile name</span>
 			<div :class="[shakeName && $style.shake]">
 				<Input
@@ -130,7 +132,7 @@ onBeforeUnmount(() => {
 		<div v-else :class="$style.section_last">
 			<span :class="$style.section_label">Passkey</span>
 			<Text size="13" height="150" color="body">
-				No password required. Your new profile will be linked to your passkey, so you can sign in securely and effortlessly — no memorizing, no typing, just one tap.
+				No password required. Your new profile will be linked to your passkey, so you can sign in securely and effortlessly. No memorizing, no typing, just one tap.
 			</Text>
 		</div>
 

@@ -19,7 +19,7 @@
  * `describe.skipIf(!process.env.RUN_NETWORK_E2E)`.
  */
 
-import { beforeEach, describe, expect, test, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { ContractResolver } from "../contract-resolver"
 
 // Mock the heavy Aztec stdlib parts the helper composes with. The unit
@@ -27,8 +27,8 @@ import { ContractResolver } from "../contract-resolver"
 // `FunctionSelector` hashes correctly or `encodeArguments` packs the right
 // bytes. Those are upstream concerns. Integration tests in the sibling
 // `.integration.test.ts` file exercise the real ones.
-vi.mock("@aztec/stdlib/abi", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@aztec/stdlib/abi")>()
+vi.mock("@aztec-labs/stdlib/abi", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@aztec-labs/stdlib/abi")>()
 	return {
 		...actual,
 		// Selector computation is a Wasm hash — too heavy for unit tests; return
@@ -55,23 +55,21 @@ vi.mock("@aztec/stdlib/abi", async (importOriginal) => {
 // sim path; we control its return shape per-test to validate unpack. The
 // `completeFeeOptions` shim mirrors what `runFastArm` calls — it's lazy on the
 // fast path only, so most non-fast tests don't need to invoke it.
-vi.mock("@aztec/wallet-sdk/base-wallet", () => ({
+vi.mock("@aztec-labs/wallet-sdk/base-wallet", () => ({
 	simulateViaNode: vi.fn(),
 }))
-vi.mock("@nulo/aztec-runtime/account", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@nulo/aztec-runtime/account")>()
-	return {
-		...actual,
-		completeFeeOptions: vi.fn(async () => ({ id: "stub-gas-settings" })),
-	}
-})
+// Only `completeFeeOptions` is consumed; spreading the real barrel would also evaluate the frozen
+// account artifact, which this helper never touches.
+vi.mock("@nulo/aztec-runtime/account", () => ({
+	completeFeeOptions: vi.fn(async () => ({ id: "stub-gas-settings" })),
+}))
 
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { FunctionType, type FunctionAbi } from "@aztec/stdlib/abi"
-import { SimulationError } from "@aztec/stdlib/errors"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { type AbiType, decodeFromAbi, FunctionType, type FunctionAbi } from "@aztec-labs/stdlib/abi"
+import { SimulationError } from "@aztec-labs/stdlib/errors"
 import type { CallAction, EncodedCallAction } from "@nulo/wallet-bridge"
-import { simulateViaNode } from "@aztec/wallet-sdk/base-wallet"
+import { simulateViaNode } from "@aztec-labs/wallet-sdk/base-wallet"
 import { type ILogger, LogLevel } from "@/wallet/logger"
 import { batchedViewSimulation, type BatchedViewSimulationDeps } from "./batched-view-simulation"
 
@@ -85,14 +83,14 @@ const ACCOUNT_ADDR = AztecAddress.fromStringUnsafe("0x00000000000000000000000000
 const OTHER_ORIGIN = AztecAddress.fromStringUnsafe("0x000000000000000000000000000000000000000000000000000000000000000b")
 
 /** Build a stub FunctionAbi with the minimum surface the helper reads. */
-function abi(name: string, kind: FunctionType, isStatic = false): FunctionAbi {
+function abi(name: string, kind: FunctionType, isStatic = false, returnType?: AbiType): FunctionAbi {
 	return {
 		name,
 		functionType: kind,
 		isInternal: false,
 		isStatic,
 		parameters: [],
-		returnTypes: [],
+		returnType,
 		errorTypes: {},
 		// biome-ignore lint/suspicious/noExplicitAny: FunctionAbi has many fields we don't read; cast keeps the fixture small.
 	} as any
@@ -107,7 +105,7 @@ function artifact(fns: FunctionAbi[]) {
 type Event = { type: "executeUtility-call" | "executeUtility-resolve" | "simulateTx-call" | "simulateTx-resolve"; index?: number }
 
 function makeDeps(opts: {
-	functions: Record<string, { kind: FunctionType; isStatic?: boolean }>
+	functions: Record<string, { kind: FunctionType; isStatic?: boolean; returnType?: AbiType }>
 	publicReturns?: Fr[][]
 	privateReturns?: Fr[][]
 	/** Set true to make the origin returned by `buildTxExecutionRequest` NOT
@@ -126,8 +124,8 @@ function makeDeps(opts: {
 	nodeInfo?: { l1ChainId: number; rollupVersion: number } | "throw"
 }): BatchedViewSimulationDeps {
 	const fnAbis: Map<string, FunctionAbi> = new Map()
-	for (const [name, { kind, isStatic }] of Object.entries(opts.functions)) {
-		fnAbis.set(name, abi(name, kind, isStatic ?? false))
+	for (const [name, { kind, isStatic, returnType }] of Object.entries(opts.functions)) {
+		fnAbis.set(name, abi(name, kind, isStatic ?? false, returnType))
 	}
 
 	let utilityCallCount = 0
@@ -403,7 +401,6 @@ describe("batchedViewSimulation", () => {
 				type: "public",
 				isStatic: false,
 				hideMsgSender: true,
-				returnTypes: [],
 			},
 		]
 		await batchedViewSimulation(calls, deps)
@@ -430,7 +427,6 @@ describe("batchedViewSimulation", () => {
 				type: "utility",
 				isStatic: false,
 				hideMsgSender: true,
-				returnTypes: [],
 			},
 		]
 		await batchedViewSimulation(calls, deps)
@@ -517,7 +513,7 @@ describe("batchedViewSimulation — fast arm (PUBLIC+isStatic leading prefix)", 
 		simulateViaNodeMock.mockReset()
 	})
 
-	function fastSimResult(publicReturnValues: Array<{ values: Fr[] }>): import("@aztec/stdlib/tx").TxSimulationResult {
+	function fastSimResult(publicReturnValues: Array<{ values: Fr[] }>): import("@aztec-labs/stdlib/tx").TxSimulationResult {
 		return {
 			publicOutput: {
 				publicReturnValues,
@@ -851,5 +847,48 @@ describe("batchedViewSimulation — fast arm (PUBLIC+isStatic leading prefix)", 
 		})
 		await batchedViewSimulation([publicStaticCall(), publicStaticCall(), publicStaticCall()], deps)
 		expect(simulateViaNodeMock).toHaveBeenCalledOnce()
+	})
+})
+
+describe("batchedViewSimulation — return shapes through the real decoder", () => {
+	const METHODS = ["scalar", "tuple", "empty"] as const
+	const RETURN_TYPES: Record<(typeof METHODS)[number], AbiType | undefined> = {
+		scalar: { kind: "integer", sign: "unsigned", width: 128 },
+		tuple: { kind: "tuple", fields: [{ kind: "field" }, { kind: "boolean" }] },
+		empty: undefined,
+	}
+	const RETURNS = [[new Fr(42n)], [new Fr(5n), new Fr(1n)], []]
+	const CALLS: CallAction[] = METHODS.map((method) => ({ kind: "call", contract: CONTRACT_A, method, args: [] }))
+	const functions = (kind: FunctionType, isStatic = false) =>
+		Object.fromEntries(METHODS.map((m) => [m, { kind, isStatic, returnType: RETURN_TYPES[m] }]))
+	const passthrough = vi.mocked(decodeFromAbi).getMockImplementation()
+
+	beforeEach(async () => {
+		simulateViaNodeMock.mockReset()
+		const actual = await vi.importActual<typeof import("@aztec-labs/stdlib/abi")>("@aztec-labs/stdlib/abi")
+		vi.mocked(decodeFromAbi).mockImplementation(actual.decodeFromAbi)
+	})
+	afterEach(() => {
+		vi.mocked(decodeFromAbi).mockImplementation(passthrough as typeof decodeFromAbi)
+	})
+
+	test.each([
+		[
+			"utility",
+			() => makeDeps({ functions: functions(FunctionType.UTILITY), utilityReturns: new Map(METHODS.map((m, i) => [m, RETURNS[i]])) }),
+		],
+		["public, PXE arm", () => makeDeps({ functions: functions(FunctionType.PUBLIC), publicReturns: RETURNS })],
+		["private", () => makeDeps({ functions: functions(FunctionType.PRIVATE), privateReturns: RETURNS })],
+		[
+			"public static, node arm",
+			() => {
+				simulateViaNodeMock.mockResolvedValueOnce([{ publicOutput: { publicReturnValues: RETURNS.map((values) => ({ values })) } }])
+				return makeDeps({ functions: functions(FunctionType.PUBLIC, true) })
+			},
+		],
+	])("%s: a scalar, a tuple and no return decode to a value, an array and undefined", async (_arm, deps) => {
+		const { decoded } = await batchedViewSimulation(CALLS, deps())
+
+		expect(decoded).toEqual([42n, [5n, true], undefined])
 	})
 })

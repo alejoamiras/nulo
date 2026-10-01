@@ -5,7 +5,7 @@
  * moved here with the subsystem; the behavior contract is identical.
  */
 
-import { GasFees } from "@aztec/stdlib/gas"
+import { GasFees } from "@aztec-labs/stdlib/gas"
 import { SessionEndedError } from "@nulo/extension-messaging/errors"
 import { describe, expect, test } from "vitest"
 import { TransferType } from "@/wallet/services/transaction/spec"

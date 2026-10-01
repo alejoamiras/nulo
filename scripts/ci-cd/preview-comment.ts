@@ -4,10 +4,9 @@
  * artifacts. The comment is the only thing that makes those artifacts discoverable — GitHub buries
  * them in the run's Summary page. Rendering is pure; the upsert shells out to `gh api`.
  *
- * A build's result is rendered per target. A skipped Firefox build is normal (its job only runs when
- * the diff touches Firefox-relevant files), so a skipped target reads as "not built for this
- * change", never as an error; a failed build still updates the comment so a stale link from a
- * previous push cannot pass for the current head.
+ * A build's result is rendered per target. A skipped target reads as "not built for this change",
+ * never as an error; a failed build still updates the comment so a stale link from a previous push
+ * cannot pass for the current head.
  */
 
 import { $ } from "bun"

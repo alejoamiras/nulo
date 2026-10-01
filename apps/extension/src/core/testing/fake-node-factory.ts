@@ -15,7 +15,9 @@
  * the production adapter for those paths.
  */
 
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import type { NodeFactory } from "@nulo/aztec-runtime/ports"
 import { walletChainId } from "@/utils/chain-ids"
 
@@ -24,6 +26,8 @@ export type FakeNodeOverrides = Partial<AztecNode>
 export class FakeNodeFactory implements NodeFactory {
 	/** Nodes created so far, in call order. Useful for assertions. */
 	public readonly created: Array<{ rpcUrl: string; node: AztecNode }> = []
+	/** The URLs of the `created` entries that came from `createSingleAttemptNode`, in call order. */
+	public readonly singleAttempt: string[] = []
 
 	private readonly perUrl = new Map<string, FakeNodeOverrides>()
 	private template: FakeNodeOverrides = {}
@@ -45,6 +49,19 @@ export class FakeNodeFactory implements NodeFactory {
 		const node = this.createNode(rpcUrl)
 		const info = await node.getNodeInfo()
 		return walletChainId(info.l1ChainId, info.rollupVersion)
+	}
+
+	/** The same fake as `createNode`, recorded with `singleAttempt` so a test can tell the two apart. */
+	public createSingleAttemptNode(rpcUrl: string, _timeoutMs: number): AztecNode {
+		const node = this.createNode(rpcUrl)
+		this.singleAttempt.push(rpcUrl)
+		return node
+	}
+
+	/** Mirrors the production single read against the same per-URL stubs; `timeoutMs` is not
+	 *  enforced, as for `probeChainId`. */
+	public async readPublicStorageOnce(rpcUrl: string, contract: AztecAddress, slot: Fr, _timeoutMs: number): Promise<Fr> {
+		return this.createNode(rpcUrl).getPublicStorageAt("latest", contract, slot)
 	}
 
 	public createNode(rpcUrl: string): AztecNode {

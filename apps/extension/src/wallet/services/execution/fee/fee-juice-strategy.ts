@@ -10,7 +10,7 @@
  * so the freshly signed witnesses are verified before the estimate leaves.
  */
 
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import type { Action } from "../spec"
 import type { FeeEstimate, FeeStrategy, FeeStrategyContext, FeeStrategyDeps } from "./fee-strategy"

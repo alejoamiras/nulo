@@ -10,13 +10,13 @@
  * `abi()`), in matcher order, and `getDefaultTokenFn`. A wrong ABI or a mis-scored candidate =
  * the wallet calls the WRONG token function (mis-read balance / mis-routed transfer).
  *
- * Fixture: the real `@aztec/noir-contracts.js/Token` artifact (imported live — ~11 MB, too
+ * Fixture: the real `@aztec-labs/noir-contracts.js/Token` artifact (imported live — ~11 MB, too
  * large to freeze; Aztec is exact-pinned + manually bumped). The real artifact exposes ONE
  * candidate per kind, so the multi-candidate scoring / tie paths are pinned separately below
  * against synthetic artifacts (cloned real ABIs, varied names).
  */
-import type { ContractArtifact, FunctionAbi } from "@aztec/stdlib/abi"
-import { TokenContractArtifact } from "@aztec/noir-contracts.js/Token"
+import type { ContractArtifact, FunctionAbi } from "@aztec-labs/stdlib/abi"
+import { TokenContractArtifact } from "@aztec-labs/noir-contracts.js/Token"
 import { describe, expect, test } from "vitest"
 import type { Fn } from "@/wallet/utils/fn"
 import { TOKEN_FN_DESCRIPTORS } from "./descriptors"

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue"
-import { type FactCell, factWord, type PublishFacts, stripAriaLabel } from "./publish-facts"
+import { type FactCell, factWord, type PublishFacts, publishGlyph, stripAriaLabel } from "./publish-facts"
 import mark from "./publish-mark.module.css"
 
 const props = defineProps<{ facts: PublishFacts }>()
@@ -13,7 +13,7 @@ const CELLS: { cell: FactCell; name: string; attr: string }[] = [
 ]
 
 const label = computed(() => stripAriaLabel(props.facts))
-const isFilled = (cell: FactCell) => props.facts[cell] === "public" || props.facts[cell] === "exposed"
+const cells = computed(() => CELLS.map((c) => ({ ...c, glyph: publishGlyph(props.facts[c.cell]) })))
 </script>
 
 <template>
@@ -27,8 +27,8 @@ const isFilled = (cell: FactCell) => props.facts[cell] === "public" || props.fac
 		:aria-label="label"
 		@click="emit('open')"
 	>
-		<span v-for="{ cell, name, attr } in CELLS" :key="cell" :class="[$style.cell, mark[facts[cell]]]" :data-cell="attr">
-			<i :class="[mark.mark, isFilled(cell) && mark.filled]" aria-hidden="true" />
+		<span v-for="{ cell, name, attr, glyph } in cells" :key="cell" :class="[$style.cell, mark[facts[cell]]]" :data-cell="attr">
+			<Icon v-if="glyph" :name="glyph" size="10" aria-hidden="true" />
 			<b :class="$style.name">{{ name }}</b>
 			<span :class="$style.word">{{ factWord(cell, facts) }}</span>
 		</span>

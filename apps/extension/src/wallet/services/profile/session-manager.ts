@@ -49,7 +49,7 @@
  * required there either.
  */
 
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import type { ConfigProp, IConfig } from "@/wallet/config"
 import { type ILogger, LogLevel } from "@/wallet/logger"
 import { ValueStorage } from "@/wallet/storage"

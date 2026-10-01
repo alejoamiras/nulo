@@ -23,6 +23,12 @@ for (const method of ["trace", "debug", "log", "info", "warn", "error"] as const
 	}
 }
 
+// jsdom lays nothing out and implements no `scrollIntoView`, so a component that scrolls a block
+// into view as it appears would throw from its watcher; a test that cares spies on this no-op.
+if (typeof Element !== "undefined" && typeof Element.prototype.scrollIntoView !== "function") {
+	Element.prototype.scrollIntoView = () => {}
+}
+
 let ports = new PortRegistry()
 
 export const emitPortMessage = (service: string, message: unknown) => ports.deliver(service, message)

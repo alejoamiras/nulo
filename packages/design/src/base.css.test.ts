@@ -18,5 +18,6 @@ test("base.css content is pinned (edits must be deliberate + visually re-verifie
 	// 2026-09-20 (firefox): `* { scrollbar-width: none }` beside the `::-webkit-scrollbar` rule Firefox
 	// ignores, and `-moz-osx-font-smoothing` on the icon font. Deliberate; re-verified by screenshotting
 	// 16 popup routes in both browsers — Chrome unchanged, Firefox matching it.
-	expect(hash).toBe("fa81d2f7b50e2bcf6b7caafb40055942c5191d44b1e80d2ca60f991ac9485a3f")
+	// 2026-09-23 (attribution): an Apache-2.0 §4(b) header comment on line 1. No rule changed.
+	expect(hash).toBe("329bfd99da60aaae47b9600c98a983822fad7abb5e19adc1470ee9a91e5fd4a8")
 })

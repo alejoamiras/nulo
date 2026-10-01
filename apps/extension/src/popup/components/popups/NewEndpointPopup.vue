@@ -49,11 +49,11 @@ const handleCreate = async () => {
 		await managers.network.addEndpoint(network.value.id, labelTerm.value || undefined, urlTerm.value)
 		appStore.networks = await managers.network.getNetworks()
 		emit("onClose")
-		openToast({ label: "Endpoint added" })
+		openToast({ kind: "success", label: "Endpoint added" })
 	} catch (err) {
 		const msg = errorMessageFromUnknown(err)
 		if (msg.includes("ENDPOINT_CHAIN_MISMATCH")) {
-			errorText.value = `Wrong chain — this network is chain ${network.value?.chainId}.`
+			errorText.value = `Wrong chain. This network is chain ${network.value?.chainId}.`
 		} else if (msg.includes("DUPLICATE_ENDPOINT")) {
 			errorText.value = "This URL is already an endpoint of this network."
 		} else if (msg === "Failed to fetch node info") {

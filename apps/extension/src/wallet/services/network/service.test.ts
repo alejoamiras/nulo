@@ -16,7 +16,9 @@
  */
 
 import { beforeEach, describe, expect, test, vi } from "vitest"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import { CHAIN_IDS, LOCAL_L1_CHAIN_ID } from "@/utils/chain-ids"
 import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { LoggerStore } from "@/wallet/logger"
@@ -148,8 +150,8 @@ describe("NetworkService — seedDefaultsForProfile (full-backup import reseeds 
 	test("seeds every default for the target profile and writes ITS active pointer, never touching the active profile's node cache", async () => {
 		const h = withProfiles(harness({}), ["p1", "p2"])
 		const p1 = await h.service.getOrInitNetworks()
-		const mainnet = p1.find((n) => n.chainId === CHAIN_IDS.MAINNET)!
-		const p1NodeBefore = await h.service.getNode(mainnet.chainId)
+		const p1Primary = p1.find((n) => n.chainId === CHAIN_IDS.TESTNET)!
+		const p1NodeBefore = await h.service.getNode(p1Primary.chainId)
 		const nodesBefore = new Map((h.service as unknown as { nodes: Map<number, unknown> }).nodes)
 
 		const seeded = await h.service.seedDefaultsForProfile("p2")
@@ -162,12 +164,12 @@ describe("NetworkService — seedDefaultsForProfile (full-backup import reseeds 
 		const nodesAfter = (h.service as unknown as { nodes: Map<number, unknown> }).nodes
 		expect(nodesAfter.size).toBe(nodesBefore.size)
 		for (const [chainId, node] of nodesBefore) expect(nodesAfter.get(chainId)).toBe(node)
-		expect(await h.service.getNode(mainnet.chainId)).toBe(p1NodeBefore)
+		expect(await h.service.getNode(p1Primary.chainId)).toBe(p1NodeBefore)
 		// p2's pointer names p2's primary seed; p1's pointer is untouched.
 		const raw = (await h.browserApi.storage.local.get(null)) as Record<string, unknown>
-		const p2Primary = seeded.find((n) => n.chainId === CHAIN_IDS.MAINNET)!
+		const p2Primary = seeded.find((n) => n.chainId === CHAIN_IDS.TESTNET)!
 		expect(Object.entries(raw).some(([k, v]) => k.includes("p2") && v === p2Primary.id)).toBe(true)
-		expect(Object.entries(raw).some(([k, v]) => k.includes("p1") && v === mainnet.id)).toBe(true)
+		expect(Object.entries(raw).some(([k, v]) => k.includes("p1") && v === p1Primary.id)).toBe(true)
 	})
 
 	test("a repeat call returns the stored rows untouched — no duplicate (profileId, chainId), no endpoint reset", async () => {
@@ -420,6 +422,15 @@ describe("NetworkService transient-node cache (M4.10)", () => {
 		// Pins to the submitted URL; never touches the active profile's node (rpc.b).
 		const createdEntry = factory.created.find((c) => c.node === node)
 		expect(createdEntry?.rpcUrl).toBe("https://rpc.deleted")
+		expect(factory.created.map((c) => c.rpcUrl)).not.toContain("https://rpc.b")
+	})
+
+	test("getSingleAttemptNodeForUrl pins the same way, through the factory's one-attempt client, one per URL", async () => {
+		const { service, factory } = setupServiceWithStorage({ "https://rpc.b": nodeInfoForChain(7) })
+		const node = await service.getSingleAttemptNodeForUrl("https://rpc.deleted")
+		expect(await service.getSingleAttemptNodeForUrl("https://rpc.deleted")).toBe(node)
+		expect(factory.singleAttempt).toEqual(["https://rpc.deleted"])
+		expect(factory.created.find((c) => c.node === node)?.rpcUrl).toBe("https://rpc.deleted")
 		expect(factory.created.map((c) => c.rpcUrl)).not.toContain("https://rpc.b")
 	})
 
@@ -1118,20 +1129,19 @@ describe("NetworkService public API (M4.10)", () => {
 	})
 
 	describe("getPrimaryNetwork", () => {
-		// Unit builds set no VITE_NULO_E2E_DEFAULT_NET flag → the primary seed is Alpha (MAINNET).
 		test("returns the network matching the primary (isPrimaryActive) seed's chainId, regardless of insertion order", async () => {
 			const { service } = setupServiceWithStorage({
 				"https://rpc.test/other": nodeInfoForChain(999_999),
-				"https://rpc.test/mainnet": nodeInfoForChain(CHAIN_IDS.MAINNET),
+				"https://rpc.test/testnet": nodeInfoForChain(CHAIN_IDS.TESTNET),
 			})
 			await service.addNetwork("Other", "https://rpc.test/other")
-			const alpha = await service.addNetwork("Alpha V5", "https://rpc.test/mainnet")
+			const testnet = await service.addNetwork("Testnet", "https://rpc.test/testnet")
 			const primary = await service.getPrimaryNetwork()
-			expect(primary?.id).toBe(alpha.id)
-			expect(primary?.chainId).toBe(CHAIN_IDS.MAINNET)
+			expect(primary?.id).toBe(testnet.id)
+			expect(primary?.chainId).toBe(CHAIN_IDS.TESTNET)
 		})
 
-		test("returns null when the primary network is absent (e.g. user deleted Alpha)", async () => {
+		test("returns null when the primary network is absent (e.g. the user deleted the Testnet)", async () => {
 			const { service } = setupServiceWithStorage({
 				"https://rpc.test/other": nodeInfoForChain(999_999),
 			})
@@ -1201,13 +1211,13 @@ describe("NetworkService public API (M4.10)", () => {
 })
 
 describe("NetworkService default seeding", () => {
-	test("seeded dRPC endpoints carry the 'dRPC' label; Local Network stays unlabeled", async () => {
+	test("seeds Testnet and Local Network only; the dRPC endpoint carries the 'dRPC' label", async () => {
 		// Settings renders `endpoint.label || endpoint.rpcUrl` as the row title — the label is what
 		// keeps the raw provider URL out of the UI. Local Network is not dRPC-backed, so no label.
 		const { service } = setupServiceWithStorage({})
 		const networks = await service.getOrInitNetworks()
 		const byName = new Map(networks.map((n) => [n.name, n]))
-		expect(byName.get("Alpha V5")?.endpoints[0]?.label).toBe("dRPC")
+		expect([...byName.keys()].sort()).toEqual(["Local Network", "Testnet"])
 		expect(byName.get("Testnet")?.endpoints[0]?.label).toBe("dRPC")
 		expect(byName.get("Local Network")?.endpoints[0]?.label).toBeUndefined()
 	})
@@ -1302,6 +1312,53 @@ describe("NetworkService.probeNodeStatus (bounded probe)", () => {
 		const network = await service.addNetwork("Seven", "https://rpc.example.com")
 		await expect(service.probeNodeStatus(network.id, 999_999)).rejects.toThrow()
 		await expect(service.probeNodeStatus(network.id, 1)).rejects.toThrow()
+	})
+})
+
+describe("NetworkService.readPublicStorageOnce", () => {
+	test("reads at the passed row's primary endpoint, never another network's or the active profile's row for that chain", async () => {
+		const { service, factory } = setupServiceWithStorage({})
+		const chainOf: Record<string, number> = {
+			"https://a.example": 7,
+			"https://a2.example": 7,
+			"https://b.example": 9,
+			"https://p2.example": 7,
+		}
+		const storageAt = new Map<string, ReturnType<typeof vi.fn>>()
+		for (const [i, [url, chainId]] of Object.entries(chainOf).entries()) {
+			const read = vi.fn(async () => new Fr(BigInt(100 + i)))
+			storageAt.set(url, read)
+			factory.setOverrides(url, {
+				getNodeInfo: vi.fn().mockResolvedValue(nodeInfoForChain(chainId)) as unknown as AztecNode["getNodeInfo"],
+				getPublicStorageAt: read as unknown as AztecNode["getPublicStorageAt"],
+			})
+		}
+		const a = await service.addNetwork("A", "https://a.example")
+		const second = await service.addEndpoint(a.id, "Two", "https://a2.example")
+		const row = await service.setPrimaryEndpoint(a.id, second.id)
+		await service.addNetwork("B", "https://b.example")
+		// Another profile's row on the same chain: the active profile's own row for chain 7 is `row`.
+		const foreign: Network = {
+			...row,
+			id: "net-p2",
+			profileId: "p2",
+			endpoints: [{ id: "ep-p2", rpcUrl: "https://p2.example" }],
+			primaryEndpointId: "ep-p2",
+		}
+		const once = vi.spyOn(factory, "readPublicStorageOnce")
+		const contract = AztecAddress.fromNumberUnsafe(5)
+		const slot = new Fr(9n)
+
+		expect((await service.readPublicStorageOnce(row, contract, slot, 5_000)).toBigInt()).toBe(101n)
+		expect((await service.readPublicStorageOnce(foreign, contract, slot, 5_000)).toBigInt()).toBe(103n)
+
+		expect(once.mock.calls).toEqual([
+			["https://a2.example", contract, slot, 5_000],
+			["https://p2.example", contract, slot, 5_000],
+		])
+		expect(storageAt.get("https://a2.example")).toHaveBeenCalledWith("latest", contract, slot)
+		expect(storageAt.get("https://a.example")).not.toHaveBeenCalled()
+		expect(storageAt.get("https://b.example")).not.toHaveBeenCalled()
 	})
 })
 

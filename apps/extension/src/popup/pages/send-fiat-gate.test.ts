@@ -78,7 +78,7 @@ describe("send-fiat-gate", () => {
 	})
 })
 
-describe("send-fiat-gate — snapshot expiry (codex post-impl H4)", () => {
+describe("send-fiat-gate — snapshot expiry", () => {
 	test("a frozen session older than 15 min blocks with requote, even at ZERO drift", () => {
 		const frozenAt = 1_000_000
 		const guard = { frozenUsd: 1, frozenAt, converting: false }

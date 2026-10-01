@@ -12,7 +12,7 @@ import { describe, expect, test, vi } from "vitest"
 import type { ConfigProp, IConfig } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { EventHandler } from "@nulo/wallet-core/utils"
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import { AuthwitDiscoverer, type BuildTxRequestFn } from "./authwit-discoverer"
 import type { Action } from "./spec"
 

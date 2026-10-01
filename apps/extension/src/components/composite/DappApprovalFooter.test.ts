@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest"
 import { mount } from "@vue/test-utils"
+import { pressOn } from "../../../tests/helpers/press-key"
 import DappApprovalFooter from "./DappApprovalFooter.vue"
 
 const STUBS = {
@@ -52,6 +53,16 @@ describe("composite/DappApprovalFooter", () => {
 		await w.find('[data-testid="x-confirm-btn"]').trigger("click")
 		expect(w.emitted("approve")).toHaveLength(1)
 		expect(w.emitted("reject")).toBeUndefined()
+	})
+
+	test("a repeat or composing Enter on the confirm approves nothing; a plain Enter approves once", () => {
+		const w = factory()
+		const confirm = w.get('[data-testid="x-confirm-btn"]').element as HTMLElement
+		pressOn(confirm, "Enter", { repeat: true })
+		pressOn(confirm, "Enter", { isComposing: true })
+		expect(w.emitted("approve")).toBeUndefined()
+		pressOn(confirm, "Enter")
+		expect(w.emitted("approve")).toHaveLength(1)
 	})
 
 	test("rejectDisabled disables the reject button", () => {

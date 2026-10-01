@@ -7,6 +7,7 @@
 import { completeImportWithRecovery } from "@/composables/completeImportWithRecovery"
 import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
 import { useProfileImportFlow } from "@/composables/useProfileImportFlow"
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 
 /** Utils */
@@ -32,25 +33,23 @@ const { bootstrapActiveProfile, hydrateKnownProfile } = useProfileBootstrap()
 // bootstraps the freshly activated profile itself — its "wait for active" IS the
 // direct bootstrap. If that bootstrap doesn't activate (an MV3 worker restart
 // mid-import, so the session couldn't be confirmed), the recovery re-reads the
-// active profile and bootstraps again, matching the popup path. Onboarding routes
-// to /onboarding/learn regardless (that screen gates on unlock); only the toast
-// copy reflects the outcome.
+// active profile and bootstraps again, matching the popup path. Either way onboarding
+// moves on with no success snack, unlike the popup's import: no later onboarding page
+// needs the session, and a profile left locked meets the popup's unlock screen.
 async function completeImport(profile: unknown) {
 	const p = profile as { id: string; name: string; type: "password" | "passkey" }
 	await setLastActiveProfileId(p.id)
-	const outcome = await completeImportWithRecovery({
+	await completeImportWithRecovery({
 		waitForActive: async () => {
 			if (!(await bootstrapActiveProfile(p))) throw new Error("bootstrap did not activate")
 		},
 		recover: async () => (await hydrateKnownProfile())?.id === p.id && appStore.isLogined,
 	})
-	openToast(
-		outcome === "active" ? { label: "Profile imported", icon: "check-circle" } : { label: "Profile imported. Unlock to continue." },
-	)
 	router.push("/onboarding/learn")
 }
 
 const {
+	nameFieldState,
 	profileName,
 	nameError,
 	shakeName,
@@ -72,9 +71,14 @@ const {
 	decryptionPassword,
 	restoreStatus,
 	restoreStage,
-	importedProfile,
 	isAllowedToImportBackup,
 	isRestoreHasErrors,
+	canRetryAccountState,
+	unrestoredNetworkNames,
+	hasOtherRestoreErrors,
+	isRetryingAccountState,
+	retryAccountState,
+	continueImport,
 	pickBackupFile,
 	decryptBackup,
 	restoreBackup,
@@ -127,16 +131,17 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<OnboardingPage :gap="24" :data-restore-stage="restoreStage">
+	<OnboardingPage :gap="24" data-testid="onboarding-import-page" :data-name-field="nameFieldState" :data-restore-stage="restoreStage">
 		<OnboardingBackLink testid="onboarding-import-back" />
 		<StepIndicator :current="2" />
 		<header :class="$style.hero">
-			<BrutalistTitle main="Import" sub="Profile" />
+			<BrutalistTitle main="Import" sub="Wallet" />
 			<div :class="$style.hero_bar" />
 			<Text size="14" color="secondary" height="150">Restore from a recovery phrase, passkey, or full backup.</Text>
 		</header>
 
 		<OnboardingProfileNameField
+			v-if="nameFieldState === 'shown'"
 			ref="nameInputRef"
 			v-model="profileName"
 			:error="nameError"
@@ -159,6 +164,8 @@ onBeforeUnmount(() => {
 			:selectedBackup="selectedBackup"
 			:restoreStatus="restoreStatus"
 			:isRestoreHasErrors="isRestoreHasErrors"
+			:unrestoredNetworks="unrestoredNetworkNames"
+			:hasOtherErrors="hasOtherRestoreErrors"
 			:error="error"
 			:isCopied="isCopied"
 			:maxPasswordLength="maxPasswordLength"
@@ -179,7 +186,7 @@ onBeforeUnmount(() => {
 			@passwordInput="handlePasswordInput"
 		/>
 
-		<Flex v-if="selectedImportOption" direction="column" gap="10" :class="$style.ctas">
+		<Flex v-if="selectedImportOption" v-snack-footer direction="column" gap="10" :class="$style.ctas">
 			<template v-if="selectedImportOption === 'full_backup'">
 				<Button
 					v-if="selectedBackup?.type === 'encrypted' && !selectedBackup?.profileType"
@@ -203,11 +210,23 @@ onBeforeUnmount(() => {
 					{{ restoreStatus === "progress" ? "Importing..." : "Import profile" }}
 				</Button>
 				<Button
+					v-if="canRetryAccountState"
+					variant="cta_outline"
+					size="large"
+					:disabled="isRetryingAccountState"
+					:loading="isRetryingAccountState"
+					data-testid="import-full-backup-retry-btn"
+					@click="retryAccountState"
+				>
+					{{ isRetryingAccountState ? "Retrying..." : "Retry" }}
+				</Button>
+				<Button
 					v-if="restoreStatus === 'finished' && isRestoreHasErrors"
 					variant="cta"
 					size="large"
+					:disabled="isRetryingAccountState"
 					data-testid="import-full-backup-continue-btn"
-					@click="importedProfile && completeImport(importedProfile as { id: string })"
+					@click="continueImport"
 				>
 					Continue
 				</Button>
@@ -215,6 +234,7 @@ onBeforeUnmount(() => {
 					v-if="restoreStatus === 'finished' && isRestoreHasErrors"
 					variant="cta_outline"
 					size="large"
+					:disabled="isRetryingAccountState"
 					data-testid="import-full-backup-view-errors-btn"
 					@click="showRestoreErrorLog"
 				>
@@ -236,7 +256,7 @@ onBeforeUnmount(() => {
 			<Button
 				variant="cta_outline"
 				size="large"
-				:disabled="restoreStatus === 'progress'"
+				:disabled="restoreStatus === 'progress' || isRetryingAccountState"
 				@click="handleBack"
 			>
 				Back to methods

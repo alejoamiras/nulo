@@ -5,7 +5,7 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 budget: recon 2 agents (repo + store APIs) · codex high · code-review off
-status: revision 2 (Firefox joins; keyless Chrome publish) — codex approved (round 7) — owner approved 2026-09-21 — completed: merged to dev 2026-09-22 (#662 `0af7d9bc`, #663 `a5374be2`); the account-side checklist is the remaining launch work
+status: revision 2 (Firefox joins; keyless Chrome publish) — codex approved (round 7) — owner approved 2026-09-21 — completed: merged to dev 2026-09-22 (#662 `0af7d9bc`, #663 `a5374be2`); account side done 2026-09-23 — v0.28.0 in review at both stores (Chrome uploaded by CI, submitted by hand; Firefox `nulo-v5` submitted by hand), store-check `both` green; log in `lessons/account-session.md`
 ---
 
 # Store launch — Chrome Web Store and Firefox Add-ons, the repo half
@@ -199,7 +199,7 @@ Both touch `apps/extension/**` and `.github/workflows/**`, so smoke + network e2
 1. *Legal* (Ask 6): fill `BEFORE-LAUNCH.md` § 1 and the privacy policy's effective date (version line, history row, `LEGAL_MANIFEST` entry together; `bun run --cwd packages/legal test` green); deploy; confirm `/privacy` has no DRAFT banner (`/terms` keeps it until step 7).
 1b. *Mozilla's modified-library question* (Ask 9): stated in the reviewer notes; no separate message.
 2. *Chrome, first submission by hand*: new item from the release's `nulo-chrome-<v>.zip`; listing, Privacy tab and art from `store/`; privacy URL; official URL `nulo.sh` (Search Console already verified); visibility **Unlisted**; submit. Note the Publisher ID (Account page) and Item ID.
-3. *Google Cloud* (as `alejo@nulo.sh`; its project is "internal" to the Workspace, so the OAuth block does not apply): create project `nulo-store-publish`; enable the Chrome Web Store API and the IAM Service Account Credentials API; create service account `cws-publisher` with no roles; create a Workload Identity pool + GitHub provider (issuer `https://token.actions.githubusercontent.com`, mappings for `sub`, `repository_id`, `repository_owner_id`, `environment`, `ref`, `event_name`, `workflow_ref`, and the attribute condition from the Security section); grant the pool's principal set `roles/iam.workloadIdentityUser` on the service account; add the service account's email in the Developer Dashboard → Account.
+3. *Google Cloud* (as `alejo@nulo.sh`; its project is "internal" to the Workspace, so the OAuth block does not apply): create a project (created as `nulo-cws`); enable the Chrome Web Store API and the IAM Service Account Credentials API; create service account `cws-publisher` with no roles; create a Workload Identity pool + GitHub provider (issuer `https://token.actions.githubusercontent.com`, mappings for `sub`, `repository_id`, `repository_owner_id`, `environment`, `ref`, `event_name`, `workflow_ref`, and the attribute condition from the Security section); grant the pool's principal set `roles/iam.workloadIdentityUser` on the service account; add the service account's email in the Developer Dashboard → Account.
 4. *GitHub*: create environment `chrome-web-store` (reviewer, `main` only, bypass off; if one already exists, verify its rules first) with **variables** `CWS_WIF_PROVIDER`, `CWS_SERVICE_ACCOUNT`, `CWS_PUBLISHER_ID`, `CWS_ITEM_ID`, `CWS_PUBLISH_TYPE`.
 5. *Firefox, first submission by hand*: Developer Hub → Submit a New Add-on → On this site → upload `nulo-firefox-<v>.zip` → answer "yes" to source code and upload `git archive` of the tag → listing from `store/listing.md`'s Firefox part, experimental flag per Ask 8, reviewer notes pasted → submit. Then Developer Hub → Manage API Keys → generate; create environment `firefox-add-ons` (same protections; if GitHub already shows one, verify its rules before adding anything) with secrets `AMO_JWT_ISSUER`, `AMO_JWT_SECRET` (the owner pastes them; they are never shown to an assistant or written anywhere else).
 6. *Prove it, in two steps.* Wiring: `gh workflow run release.yml --ref main -f tag=<latest> -f dry_run=true -f publish_chrome=true -f publish_firefox=true`; confirm both jobs **ran**, verified their zips and printed their plans (no authentication happens). Credentials: `gh workflow run store-check.yml --ref main -f store=chrome` once Chrome's environment exists (the only option while only Arc 1 is on `main`), and `-f store=both` once Arc 2 has shipped and both environments exist; each job authenticates, makes one read-only request and prints the item's state (Chrome: the hand-made submission, pending or published; Firefox: `wallet@nulo.sh` in the author-scoped list). It touches no release. The first real publish is the next stable release (its version must exceed the hand-uploaded one).
@@ -207,7 +207,7 @@ Both touch `apps/extension/**` and `.github/workflows/**`, so smoke + network e2
 
 ## Audit — codex
 
-Revision 1 (2026-09-07): round 1 reject, round 2 reject, round 3 approve; findings and their disposition are in [`audit-codex.md`](./audit-codex.md). They carried into this revision: the v2 API and its state vocabulary; `DRY_RUN` from the dispatch input with strict parsing; checkout at the release SHA; dedicated environments rather than rules on `production`; the `always() && !cancelled()` guard; a bare `oven-sh/setup-bun` with no install; bounded, fail-closed polling; a summary naming the actual state; the remote-code answer as an owner decision.
+Revision 1 (2026-09-07): round 1 reject, round 2 reject, round 3 approve; findings and their disposition are in [`audit-codex.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/chrome-store-launch/audit-codex.md). They carried into this revision: the v2 API and its state vocabulary; `DRY_RUN` from the dispatch input with strict parsing; checkout at the release SHA; dedicated environments rather than rules on `production`; the `always() && !cancelled()` guard; a bare `oven-sh/setup-bun` with no install; bounded, fail-closed polling; a summary naming the actual state; the remote-code answer as an owner decision.
 
 **Revision 2, round 4 (GPT-6 Astra, high, 2026-09-21): reject.** Seven blocking, eight should-fix, two nits; every one verified against the repo and adopted, none rejected. Blocking: a tag on another branch could supply the script run with the store credential (the dispatch ref authenticates the workflow, not the tag) → `resolve.outputs.on_main` gates both jobs; root `prepare` exits 128 outside a git checkout, so the documented source install fails (probed) → guarded, and archives are unpacked outside any repo; a new workflow file cannot be dispatched from a branch → a path-filtered `push` trigger; the Chrome runner polled `lastAsyncUploadState`, which need not exist after a synchronous upload → branch on the upload response; the reproducibility gate compared two rebuilds with each other and tolerated documented differences → both architectures are compared with the shipped build, any difference fails, the committed version is asserted; disclosure does not satisfy Mozilla's modified-library rule, and the modifications were misdescribed → Ask 9, exact inventory; the remote-code default turned support silence into "No" and understated mediated node access → no auto-default, precise direct/mediated wording, the policy's two sentences flagged. Should-fix: `workflow_ref` and `event_name` in the OIDC condition; integer-tuple version compare across `distributionChannels[]` and both warning envelopes; an AMO partial-failure recovery procedure, notes validated before upload, JWTs masked; a data inventory (contacts, connected-app URLs, every destination) and an outbound-only assessment for Firefox; prefixed archive paths, an exact-filename checksum, a settled (not merely non-empty) declaration; a read-only `store_check` mode, because a dry run proves no credential, and an honest legal sequence (the effective date and listing URLs cannot be filled before submission); Firefox's `environment:` key moves to Arc 2; the smoke gate runs in artifact mode. Nits adopted: four fact corrections; `source-rebuild.sh` is canonical and the doc-parity test is dropped.
 
@@ -216,6 +216,35 @@ Revision 1 (2026-09-07): round 1 reject, round 2 reject, round 3 approve; findin
 **Round 6: conditional approve.** "No new blocking credential-boundary defect found." Four should-fix, all adopted: `store-check.yml`'s `store` options grow with the jobs that exist (Arc 1 offers only `chrome`); the rebuild trigger stays through Arc 2's fix loop and leaves in an isolated, trigger-only final commit; Ask 5's exclusion of `personallyIdentifyingInfo` rested on "profile names stay local", which the passkey label contradicts, so the judgment call now covers both categories; the Firefox summary reports the state AMO returned rather than assuming human review. Codex confirmed the `workflow_ref in [...]` condition is valid CEL.
 
 **Round 7: approve.** "All four round-6 findings are resolved and no material plan findings remain; confidence is **high** in this plan review, while implementation correctness, CI execution, cross-architecture reproducibility and memory use, live credentials/environment protections, and store-policy acceptance remain unverified."
+
+## Launch status and follow-ups (2026-09-23)
+
+The account side ran on 2026-09-22/23. Every action, with its rollback, is in
+[`lessons/account-session.md`](lessons/account-session.md). Open items:
+
+- **Chrome**: v0.28.0 is under review. The API submit was refused on `BROAD_HOST_USAGE`, so the
+  owner submitted by hand. After approval: Publish from the dashboard (a staged approval lapses
+  after 30 days). Unlisted → Public is the owner's call, after a `/harden security` pass.
+- **Firefox**: `nulo-v5` 0.28.0.0 is awaiting review. Mozilla's modified-library rule (Ask 9) is the
+  open review risk. API publishing starts with the next stable release.
+- **CI Chrome publish vs warnings** — decided 2026-09-24: an accepted-warnings list in code
+  (`ACCEPTED_WARNINGS` in `scripts/release/publish-chrome-store.ts`, only `BROAD_HOST_USAGE`, pinned
+  by a test). The publish still sends `blockOnWarnings: true`; a refusal whose every warning is on
+  the list is recorded in the job summary and retried once with `blockOnWarnings: false`; anything
+  else fails closed. `apps/extension/src/manifest.test.ts` pins the host permissions, the
+  content-script matches and the absence of optional grants, so nothing widens behind it.
+- **`fetchStatus` and a dashboard submission**: about two hours after the hand submission, check
+  mode read `submitted none`. Confirm what the next publish's preflight reports.
+- **Release notes are empty on every release**: `attach-assets` runs `git-cliff --unreleased` after
+  the tag already exists. Use `--latest`, then regenerate v0.28.0's body.
+- **Rebuilt zips are not byte-reproducible** (content-identical, container metadata differs), so a
+  non-dry republish churns `SHASUMS256.txt`. Fixed entry mtimes would stop that.
+- **Tools e2e flakes** on identical code: `deposit-token` cell 2 (2 of 4 runs), `fee-states` cell 12,
+  `activity` cell 40.
+- **`store-icons.test.ts` fails on macOS**: the PNG bytes differ by platform. Compare pixels, or run
+  it on CI only.
+- **v1.0.0** (`BEFORE-LAUNCH.md` § 3): the Terms' effective date, and a check that both listing
+  URLs resolve.
 
 ## Seeds
 

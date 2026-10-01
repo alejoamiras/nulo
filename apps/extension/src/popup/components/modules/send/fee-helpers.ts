@@ -1,6 +1,30 @@
 import { FpcType } from "@/wallet/services/fpc/client"
+import { feeJuicePricingFromUsd, feeToUsd, formatGasBalance } from "@/utils/fee-estimation"
 
-export { formatGasBalance } from "@/utils/fee-estimation"
+export { formatGasBalance }
+
+export interface FeeDisplay {
+	amount: string
+	/** Null without a live Fee Juice quote. */
+	usd: string | null
+}
+
+export function feeDisplay(
+	estimate: { maxFee: string | bigint; maxFeeFormatted: string } | null | undefined,
+	usdPerFeeJuice: number | undefined,
+): FeeDisplay | null {
+	if (!estimate) return null
+	return {
+		amount: estimate.maxFeeFormatted,
+		usd: feeToUsd(BigInt(estimate.maxFee), feeJuicePricingFromUsd(usdPerFeeJuice)),
+	}
+}
+
+/** The fee card's "You pay" value as one string, in the card's words. */
+export function feeLine(display: FeeDisplay | null): string | undefined {
+	if (!display) return undefined
+	return display.usd ? `~${display.amount} FJ (${display.usd})` : `~${display.amount} FJ`
+}
 
 export interface FeeMethodOption {
 	type: "fj" | "private_fpc" | "fpc"
@@ -8,10 +32,15 @@ export interface FeeMethodOption {
 	subtitle: string
 	disabled?: boolean
 	/** When `disabled`, optional short copy rendered in the dropdown row
-	 *  in place of the regular subtitle (e.g. "no balance"). The testid
-	 *  is still derived from `subtitle`, so this is display-only. */
+	 *  in place of `spend` (e.g. "no balance"). The testid is still derived
+	 *  from `subtitle`, so this is display-only. */
 	disabledReason?: string
-	fpc?: { id: string; type: FpcType; name?: string } | null
+	/** A sponsor a short verdict set aside on this card: selected only when the person picks it. */
+	setAside?: boolean
+	/** What the method can spend, for the menu's right column: a balance, "— FJ" while
+	 *  balances are unknown, "free" for Nulo's own sponsor, "—" for one added by hand. */
+	spend?: string
+	fpc?: { id: string; type: FpcType; name?: string; isProtocol?: boolean; address?: string } | null
 }
 
 /** Fee Juice balances surfaced from `executionService.getGasBalances` —
@@ -45,6 +74,7 @@ export interface RegisteredFpc {
 	type: FpcType
 	name?: string
 	isProtocol?: boolean
+	address?: string
 }
 
 /**
@@ -130,31 +160,33 @@ export function resolveSavedSelection(
 			const fpcId = saved.fpc?.id
 			if (!fpcId) return undefined
 			const match = freshMethods.find((m) => m.type === "fpc" && m.fpc?.id === fpcId)
-			return match ?? undefined
+			return match && !match.disabled && !match.setAside ? match : undefined
 		}
 		default:
 			return undefined
 	}
 }
 
+export interface FeeMethodsOptions {
+	/** Sponsors a verdict found short on the current transaction: their rows are disabled. */
+	shortSponsorIds?: ReadonlySet<string>
+	/** Sponsors a verdict found short on this card: their rows are set aside. */
+	setAsideSponsorIds?: ReadonlySet<string>
+}
+
 /**
  * Build the dropdown's method list. When `gasBalances` is provided,
  * `fj` and `private_fpc` get marked `disabled` with a "no balance" /
- * "not available" hint so the user can't select a method whose
- * simulation would fail. `gasBalances` is optional so callers can keep
+ * "couldn't check balance" / "not available" hint so the user can't
+ * select a method whose simulation would fail. `gasBalances` is optional so callers can keep
  * building the list before balances arrive (everything stays enabled
  * during load; balances flip the disabled state once fetched).
- *
- * `options.allowSponsored` (default true) gates whether Sponsored FPC
- * rows are offered — set false on networks that have no funded sponsor
- * (Alpha/mainnet), where offering it would be a trap that fails at send.
  */
 export function buildFeeMethods(
 	registeredFpcs: RegisteredFpc[],
 	gasBalances?: GasBalances,
-	options?: { allowSponsored?: boolean },
+	options?: FeeMethodsOptions,
 ): FeeMethodOption[] {
-	const allowSponsored = options?.allowSponsored ?? true
 	// Only the protocol-derived PrivateFPC may pay privately; a same-typed row at any other
 	// address (a restored or hand-added one) is never offered, even when it sorts first.
 	const privateFpc = registeredFpcs.find((f) => f.type === FpcType.PrivateFpc && f.isProtocol === true)
@@ -166,13 +198,46 @@ export function buildFeeMethods(
 			continue
 		}
 		if (fpc.type === FpcType.DefaultSponsoredFpc) {
-			// Hidden on networks with no funded sponsor (Alpha/mainnet) — see options.allowSponsored.
-			if (!allowSponsored) continue
-			base.push({ type: "fpc", title: fpc.name || "Sponsored FPC", subtitle: "sponsored", fpc })
+			base.push(sponsorOption(fpc, options))
 		}
 	}
 
 	return base
+}
+
+function sponsorOption(fpc: RegisteredFpc, options: FeeMethodsOptions | undefined): FeeMethodOption {
+	// Only the sponsor Nulo ships is promised free: a contract added by hand can make its
+	// sponsorship conditional on a call from the account and then spend a token
+	// authorization the account granted it earlier.
+	const spend = fpc.isProtocol === true ? "free" : "—"
+	const option: FeeMethodOption = { type: "fpc", title: fpc.name || "Sponsored", subtitle: "sponsored", spend, fpc }
+	if (options?.shortSponsorIds?.has(fpc.id)) {
+		option.disabled = true
+		option.disabledReason = "can't pay now"
+	}
+	if (options?.setAsideSponsorIds?.has(fpc.id)) option.setAside = true
+	return option
+}
+
+/** The fee menu's rows: Nulo's sponsor before hand-added ones, which keep their order. Only the menu
+ *  is reordered; the default sponsor is `defaultSponsor`'s, whatever a row's position. */
+export function menuOrder(methods: FeeMethodOption[]): FeeMethodOption[] {
+	const sponsors = methods.filter((m) => m.type === "fpc")
+	const nulo = sponsors.filter((m) => m.fpc?.isProtocol === true)
+	const handAdded = sponsors.filter((m) => m.fpc?.isProtocol !== true)
+	return [...methods.filter((m) => m.type !== "fpc"), ...nulo, ...handAdded]
+}
+
+/** The only sponsor a card picks unasked: Nulo's own, by its derived identity. One a verdict set
+ *  aside reads as missing. */
+export function defaultSponsor(methods: FeeMethodOption[]): FeeMethodOption | undefined {
+	return methods.find((m) => m.type === "fpc" && m.fpc?.isProtocol === true && !m.disabled && !m.setAside)
+}
+
+/** `undefined` (balances not known yet) and `null` (the leg's read failed) are never printed as a
+ *  zero, which is what `formatGasBalance` makes of them. */
+function spendOf(balance: string | null | undefined): string {
+	return typeof balance === "string" ? `${formatGasBalance(balance)} FJ` : "— FJ"
 }
 
 function feeJuiceOption(gasBalances?: GasBalances): FeeMethodOption {
@@ -180,7 +245,12 @@ function feeJuiceOption(gasBalances?: GasBalances): FeeMethodOption {
 	// Unknown (null) disables too — but with an honest reason, never "no balance".
 	const publicFeeJuiceUnknown = gasBalances !== undefined && gasBalances.publicFeeJuice === null
 
-	const fj: FeeMethodOption = { type: "fj", title: "Fee Juice", subtitle: "public" }
+	const fj: FeeMethodOption = {
+		type: "fj",
+		title: "Public Fee Juice",
+		subtitle: "public",
+		spend: spendOf(gasBalances?.publicFeeJuice),
+	}
 	if (publicFeeJuiceZero) {
 		fj.disabled = true
 		fj.disabledReason = "no balance"
@@ -192,12 +262,15 @@ function feeJuiceOption(gasBalances?: GasBalances): FeeMethodOption {
 }
 
 function privateFeeJuiceOption(privateFpc: RegisteredFpc | undefined, gasBalances?: GasBalances): FeeMethodOption {
-	const privateFeeJuiceZero = gasBalances !== undefined && (gasBalances.privateFeeJuice === null || gasBalances.privateFeeJuice === "0")
+	const privateFeeJuiceZero = gasBalances?.privateFeeJuice === "0"
+	// Unknown (null) disables too — but with an honest reason, never "no balance".
+	const privateFeeJuiceUnknown = gasBalances !== undefined && gasBalances.privateFeeJuice === null
 
 	const privateFj: FeeMethodOption = {
 		type: "private_fpc",
 		title: privateFpc?.name || "Private Fee Juice",
 		subtitle: "private",
+		spend: spendOf(gasBalances?.privateFeeJuice),
 		fpc: privateFpc ?? null,
 	}
 	if (!privateFpc) {
@@ -206,13 +279,17 @@ function privateFeeJuiceOption(privateFpc: RegisteredFpc | undefined, gasBalance
 	} else if (privateFeeJuiceZero) {
 		privateFj.disabled = true
 		privateFj.disabledReason = "no balance"
+	} else if (privateFeeJuiceUnknown) {
+		privateFj.disabled = true
+		privateFj.disabledReason = "couldn't check balance"
 	}
 	return privateFj
 }
 
 /**
- * Destination of the "get fee juice" nudge — the tools site's fee-juice
- * bridge (Fuel). A single destination for every network for now; override
- * at build time with `VITE_FEE_JUICE_BRIDGE_URL`.
+ * Destination of the "get fee juice" nudge: unleashed's testnet app, on every network (the owner's
+ * call; unleashed has no public mainnet bridge). It is a workers.dev host until unleashed gets its
+ * own domain. Override at build time with `VITE_FEE_JUICE_BRIDGE_URL`.
  */
-export const FEE_JUICE_BRIDGE_URL: string = (import.meta.env.VITE_FEE_JUICE_BRIDGE_URL as string | undefined) ?? "https://tools.nulo.sh"
+export const FEE_JUICE_BRIDGE_URL: string =
+	(import.meta.env.VITE_FEE_JUICE_BRIDGE_URL as string | undefined) ?? "https://unleashed-testnet.alejo-amiras.workers.dev"

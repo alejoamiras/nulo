@@ -1,5 +1,5 @@
 /**
- * Helpers for mutating the dApp session record directly in chrome.storage.local.
+ * Helpers for reading and mutating the dApp session record directly in chrome.storage.local.
  *
  * EntityStorage backs sessions at keys `nulo:core:dappSessions@<id>`, JSON-encoded.
  * Test driver (Puppeteer) opens the popup page and runs `chrome.storage.local`
@@ -8,7 +8,8 @@
  * is observed without needing a SW restart.
  *
  * Used by tests that need an "elevated confirmationLevel" session (so non-sendTx
- * methods open the execute popup instead of going silent).
+ * methods open the execute popup instead of going silent), and by tests that check
+ * the stored grant beside the dApp's answer.
  */
 import type { ExtensionContext } from "./extension"
 import { openPopup } from "./extension"
@@ -50,6 +51,35 @@ export async function getSessionIdForOrigin(ctx: ExtensionContext, origin: strin
 			{ originPrefix: origin, prefix: SESSION_KEY_PREFIX },
 		)
 		return id
+	} finally {
+		await page.close()
+	}
+}
+
+/**
+ * The capability of `type` that the one session stored for `origin` holds, as persisted, or
+ * undefined when it holds none. Throws unless exactly one session matches.
+ */
+export async function readStoredCapability(
+	ctx: ExtensionContext,
+	origin: string,
+	type: string,
+): Promise<Record<string, unknown> | undefined> {
+	const page = await openPopup(ctx)
+	try {
+		return await page.evaluate(
+			async ({ originPrefix, prefix, capType }: { originPrefix: string; prefix: string; capType: string }) => {
+				const all = await chrome.storage.local.get(null)
+				const sessions = Object.entries(all)
+					.filter(([key]) => key.startsWith(prefix))
+					.map(([, value]) => (typeof value === "string" ? JSON.parse(value) : value))
+					.filter((session) => String(session?.dappMetadata?.url ?? "").startsWith(originPrefix))
+				if (sessions.length !== 1) throw new Error(`expected one dApp session for ${originPrefix}, found ${sessions.length}`)
+				const grants: Array<{ capability?: { type?: string } }> = sessions[0].capabilityGrants ?? []
+				return grants.find((grant) => grant.capability?.type === capType)?.capability
+			},
+			{ originPrefix: origin, prefix: SESSION_KEY_PREFIX, capType: type },
+		)
 	} finally {
 		await page.close()
 	}

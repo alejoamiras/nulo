@@ -1,3 +1,4 @@
+<!-- Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0. -->
 <script setup>
 /** Components */
 import FeeSettingsCard from "@/popup/components/modules/send/FeeSettingsCard.vue"
@@ -7,9 +8,10 @@ import { AuthRegistryServiceClient } from "@/wallet/services/auth-registry/clien
 import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejection"
 
 /** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 import { useAuthRegistryStatus } from "@/composables/useAuthRegistryStatus"
-import { usePopupEntity } from "@/composables/usePopupEntity"
+import { refuseRepeatEnter, usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -46,13 +48,9 @@ const isAllowedToExecute = computed(() => {
 })
 
 async function handleChangeRegistry() {
-	// Full-lifetime submit latch, handler-owned: every route (keydown, click, any future caller)
-	// self-checks here; the button's :disabled is defense-in-depth, not the guard.
+	// Full-lifetime submit latch, handler-owned: every route (click, any future caller) self-checks
+	// here; the button's :disabled is defense-in-depth, not the guard.
 	if (isLoading.value) return
-	// `isAllowedToExecute` is a computed ref (always truthy as a ref object) —
-	// must dereference `.value` for the guard to actually work. Pre-fix this
-	// guard was a no-op, letting Enter / programmatic clicks fire the handler
-	// before `feeSettings.value` was set. Codex audit-codex-rootcause-8 #3.
 	if (!isAllowedToExecute.value) return
 
 	try {
@@ -60,13 +58,13 @@ async function handleChangeRegistry() {
 
 		await authwitsService.setRegistryEnabled(appStore.network.id, appStore.account.address, !isRegistryEnabled.value, feeSettings.value)
 
-		openToast({ label: "Account authwit registry is changed" })
+		openToast({ kind: "success", label: "Account authwit registry is changed" })
 	} catch (err) {
 		// User-initiated cancel: terminal card in RecentActivityView says
 		// "Cancelled" — suppress the failure toast + error.value.
 		if (classifyCancellableRejection(err) !== "silent") {
 			error.value = err
-			openToast({ label: "Failed to change registry status", icon: "warning" }, TOAST_DURATION.LONG)
+			openToast({ kind: "error", label: "Failed to change registry status" })
 		}
 	} finally {
 		// Handler-owned latch release — closure via the hide watcher still
@@ -76,19 +74,13 @@ async function handleChangeRegistry() {
 	}
 }
 
-// No input to focus here: a global Enter confirms, gated by the handler's own latch and fee check.
-usePopupEntity(
-	() => props.show,
-	{
-		submit: handleChangeRegistry,
-		onShow: registry.fetch,
-		onHide: () => {
-			registry.reset()
-			authwitsService.disconnect()
-		},
+usePopupEntity(() => props.show, {
+	onShow: registry.fetch,
+	onHide: () => {
+		registry.reset()
+		authwitsService.disconnect()
 	},
-	{ submitWaitsForShow: true, submitKey: (e) => e.key === "Enter" },
-)
+})
 </script>
 
 <template>
@@ -123,10 +115,12 @@ usePopupEntity(
 					v-model="feeSettings"
 				/>
 
-				<Flex align="center" direction="column" gap="12">
+				<Flex v-snack-footer align="center" direction="column" gap="12">
+					<!-- A held or composing Enter that first reaches this button idle must not send. -->
 					<Button
 						data-testid="registry-toggle-submit"
 						@click="handleChangeRegistry"
+						@keydown.enter="refuseRepeatEnter"
 						variant="primary"
 						size="medium"
 						wide

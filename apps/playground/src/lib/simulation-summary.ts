@@ -3,9 +3,9 @@
  * ran the entrypoint, who pays, and which public calls were filed under setup
  * (non-revertible), app logic (revertible) and teardown.
  */
-import type { Fr } from "@aztec/aztec.js/fields"
-import type { PrivateCallExecutionResult, TxSimulationResult } from "@aztec/stdlib/tx"
-import type { PublicCallRequest } from "@aztec/stdlib/kernel"
+import type { Fr } from "@aztec-labs/aztec.js/fields"
+import type { PrivateCallExecutionResult, TxSimulationResult } from "@aztec-labs/stdlib/tx"
+import type { PublicCallRequest } from "@aztec-labs/stdlib/kernel"
 
 export type PublicCallSummary = {
 	contract: string

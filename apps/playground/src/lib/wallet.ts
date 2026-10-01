@@ -14,10 +14,10 @@
 // Must be the first import in this module — see @nulo/wallet-sdk-schema-patch.
 import "@nulo/wallet-sdk-schema-patch/register"
 
-import { WalletManager, type WalletProvider } from "@aztec/wallet-sdk/manager"
-import type { Wallet } from "@aztec/aztec.js/wallet"
-import type { ChainInfo } from "@aztec/aztec.js/account"
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { WalletManager, type WalletProvider } from "@aztec-labs/wallet-sdk/manager"
+import type { Wallet } from "@aztec-labs/aztec.js/wallet"
+import type { ChainInfo } from "@aztec-labs/aztec.js/account"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { setState, getState } from "../state"
 import type { AppCapabilitiesManifest } from "./bundles"
 
@@ -66,7 +66,7 @@ export function getProvider(): WalletProvider | null {
 export async function connect(): Promise<void> {
 	if (getState().status === "connected") return
 
-	setState({ status: "discovering", lastError: null })
+	setState({ status: "discovering", lastError: null, verificationHash: null })
 
 	const manager = WalletManager.configure({ extensions: { enabled: true } })
 	const discovery = manager.getAvailableWallets({
@@ -91,6 +91,7 @@ export async function connect(): Promise<void> {
 	setState({ status: "verifying" })
 
 	const pending = await provider.establishSecureChannel(APP_ID)
+	setState({ verificationHash: pending.verificationHash })
 	wallet = await pending.confirm()
 
 	// Wallet-INITIATED disconnects (session termination, profile switch) arrive

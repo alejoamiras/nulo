@@ -44,37 +44,23 @@ const isSynthetic = computed(() => props.synthetic === "public-fj")
 		<template #right>
 			<Flex v-if="!isSynthetic" align="center" gap="8">
 				<Tooltip position="end" delay="350">
-					<Icon
-						@click="emit('copyAddress', fpc.address)"
-						name="copy"
-						size="14"
-						color="tertiary"
-						:class="$style.icon_btn"
-					/>
+					<RowAction label="Copy FPC address" @click="emit('copyAddress', fpc.address)">
+						<Icon name="copy" size="14" color="tertiary" />
+					</RowAction>
 					<template #content>Copy FPC address</template>
 				</Tooltip>
 
 				<Tooltip v-if="!nonEditable" position="end" delay="350">
-					<Icon
-						@click.stop="emit('edit', fpc)"
-						name="edit"
-						size="14"
-						color="tertiary"
-						:class="$style.icon_btn"
-						data-testid="fpc-edit-btn"
-					/>
+					<RowAction label="Edit FPC" data-testid="fpc-edit-btn" @click="emit('edit', fpc)">
+						<Icon name="edit" size="14" color="tertiary" />
+					</RowAction>
 					<template #content>Edit FPC</template>
 				</Tooltip>
 
 				<Tooltip v-if="!protectedRow" position="end" delay="350">
-					<Icon
-						@click.stop="emit('delete', fpc)"
-						name="close-circle"
-						size="14"
-						color="tertiary"
-						:class="$style.icon_btn"
-						data-testid="fpc-delete-btn"
-					/>
+					<RowAction label="Delete FPC" data-testid="fpc-delete-btn" @click="emit('delete', fpc)">
+						<Icon name="close-circle" size="14" color="tertiary" />
+					</RowAction>
 					<template #content>Delete FPC</template>
 				</Tooltip>
 			</Flex>
@@ -91,15 +77,6 @@ const isSynthetic = computed(() => props.synthetic === "public-fj")
 
 	& span:last-child {
 		white-space: normal;
-	}
-}
-
-.icon_btn {
-	cursor: pointer;
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		fill: var(--txt-primary);
 	}
 }
 </style>

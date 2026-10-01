@@ -25,10 +25,10 @@
  * facade's private state.
  */
 
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { type ContractArtifact, type FunctionAbi, FunctionSelector } from "@aztec/stdlib/abi"
-import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { type ContractArtifact, type FunctionAbi, FunctionSelector } from "@aztec-labs/stdlib/abi"
+import type { ContractInstanceWithAddress } from "@aztec-labs/stdlib/contract"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { type ILogger, LogLevel } from "@/wallet/logger"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
 import { ContractNotRegisteredError } from "@nulo/extension-messaging/errors"

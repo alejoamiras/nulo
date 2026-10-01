@@ -19,7 +19,7 @@ re-gate with the owner per the aztec-update skill — never a silent re-pin.
 
 **Plan baseline**: recon base `21244d4a`; **PR-1 gate baseline `1727a42f`** (post-PR-0-merge dev — the handoff re-pin; the worktree base — all "zero-diff" gates measure
 against this OID, not the working tree). Companion: [recon.md](recon.md). Audits:
-[audit-codex.md](audit-codex.md), [audit-fable.md](audit-fable.md). `eli5_mode: artifact`
+[audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/aztec-5.2.0-js-line/audit-codex.md), [audit-fable.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/aztec-5.2.0-js-line/audit-fable.md). `eli5_mode: artifact`
 (URL recorded in Seeds §).
 
 ## Success criterion
@@ -619,7 +619,7 @@ boundary. Owner can schedule separately.
 ## Audit verdicts
 
 - **Codex round 1** (xhigh, fresh): `reject` — findings triaged in
-  [audit-codex.md](audit-codex.md); Critical/High items adopted into this revision (three-mode
+  [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/aztec-5.2.0-js-line/audit-codex.md); Critical/High items adopted into this revision (three-mode
   boundary inventory, two-PR delivery, canary-first ordering, executable gates with pinned
   baseline, D2 structural-diff precondition, Ask 2 default flip, Ask 5 added). Two items
   rejected with reasons (kill-switch removal; CI-native fee canary).
@@ -627,7 +627,7 @@ boundary. Owner can schedule separately.
   C1 SponsoredFPC funding probe; C2 peer-mismatch modeling; C3 D2 seam budget; C4 pin
   counts + patch procedure; C5 seed count + post-loop re-gate)` — ALL FIVE conditions resolved
   in this revision (C1 answered empirically at plan time: the 5.2.0 instance is funded);
-  triage + the one disputed item (single-vs-two-PR) in [audit-fable.md](audit-fable.md).
+  triage + the one disputed item (single-vs-two-PR) in [audit-fable.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/aztec-5.2.0-js-line/audit-fable.md).
 - **Final fresh-context codex pass** (new session, full decision trail): `conditional approve
   (with conditions: hard-enforce native proving, repair post-review and PR-handoff gates, and
   make the patch/residue/provenance checks executable)` — ALL conditions integrated in this
@@ -636,7 +636,7 @@ boundary. Owner can schedule separately.
   residue closure+realpath spec, provenance verification aim, hybrid sub-mode, explicit bind,
   stale-criterion cleanup). Consolidation judged "architecturally coherent"; D7 "defensible
   once its handoff and rollback rules are corrected" (now corrected). Round 2 recorded in
-  [audit-codex.md](audit-codex.md).
+  [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/aztec-5.2.0-js-line/audit-codex.md).
 - **OWNER: APPROVED** (2026-08-26) with all five Asks resolved (see Assumptions § Asks).
 
 ## Seeds (FINAL — approved scope, 2026-08-26)

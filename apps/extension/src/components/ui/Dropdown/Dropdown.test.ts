@@ -118,7 +118,7 @@ describe("ui/Dropdown — DropdownItem", () => {
 		expect(w.attributes("class") ?? "").toMatch(/disabled/)
 	})
 
-	// (P5a post-impl, codex MEDIUM) a disabled item must be OUT of the Tab order AND the arrow-nav set,
+	// A disabled item must be OUT of the Tab order AND the arrow-nav set,
 	// so it can't be focused + Enter-activated (DropdownRoot's Enter does activeElement.click()).
 	test("a disabled item is unfocusable (tabindex=-1) and excluded from arrow-nav (no data-dropdown-item)", () => {
 		const w = mount(DropdownItem, { props: { disabled: true }, slots: { default: "X" } })
@@ -265,6 +265,25 @@ describe("ui/Dropdown — DropdownRoot", () => {
 		expect(w.emitted("onClose")).toBeTruthy()
 	})
 
+	// Chrome closes its toolbar popup on an unhandled Escape, and in a real key event closing the menu
+	// removes its trap's Escape handler before it runs, so the menu's own listener must mark the key.
+	test("Escape closes the menu and marks the key handled", async () => {
+		const w = mount(DropdownRoot, {
+			props: { forceOpen: false },
+			slots: { default: "<button>Open</button>", popup: "<span>Menu</span>" },
+			attachTo: document.body,
+			global: { stubs: STUBS },
+		})
+		await w.setProps({ forceOpen: true })
+		await flushPromises()
+		const keydown = new KeyboardEvent("keydown", { key: "Escape", cancelable: true })
+		document.dispatchEvent(keydown)
+		await flushPromises()
+		expect(keydown.defaultPrevented).toBe(true)
+		expect(w.find("[data-dropdown-open]").attributes("data-dropdown-open")).toBe("false")
+		w.unmount()
+	})
+
 	// (frontend-ux-fixes P5a) regression pin: arrow-nav must keep finding items after the
 	// `[tabindex="1"]` → `[data-dropdown-item]` selector change (else changing DropdownItem's tabindex
 	// silently breaks keyboard nav — the codex HIGH). The Flex stub here exposes `wrapper` (the real
@@ -297,7 +316,7 @@ describe("ui/Dropdown — DropdownRoot", () => {
 		w.unmount()
 	})
 
-	// (P5a post-impl, codex LOW) end-to-end Enter-gate: a focused aria-disabled item must NOT fire its
+	// End-to-end Enter gate: a focused aria-disabled item must NOT fire its
 	// click on Enter (DropdownRoot.onKeydown gates activeElement.click() on aria-disabled !== "true").
 	test("Enter activates a focused item but NOT one marked aria-disabled", async () => {
 		const FlexWithWrapper = defineComponent({
@@ -334,6 +353,27 @@ describe("ui/Dropdown — DropdownRoot", () => {
 		enabled.focus()
 		document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }))
 		expect(enabledClick).toHaveBeenCalled()
+		w.unmount()
+	})
+
+	// The trap can leave focus outside the menu, on the host popup's confirm or ×.
+	test("Enter with focus outside the open menu clicks nothing", async () => {
+		const w = mount(DropdownRoot, {
+			props: { forceOpen: false },
+			slots: { default: "<button>Open</button>", popup: '<div data-dropdown-item tabindex="0">Item</div>' },
+			attachTo: document.body,
+			global: { stubs: STUBS },
+		})
+		await w.setProps({ forceOpen: true })
+		await flushPromises()
+		const outside = document.createElement("button")
+		const outsideClick = vi.fn()
+		outside.addEventListener("click", outsideClick)
+		document.body.appendChild(outside)
+		outside.focus()
+		document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }))
+		expect(outsideClick).not.toHaveBeenCalled()
+		outside.remove()
 		w.unmount()
 	})
 

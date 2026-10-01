@@ -3,7 +3,7 @@
 **Status:** APPROVED by owner 2026-08-18 (conditional approve — rider: heightened crypto/entropy adversarial protocol during implementation, see Post-implementation §0 and ledger L28). A1: yes · A2: in-place · A3: yes · A4: fail-closed error + delete/re-import (simplest path). Audit trail: codex R1 reject → adopted; fable R1 conditional approve → adopted; final fresh-context codex reject → adopted; resumed re-verdict conditional approve → conditions adopted.
 **Tier:** `/blueprint mid` (rubric: security sensitivity HIGH; novelty/blast/irreversibility/migration/external-coupling low-med — pre-production, no users, no migrations).
 **eli5_mode:** Artifact (URL recorded in § Seeds once published; source `eli5.html` in this dir).
-**Worktree/branch:** `key-model-v2` / `worktree-key-model-v2`. Recon: [recon.md](recon.md) (see its post-audit Corrections section). Audits: [audit-codex.md](audit-codex.md), [audit-fable.md](audit-fable.md).
+**Worktree/branch:** `key-model-v2` / `worktree-key-model-v2`. Recon: [recon.md](recon.md) (see its post-audit Corrections section). Audits: [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/key-model-v2/audit-codex.md), [audit-fable.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/key-model-v2/audit-fable.md).
 
 ## Summary
 

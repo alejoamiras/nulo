@@ -23,10 +23,10 @@
  * discovery sim's return value in the folded flow.
  */
 
-import { CallAuthorizationRequest, computeAuthWitMessageHash } from "@aztec/aztec.js/authorization"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import type { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { collectOffchainEffects } from "@aztec/stdlib/tx"
+import { CallAuthorizationRequest, computeAuthWitMessageHash } from "@aztec-labs/aztec.js/authorization"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { collectOffchainEffects } from "@aztec-labs/stdlib/tx"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import type { DiscoveryProbe } from "./discovery-aware-estimator"
 import type { FeeEstimate } from "./fee/fee-strategy"

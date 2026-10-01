@@ -1,14 +1,14 @@
 /**
- * Display for journal records that ended without an on-chain transaction. Those have no
- * `TransactionService` entry, so their terminal state comes from the record's own stage and
- * `error.kind`; settled transactions render through `TransactionCard` instead. The three visual
- * states (cancelled, interrupted, failed) are owner-locked.
+ * Display for journal records with no `TransactionService` entry: cancelled and interrupted
+ * operations, failures, and failed sends the wallet checks on the network. Their terminal state
+ * comes from the record alone (its stage, `error.kind` and a checked send's answer); settled
+ * transactions render through `TransactionCard` instead. Each visual state is an owner decision.
  */
 
-import type { JobErrorKind } from "@nulo/wallet-core/jobs"
+import type { JobErrorKind, SendCheckOutcome } from "@nulo/wallet-core/jobs"
 import { balanceFormatted } from "@/utils/amount.js"
 import { formatTransferType, humanizeMethodName } from "@/utils/tx-enrichment"
-import type { OperationKind, OperationRecord } from "@/wallet/services/operation-journal/spec"
+import { isSendCheckable, type OperationKind, type OperationRecord, wasNeverSent } from "@/wallet/services/operation-journal/spec"
 
 /**
  * Operation kinds that render on the activity feed (both the home-surface
@@ -28,14 +28,20 @@ import type { OperationKind, OperationRecord } from "@/wallet/services/operation
  */
 export const ACTIVITY_FEED_KINDS: ReadonlySet<OperationKind> = new Set(["transfer", "dapp_execute"])
 
-export type JournalTerminalVisualState = "cancelled" | "interrupted" | "failed"
+export type JournalTerminalVisualState = "cancelled" | "interrupted" | "failed" | "checking" | "sent" | "unconfirmed"
 
 export interface JournalTerminalDisplay {
 	state: JournalTerminalVisualState
 	subtitle: string
 	icon: string
-	color: "gray" | "amber" | "red"
+	color: "gray" | "amber" | "red" | "green"
 }
+
+/** What a failed send's record proves about the network: nothing was sent, the check is still
+ *  asking, or the check's answer. */
+export type SendOutcome = "nothing_sent" | "checking" | SendCheckOutcome
+
+type CheckedOutcome = Exclude<SendOutcome, "nothing_sent">
 
 /**
  * Canonical icon names per visual state. Centralized to prevent
@@ -52,7 +58,28 @@ const ICONS = {
 	cancelled: "cancel",
 	interrupted: "refresh-circle",
 	failed: "close-circle",
+	checking: "clock-circle",
+	sent: "check-circle",
+	unconfirmed: "help",
 } as const
+
+const CHECKED_DISPLAYS: Record<CheckedOutcome, JournalTerminalDisplay> = {
+	checking: { state: "checking", subtitle: "Not confirmed yet", icon: ICONS.checking, color: "gray" },
+	sent: { state: "sent", subtitle: "Sent", icon: ICONS.sent, color: "green" },
+	reverted: { state: "failed", subtitle: "Reverted", icon: ICONS.failed, color: "red" },
+	unconfirmed: { state: "unconfirmed", subtitle: "Unconfirmed", icon: ICONS.unconfirmed, color: "amber" },
+}
+
+/**
+ * `null` for a record that is not a failed send, and for a failed row with no recorded stage,
+ * which proves neither outcome.
+ */
+export function sendOutcome(op: OperationRecord): SendOutcome | null {
+	const { progress } = op
+	if (progress.stage !== "failed") return null
+	if (isSendCheckable(op)) return progress.check ?? "checking"
+	return wasNeverSent(op) ? "nothing_sent" : null
+}
 
 /**
  * Map a terminal journal record to its display shape.
@@ -66,6 +93,9 @@ export function journalTerminalDisplay(op: OperationRecord): JournalTerminalDisp
 
 	const stage = op.progress.stage
 	if (stage === "succeeded") return null
+
+	const outcome = sendOutcome(op)
+	if (outcome !== null && outcome !== "nothing_sent") return { ...CHECKED_DISPLAYS[outcome] }
 
 	// Cancelled: either the journal-level cancel stage, or the user-rejected
 	// error kind (popup-side reject can transition to failed:user_rejected
@@ -124,10 +154,9 @@ export function sanitizeJournalSubtitle(raw: string | undefined | null): string 
  * "Network error"). Both surfaces stay consistent with the kind value
  * the reaper / executor classify against.
  *
- * `stuck_queued` IS in the whitelist — the reaper at
- * `operation-journal/reaper.ts:192` emits it on queued-record time-out.
+ * `stuck_queued` IS in the whitelist — the reaper's `classifyReapKind`
+ * (`operation-journal/reaper.ts`) emits it on queued-record time-out.
  * Without humanization it would leak the raw kind name into the UI.
- * Codex post-impl audit H2 + opus C1.
  */
 export function humanizeErrorKind(kind: JobErrorKind): string {
 	switch (kind) {
@@ -161,25 +190,31 @@ export function humanizeErrorKind(kind: JobErrorKind): string {
 }
 
 /**
- * B2: categorical label + one-line context for a failed/cancelled
- * journal record. Maps `op.error?.kind` to a user-friendly category
- * with a brief explanation. Distinguishes pre-broadcast failures
- * (your wallet caught it before reaching the network) from interrupted-
- * mid-flight (wallet restarted; tx may still be on-chain) from generic
- * categories (network errors, app errors).
- *
- * Consumes ONLY wallet-controlled fields: `op.error?.kind`,
- * `op.kind`, `op.progress?.stage`. NEVER reads `op.subtitle` (dApp-
- * controlled) so the new B1 detail page can render the category
- * without re-opening the P1 sanitize hole.
- *
- * The "Reason" row in journal/[id].vue continues to use
- * `humanizeErrorKind` for the technical-name surface; this helper is
- * the categorical chip + context surface.
+ * The journal page's category and one-line context for a record that ended without a settled
+ * transaction: a failed send's outcome when its record proves one, otherwise its error kind's.
+ * Reads only wallet-controlled fields, never the dApp-controlled `op.subtitle`.
  */
 export type CategoricalFailureLabel = {
 	label: string
 	context: string
+}
+
+const STOPPED_BEFORE_BROADCAST: CategoricalFailureLabel = {
+	label: "Stopped before broadcast",
+	context: "Your wallet caught this before reaching the network. Often balance, fees, or invalid call.",
+}
+
+const CHECKED_LABELS: Record<CheckedOutcome, CategoricalFailureLabel> = {
+	checking: {
+		label: "Not confirmed yet",
+		context: "Your wallet is checking whether this reached the network. Don't send it again yet.",
+	},
+	sent: { label: "Went through", context: "The network confirmed this transaction." },
+	reverted: { label: "Reverted", context: "The network included this transaction, but it reverted. The fee was still paid." },
+	unconfirmed: {
+		label: "Unconfirmed",
+		context: "Your wallet couldn't confirm this. It may still go through, so check History before sending it again.",
+	},
 }
 
 export function categoricalLabel(op: OperationRecord): CategoricalFailureLabel {
@@ -190,24 +225,42 @@ export function categoricalLabel(op: OperationRecord): CategoricalFailureLabel {
 		return { label: "Cancelled", context: "This transaction was cancelled." }
 	}
 	const kind = op.error?.kind ?? "unknown"
+	const outcome = sendOutcome(op)
+	if (outcome === "nothing_sent") return nothingSentLabel(kind) ?? kindLabel(kind)
+	return outcome === null ? kindLabel(kind) : { ...CHECKED_LABELS[outcome] }
+}
+
+function nothingSentLabel(kind: JobErrorKind): CategoricalFailureLabel | undefined {
+	switch (kind) {
+		case "transfer":
+		case "dapp_execute":
+			return { ...STOPPED_BEFORE_BROADCAST }
+		case "sw_restart_post_prove":
+		case "stale_on_resume":
+			return { label: "Interrupted before sending", context: "Your wallet stopped before sending this. Nothing was sent." }
+		default:
+			return undefined
+	}
+}
+
+function kindLabel(kind: JobErrorKind): CategoricalFailureLabel {
 	switch (kind) {
 		case "user_rejected":
 			return { label: "You rejected", context: "You stopped this transaction." }
 		case "popup_bound":
 			return { label: "Popup closed early", context: "The popup closed before this transaction could finish." }
+		case "scope_refused":
+			return { label: "Not allowed", context: "The app asked for more than you allowed. Nothing was sent." }
 		case "simulation":
 		case "prover":
 		case "stuck_proving":
 		case "stuck_queued":
-			return {
-				label: "Stopped before broadcast",
-				context: "Your wallet caught this before reaching the network. Often balance, fees, or invalid call.",
-			}
+			return { ...STOPPED_BEFORE_BROADCAST }
 		case "sw_restart_post_prove":
 		case "stale_on_resume":
 			return {
 				label: "Interrupted mid-flight",
-				context: "The wallet restarted before confirming this. Transaction may still be on-chain — check the explorer.",
+				context: "The wallet restarted before confirming this. Transaction may still be on-chain. Check the explorer.",
 			}
 		case "network":
 			return {
@@ -215,6 +268,11 @@ export function categoricalLabel(op: OperationRecord): CategoricalFailureLabel {
 				context: "Couldn't reach the network. The transaction may not have been submitted.",
 			}
 		case "transfer":
+			// Reached only by a record without `from`, which cannot say whether the node holds the tx.
+			return {
+				label: "Send failed",
+				context: "Your wallet couldn't finish this send. If it was already submitted, it may still go through.",
+			}
 		case "dapp_execute":
 			return { label: "Reported by app", context: "The connected app reported an error." }
 		default:
@@ -234,9 +292,11 @@ function failedSubtitleFor(kind: JobErrorKind): string {
 		case "duplicate_initialization":
 			// The first-tx init race: another device/tx initialized the account
 			// first. Honest and actionable — a plain retry succeeds once synced.
-			return "Account already initialized — retry after sync"
+			return "Account already initialized. Retry after sync"
 		case "session_ended":
-			return "Stopped — wallet was locked"
+			return "Stopped when the wallet locked"
+		case "scope_refused":
+			return "Not allowed"
 		// popup_bound, transfer, dapp_execute, unknown, and any other / future
 		// kind all fall through to the generic copy. The kind is still preserved
 		// in the journal record's error.kind field for debugging / future
@@ -277,7 +337,7 @@ export interface JournalTerminalCardProps {
 	state: JournalTerminalVisualState
 	subtitle: string
 	icon: string
-	color: "gray" | "amber" | "red"
+	color: JournalTerminalDisplay["color"]
 }
 
 /**
@@ -318,7 +378,7 @@ function transferCardFields(op: OperationRecord, ctx: JournalTerminalCardCtx): J
 	let amount: string | null = null
 	let amountSymbol: string | null = null
 	if (op.amountRaw && token) {
-		amount = balanceFormatted(op.amountRaw, token.decimals || 0, 8).value
+		amount = balanceFormatted(op.amountRaw, token.decimals || 0, 8, { compact: true }).value
 		amountSymbol = token.symbol ?? null
 	}
 

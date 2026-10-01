@@ -1,8 +1,8 @@
 /**
- * Frozen-account execution canary — the per-`@aztec/*`-bump gate for the address freeze.
+ * Frozen-account execution canary — the per-Aztec-bump gate for the address freeze.
  *
- * A green address KAT says NOTHING about executability: frozen 5.0.1 account bytecode driven by a
- * newer simulator/prover/entrypoint encoding is a combination upstream never tests. This file
+ * A green address KAT says NOTHING about executability: the regime's frozen account bytecode driven
+ * by a newer simulator/prover/entrypoint encoding is a combination upstream never tests. This file
  * asserts the full frozen-ctor arc, stage by stage, against a live node:
  *
  *   1. The FROZEN derivation (vendored artifact + descriptor) reproduces the live wallet's
@@ -24,7 +24,7 @@
 import { Buffer } from "node:buffer"
 import { describe, expect, inject } from "vitest"
 import { backgroundAlive, stopBackground } from "../fixtures/browser"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
+import { createAztecNodeClient } from "@aztec-labs/aztec.js/node"
 import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, openPopup, test, waitForHash, type ExtensionContext } from "../fixtures/extension"
 import { ensureUnlocked, getAccountAddress, readLivenessBaseline, revealSeedPhrase, waitForWorkerLiveness } from "../fixtures/helpers"
@@ -107,12 +107,12 @@ describe("frozen-account canary — the execution gate every @aztec bump runs, o
 			expect(words.split(" ").length).toBe(24)
 
 			step("deriving accounts test-side through the frozen path")
-			const { Fr } = await import("@aztec/aztec.js/fields")
-			const { poseidon2Hash } = await import("@aztec/foundation/crypto/sync")
+			const { Fr } = await import("@aztec-labs/aztec.js/fields")
+			const { poseidon2Hash } = await import("@aztec-labs/foundation/crypto/sync")
 			const { deriveMasterFromMnemonic } = await import("@nulo/wallet-crypto")
 			const { NuloAccount } = await import("@nulo/aztec-runtime/account")
-			const { computeSiloedPrivateInitializationNullifier } = await import("@aztec/stdlib/hash")
-			const { createLogger } = await import("@aztec/foundation/log")
+			const { computeSiloedPrivateInitializationNullifier } = await import("@aztec-labs/stdlib/hash")
+			const { createLogger } = await import("@aztec-labs/foundation/log")
 			const logger = createLogger("frozen-account-canary")
 			const master = Fr.fromBuffer(Buffer.from(await deriveMasterFromMnemonic(words.split(" "))))
 			// DELIBERATELY INDEPENDENT recompute of the wallet's NULO-ACCOUNT-KDF v2 account-seed

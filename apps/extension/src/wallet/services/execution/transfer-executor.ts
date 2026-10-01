@@ -17,11 +17,11 @@
  * controller registry. Do NOT harmonize with the dApp-send flow.
  */
 
-import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import type { TxExecutionRequest } from "@aztec/stdlib/tx"
+import type { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
+import type { TxExecutionRequest } from "@aztec-labs/stdlib/tx"
 import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
-import { OperationNotRecordedError, SessionEndedError, WalletError } from "@nulo/extension-messaging/errors"
+import { JournaledRejection, OperationNotRecordedError, SessionEndedError, WalletError } from "@nulo/extension-messaging/errors"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import { formatFeeJuice } from "@/utils/fee-estimation"
 import type { Network } from "@/wallet/services/network/service"
@@ -33,12 +33,14 @@ import { requireActiveProfile } from "@/wallet/services/profile/require-active-p
 import { type TaskService, type WrappedTask, TransferContent } from "@/wallet/services/task/service"
 import { OriginType, type LocalTxOrigin, type TransactionService, type Tx } from "@/wallet/services/transaction/service"
 import type { IPXE } from "@/wallet/services/pxe/client"
+import type { PublicStorageReader } from "@/wallet/utils/fee-juice-balance"
 import { type ExecutionCoordinator, fenceChecks } from "./execution-coordinator"
 import type { FeeEstimate } from "./fee/fee-strategy"
 import { failureKind } from "./mark-failed-unless-cancelled"
 import type { OperationPlanner, TransferRequest } from "./operation-planner"
 import { maybeRethrowAsRpcCancel } from "./rpc-cancel"
 import type { Action, FeeOptions, FeeSettings, TransferFeeEstimate } from "./spec"
+import { probeSponsorFunding } from "./sponsor-funding"
 import { fingerprintBaseFee, fingerprintFeeSettings, type TransferEstimateReuse } from "./transfer-estimate-reuse"
 import { getEstimatedFee, getGasDetails } from "./tx-fee-details"
 
@@ -78,6 +80,8 @@ export interface TransferExecutorDeps {
 	isFenceLive(fence: ExecutionFence): boolean
 	getNetwork(networkId: string): Promise<Network>
 	getNode(chainId: number): Promise<AztecNode>
+	/** The sponsor probe's read: bounded and silent, unlike the build's retrying `node`. */
+	readPublicStorageOnce: PublicStorageReader
 	getPXE(network: Network): IPXE
 	getAccountContract(profileId: string, chainId: number, accountAddress: string): Promise<IAccountContract>
 	getPendingForAccount(account: string): Tx[]
@@ -110,12 +114,14 @@ export class TransferExecutor {
 		// journal-create refusal below throws before they are assigned.
 		let journalId: string | undefined
 		let controller: AbortController | undefined
-		const markJournal = async (progress: JobProgress, error?: JobError | null) => {
-			if (!journalId) return
+		const markJournal = async (progress: JobProgress, error?: JobError | null): Promise<boolean> => {
+			if (!journalId) return false
 			try {
 				await this.deps.transitionJournal(journalId, progress, error)
+				return true
 			} catch (err) {
 				this.deps.logError("Failed to update journal operation", err)
+				return false
 			}
 		}
 
@@ -149,6 +155,7 @@ export class TransferExecutor {
 				? await this.fromReusedEstimate(reused, req, precomputedEstimateId, fence)
 				: await this.buildFresh(req, fence, transferTask)
 			const { token: activityToken, fnName: activityFnName, args: activityArgs } = activity
+			const submittedEndpointUrl = primaryEndpointUrl(network)
 
 			// Activity-feed shape is always transfer-only (no FPC fee payload).
 			// `txCalls` from the build carries the FPC mutation (`pay_fee` for
@@ -167,6 +174,10 @@ export class TransferExecutor {
 				checkCancelled,
 				...fenceChecks(this.deps, fence),
 				markJournal: (patch) => markJournal(patch),
+				commitSubmitting: async (patch) => {
+					await this.deps.transitionJournal(created.journalId, { stage: "submitting", ...patch })
+				},
+				submittedEndpointUrl,
 				recordTransaction: (hash) =>
 					this.deps.addTransaction(
 						origin,
@@ -195,7 +206,7 @@ export class TransferExecutor {
 						nonce.toString(),
 						feePaymentMethod,
 						hash,
-						primaryEndpointUrl(network),
+						submittedEndpointUrl,
 						getEstimatedFee(txRequest),
 						getGasDetails(txRequest),
 						fence,
@@ -210,9 +221,10 @@ export class TransferExecutor {
 			maybeRethrowAsRpcCancel(error, transferTask)
 			// Classified failures keep their own kind on the transfer path too, so a
 			// popup transfer reads the same as a dApp send.
-			await markJournal({ stage: "failed" }, normalizeError(error, failureKind(error, "transfer")))
+			const recorded = await markJournal({ stage: "failed" }, normalizeError(error, failureKind(error, "transfer")))
 			transferTask.fail(error)
-			throw error
+			// Named only once the record holds this failure: the popup offers it as the failure's details.
+			throw recorded && journalId ? new JournaledRejection(error, journalId) : error
 		} finally {
 			if (journalId) this.deps.lane.deleteController(journalId)
 		}
@@ -343,13 +355,12 @@ export class TransferExecutor {
 		const { op, token, fn, args } = await this.deps.planner.buildTransferOperation(req)
 		checkCancelled()
 
-		const {
-			txRequest,
-			network,
-			nonce,
-			feePaymentMethod,
-			initializesAccount: builtInitializes,
-		} = await this.deps.buildAndEstimate(op, op.feeSettings, fence, undefined, signal)
+		const built = await this.deps.buildAndEstimate(op, op.feeSettings, fence, undefined, signal)
+		const { txRequest, network, nonce, feePaymentMethod, initializesAccount: builtInitializes } = built
+		checkCancelled()
+		const sponsorFunding = await probeSponsorFunding(built, this.deps.readPublicStorageOnce, (msg, data) =>
+			this.deps.logDebug(msg, data),
+		)
 		checkCancelled()
 
 		const maxFeeRaw = BigInt(getEstimatedFee(txRequest))
@@ -366,8 +377,7 @@ export class TransferExecutor {
 				const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
 				if (primary) {
 					// Fingerprint the EXACT fee the txRequest was built with —
-					// not a fresh fetch after the fact (codex audit
-					// SHOULD-FIX #3). Both FJ and FPC strategies finalize
+					// not a fresh fetch after the fact. Both FJ and FPC strategies finalize
 					// `maxFeesPerGas = predictedWorstMinFees * multiplier`, so
 					// on consume we compare against the same live product.
 					const builtFees = txRequest.txContext.gasSettings.maxFeesPerGas
@@ -414,6 +424,7 @@ export class TransferExecutor {
 			maxFeeFormatted: formatFeeJuice(maxFeeRaw),
 			gasDetails: getGasDetails(txRequest),
 			estimateId,
+			...(sponsorFunding ? { sponsorFunding } : {}),
 		}
 	}
 }

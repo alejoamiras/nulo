@@ -7,7 +7,7 @@
  * (`Transactions=5 >= confirmationLevel=5`); tests drive the popup via
  * `approveExecute()` / `rejectExecute()`.
  */
-import { AztecAddress } from "@aztec/aztec.js/addresses"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { getWallet } from "../lib/wallet"
 import { logCall } from "../lib/log"
 import { getInput, getState, setState } from "../state"
@@ -154,8 +154,8 @@ export function bindTransactions(root: HTMLElement): void {
 			const consumer = getInput("consumerAddress")
 			const amount = getInput("amount") || "100"
 			if (!consumer) throw new Error("consumerAddress input required")
-			const { CrowdfundingContract } = await import("@aztec/noir-contracts.js/Crowdfunding")
-			const { TokenContract: PullTokenContract } = await import("@aztec/noir-contracts.js/Token")
+			const { CrowdfundingContract } = await import("@aztec-labs/noir-contracts.js/Crowdfunding")
+			const { TokenContract: PullTokenContract } = await import("@aztec-labs/noir-contracts.js/Token")
 			const s = getState()
 			if (!s.selectedAccount) throw new Error("no selected account")
 			const fromAddr = AztecAddress.fromStringUnsafe(s.selectedAccount)

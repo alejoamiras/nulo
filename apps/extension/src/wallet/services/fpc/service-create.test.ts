@@ -19,8 +19,8 @@ vi.mock("@/wallet/services/execution/contract-resolver", () => ({
 }))
 // The discovery branch derives protocol instances with real Poseidon hashing,
 // which cannot run in this vitest env (bb.js std::bad_cast — the composition
-// boundary). The pins exercise fence ORDERING, not derivation.
-vi.mock("@aztec/stdlib/contract", async (importOriginal) => ({
+// boundary). The pins exercise fence ORDERING; protocol-fpcs.test.ts pins the derivation.
+vi.mock("@aztec-labs/stdlib/contract", async (importOriginal) => ({
 	...(await importOriginal<Record<string, unknown>>()),
 	getContractInstanceFromInstantiationParams: async (artifact: { functions: Array<{ name: string }> }) => ({
 		address: {

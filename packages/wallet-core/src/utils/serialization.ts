@@ -1,7 +1,7 @@
 /**
  * JSON serialization for Aztec/Node-style values. Buffers, Maps, Sets,
  * bigints, and Errors round-trip via `jsonStringify`. Copied (with
- * Buffer handling) from `@aztec/foundation/json-rpc`.
+ * Buffer handling) from `@aztec-labs/foundation/json-rpc`.
  *
  * Why a naked `Buffer` identifier + `declare`: wallet-core's tsconfig
  * ships with `"types": []` to stay Node-types free. In tests (vitest,
@@ -22,7 +22,7 @@ declare const Buffer: {
 	isBuffer(x: unknown): boolean
 }
 
-// copied from @aztec/foundation/json-rpc
+// copied from @aztec-labs/foundation/json-rpc
 export function jsonStringify(obj: unknown): string {
 	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 23 — upstream-compatible replacer dispatch defines the JSON wire form of each supported runtime type
 	return JSON.stringify(obj, (_key, value) => {

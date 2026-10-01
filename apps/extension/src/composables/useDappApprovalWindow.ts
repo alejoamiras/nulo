@@ -1,31 +1,21 @@
 /**
- * Shared lifecycle shell for the three dApp approval windows
- * (execute / capabilities / discover). Owns ONLY the byte-identical skeleton
- * the windows previously hand-rolled: the mounted sequence (eager connects →
- * session-ready wait → auth redirect → init → `beforeunload` registration),
- * the unmount teardown (disconnects, then listener removal LAST), the
- * `closeWindow` completion semantics, the active-profile-change guard, and the
- * status-strip/error-strip state. Everything divergent stays in the window and
- * is injected: the connect/disconnect lists (with their per-window ORDER), the
- * `init()` body, and the window-local `reject()` (whose guard clauses
- * deliberately differ between windows — see the frozen-oracle suites).
+ * Lifecycle shell for the dApp approval windows (execute, capabilities, discover): the mounted
+ * sequence (eager connects, session-ready wait, auth redirect, init, then the `beforeunload`
+ * registration), the unmount teardown, the completion semantics, the active-profile guard, and the
+ * strip and error state. What differs per window is injected: the connect and disconnect lists in
+ * their per-window order, the `init()` body, and the window-local `reject()`, whose guard clauses
+ * differ between windows on purpose.
  *
- * Load-bearing semantics preserved verbatim (pinned by the per-window
- * `index.test.ts` frozen oracles; see
- * implementations-plan/harden-quality-arc/round-2/R3-characterization.md):
- * - `closeWindow(true)` removes the `beforeunload` listener (decided path — no
- *   double-reject); `closeWindow()` with no argument LEAVES it attached, so an
- *   overlay dismiss delivers the rejection through the unload event rather
- *   than a direct call.
- * - The `beforeunload` listener is added AFTER `init()` resolves — including
- *   when init fails internally (all three windows' inits swallow their own
- *   errors into `setError`), so a half-loaded popup still rejects the pending
- *   request on close. A rejecting `init` would skip the registration; keep
- *   inits swallowing.
- * - `dispose()` removes the listener LAST, after every disconnect.
+ * - `closeWindow(true)` and `completeInteraction()` remove the `beforeunload` listener, so a decided
+ *   interaction is never rejected again on unload; `closeWindow()` with no argument leaves it, so an
+ *   overlay dismiss delivers the rejection through the unload event.
+ * - The listener is added after `init()` resolves, including when init fails internally (every
+ *   window's init swallows its errors into `setError`), so a half-loaded window still rejects on
+ *   close. A rejecting `init` would skip the registration.
+ * - `dispose()` removes the listener last, after every disconnect.
  *
- * Per the composable convention, this owns NO lifecycle hooks: the window
- * calls `start` in its own `onMounted` and `dispose` in its own unmount hook.
+ * It owns no lifecycle hooks: the window calls `start` from its `onMounted` and `dispose` from its
+ * unmount hook.
  */
 
 import { computed, ref, watch, type ComputedRef, type Ref } from "vue"
@@ -62,6 +52,8 @@ export interface UseDappApprovalWindowResult {
 	/** The unmount-hook body. The window calls this from its own unmount hook. */
 	dispose: () => void
 	closeWindow: (interactionCompleted?: boolean) => void
+	/** The interaction is decided: an unload no longer rejects it, and the window stays open. */
+	completeInteraction: () => void
 	/** Register on the profile service's `onActiveProfileChanged` (pre-mount, as before). */
 	onActiveProfileChanged: (profile?: ProfileInfo) => void
 	stripStatus: ComputedRef<"ready" | "loading" | "cancelled">
@@ -74,8 +66,7 @@ export function useDappApprovalWindow(options: UseDappApprovalWindowOptions): Us
 	const appStore = useAppStore()
 	const router = useRouter()
 
-	// Stable identity shared by addEventListener / removeEventListener /
-	// closeWindow — the removal must target the exact registered listener.
+	// One stable identity: every removal must target the exact registered listener.
 	const onBeforeUnload = () => options.reject()
 
 	const processingError = ref<DappWindowError | undefined>()
@@ -92,8 +83,10 @@ export function useDappApprovalWindow(options: UseDappApprovalWindowOptions): Us
 		return "ready"
 	})
 
+	const completeInteraction = () => window.removeEventListener("beforeunload", onBeforeUnload)
+
 	const closeWindow = (interactionCompleted?: boolean) => {
-		if (interactionCompleted) window.removeEventListener("beforeunload", onBeforeUnload)
+		if (interactionCompleted) completeInteraction()
 		chrome.windows.getCurrent(undefined, (window) => {
 			if (window.id) chrome.windows.remove(window.id)
 		})
@@ -136,5 +129,5 @@ export function useDappApprovalWindow(options: UseDappApprovalWindowOptions): Us
 		window.removeEventListener("beforeunload", onBeforeUnload)
 	}
 
-	return { start, dispose, closeWindow, onActiveProfileChanged, stripStatus, processingError, setError, clearError }
+	return { start, dispose, closeWindow, completeInteraction, onActiveProfileChanged, stripStatus, processingError, setError, clearError }
 }

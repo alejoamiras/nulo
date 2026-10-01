@@ -30,10 +30,10 @@ const EXTENSION_PATH = process.env.EXTENSION_PATH
 const PLAYGROUND_DIR = path.resolve(__dirname, "../../../playground")
 const CONFIG_PATH = path.resolve(__dirname, ".test-config.json")
 // ── Aztec toolchain resolution ──────────────────────────────────────────
-// Resolve from the repo's `@aztec/aztec.js` pin (the SAME rule CI's
+// Resolve from the repo's `@aztec-labs/aztec.js` pin (the SAME rule CI's
 // setup-aztec action uses), NOT from the mutable `~/.aztec/current`
 // symlink: ANY `aztec-up install` on the machine re-points `current`
-// (other projects, other agents' worktrees), and @aztec/ethereum's
+// (other projects, other agents' worktrees), and @aztec-labs/ethereum's
 // `resolveFoundryBinary` hard-codes `current/internal-bin/forge` AHEAD of
 // PATH — so a mismatched install there kills the L1 deploy for EVERY
 // version's boot ("forge script: the following required arguments were
@@ -47,9 +47,9 @@ const AZTEC_PIN_READ: { pin?: string; error?: string } = (() => {
 		const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../package.json"), "utf8")) as {
 			dependencies?: Record<string, string>
 		}
-		const pin = pkg.dependencies?.["@aztec/aztec.js"]
+		const pin = pkg.dependencies?.["@aztec-labs/aztec.js"]
 		if (typeof pin !== "string" || pin.length === 0) {
-			return { error: "dependencies['@aztec/aztec.js'] missing or not a string" }
+			return { error: "dependencies['@aztec-labs/aztec.js'] missing or not a string" }
 		}
 		return { pin }
 	} catch (err) {
@@ -67,7 +67,9 @@ function isExecutable(p: string): boolean {
 	}
 }
 
-const AZTEC_HOME = path.resolve(process.env.HOME || "~", ".aztec")
+// The installer's own variable (`aztec-up` reads it too), so a run can use a toolchain installed
+// outside the shared `~/.aztec` that other agents' installs re-point.
+const AZTEC_HOME = process.env.AZTEC_HOME ? path.resolve(process.env.AZTEC_HOME) : path.resolve(process.env.HOME || "~", ".aztec")
 // The pinned root is usable only as a COMPLETE toolchain. A partial install
 // (CLI present, internal-bin/forge missing) would let the L1 deploy resolve
 // forge through mutable `current` again — the exact hole this closes.
@@ -460,7 +462,7 @@ async function ensureAztecNode(): Promise<"ready" | "skip"> {
 			throw new Error(
 				`[e2e-setup] FATAL: aztec CLI not found at ${AZTEC_BIN} and E2E_REQUIRE_SETUP=1 is set. ` +
 					`Aborting run to prevent silent pass-by-skip. Ensure the repo's pinned aztec version is ` +
-					`installed under ~/.aztec/versions (aztec-up install ${AZTEC_PIN ?? "<pin>"}; ` +
+					`installed under ${path.join(AZTEC_HOME, "versions")} (aztec-up install ${AZTEC_PIN ?? "<pin>"}; ` +
 					`CI: see .github/actions/setup-aztec/action.yml).`,
 			)
 		}
@@ -504,11 +506,11 @@ function requirePinnedToolchainOrWarn(): void {
 		: `repo aztec pin unreadable (${AZTEC_PIN_READ.error})`
 	if (process.env.E2E_REQUIRE_SETUP === "1") {
 		throw new Error(
-			`[e2e-setup] FATAL: ${reason}, and E2E_REQUIRE_SETUP=1 forbids the ~/.aztec/current fallback. Fix: aztec-up install ${AZTEC_PIN ?? "<repo @aztec/aztec.js pin>"}`,
+			`[e2e-setup] FATAL: ${reason}, and E2E_REQUIRE_SETUP=1 forbids the ${path.join(AZTEC_HOME, "current")} fallback. Fix: aztec-up install ${AZTEC_PIN ?? "<repo @aztec-labs/aztec.js pin>"}`,
 		)
 	}
 	console.warn(
-		`[e2e-setup] ${reason} — falling back to ~/.aztec/current, which may mismatch the repo pin. Fix: aztec-up install ${AZTEC_PIN ?? "<pin>"}`,
+		`[e2e-setup] ${reason} — falling back to ${path.join(AZTEC_HOME, "current")}, which may mismatch the repo pin. Fix: aztec-up install ${AZTEC_PIN ?? "<pin>"}`,
 	)
 }
 
@@ -542,7 +544,7 @@ function spawnAztecNode(): void {
 				ETHEREUM_HOSTS: ANVIL_URL,
 				ANVIL_PORT: String(ANVIL_PORT),
 				AZTEC_PORT: String(AZTEC_PORT),
-				// Highest-priority override for @aztec/ethereum's
+				// Highest-priority override for @aztec-labs/ethereum's
 				// resolveFoundryBinary: without these, the node's L1 deploy
 				// reads `~/.aztec/current/internal-bin/forge` regardless of
 				// which version's CLI is booting — a `current` re-pointed by
@@ -783,7 +785,7 @@ function serializeL1ContractAddresses(addrs: unknown): Record<string, string> {
 async function verifyIdentity(url: string, expected: Record<string, string> | undefined): Promise<boolean> {
 	if (!expected || Object.keys(expected).length === 0) return false
 	try {
-		const { createAztecNodeClient } = await import("@aztec/aztec.js/node")
+		const { createAztecNodeClient } = await import("@aztec-labs/aztec.js/node")
 		const node = createAztecNodeClient(url)
 		const info = await node.getNodeInfo()
 		const got = serializeL1ContractAddresses(info.l1ContractAddresses)

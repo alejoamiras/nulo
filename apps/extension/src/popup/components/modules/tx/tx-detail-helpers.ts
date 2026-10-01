@@ -1,4 +1,4 @@
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import { OriginType } from "@/wallet/services/transaction/client"
 import { FEE_METHODS } from "@/utils/tx-enrichment"
 import { formatFeeJuice, formatGas } from "@/utils/fee-estimation"

@@ -113,6 +113,7 @@ describe("slot-for-executeSendTransaction (B-02 fix)", () => {
 				claimOrCreateJournal: claimOrCreateJournal as never,
 				beginJournal: beginJournal as never,
 				markJournal: vi.fn(async () => {}),
+				commitJournal: vi.fn(async () => {}),
 			},
 			buildAndEstimateValidated: vi.fn(async () => ({
 				txRequest: { txContext: { gasSettings } },
@@ -135,6 +136,7 @@ describe("slot-for-executeSendTransaction (B-02 fix)", () => {
 			isFenceLive: vi.fn(() => true),
 			getNetwork: vi.fn() as never,
 			getNode: vi.fn() as never,
+			readPublicStorageOnce: vi.fn() as never,
 			getPXE: vi.fn() as never,
 			getAccountContract: vi.fn() as never,
 			getPendingForAccount: vi.fn(() => []) as never,

@@ -15,6 +15,7 @@ import { ProfileServiceClient } from "@/wallet/services/profile/client"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
+import { isPopupSubmitKey, refuseRepeatEnter } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Components */
@@ -66,7 +67,7 @@ const handleChangePassword = async () => {
 	isLoading.value = true
 	try {
 		await profileService.changeProfilePassword(appStore.profile.id, currentPassword.value, newPassword.value)
-		openToast({ label: "Profile password changed" })
+		openToast({ kind: "success", label: "Profile password changed" })
 		router.back()
 	} catch (err) {
 		if (err instanceof Error && err.message === "Invalid profile old password") {
@@ -80,23 +81,28 @@ const handleChangePassword = async () => {
 }
 
 const onKeydown = (e) => {
-	if (e.key === "Enter") handleChangePassword()
+	if (e.defaultPrevented || !isPopupSubmitKey(e)) return
+	handleChangePassword()
 }
 
 onMounted(() => {
 	profileService = new ProfileServiceClient()
-	document.addEventListener("keydown", onKeydown)
 })
 
 onBeforeUnmount(() => {
-	document.removeEventListener("keydown", onKeydown)
 	profileService?.disconnect()
 	profileService = null
 })
 </script>
 
 <template>
-	<CollapsingHeroLayout heroMain="Change" heroSub="Password" collapsingLabel="Change Password" backTo="/popup/settings/profile">
+	<CollapsingHeroLayout
+		heroMain="Change"
+		heroSub="Password"
+		collapsingLabel="Change Password"
+		backTo="/popup/settings/profile"
+		@keydown="onKeydown"
+	>
 		<!-- Profile -->
 		<div :class="$style.section">
 			<span :class="$style.section_label">Profile</span>
@@ -218,6 +224,7 @@ onBeforeUnmount(() => {
 		<template #bottom>
 			<Button
 				@click="handleChangePassword"
+				@keydown.enter="refuseRepeatEnter"
 				:disabled="!isAllowedToChange || hasError || isLoading"
 				variant="cta"
 				data-testid="change-password-submit-btn"

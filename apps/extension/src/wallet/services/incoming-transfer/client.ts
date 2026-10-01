@@ -45,4 +45,6 @@ definePassthroughsExhaustive<Methods>()(IncomingTransferServiceClient.prototype,
 	"clearProfile",
 	"clearChain",
 	"replayPendingPrompts",
+	"getArrivalState",
+	"claimArrivals",
 ])

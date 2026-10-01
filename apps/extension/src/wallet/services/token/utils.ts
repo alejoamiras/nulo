@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 import type { Token, TokenInfo, TokenInterface } from "./spec"
 
 export const getTokenInfo = (token: Token): TokenInfo => ({
@@ -7,6 +8,7 @@ export const getTokenInfo = (token: Token): TokenInfo => ({
 	name: token.name,
 	symbol: token.symbol,
 	decimals: token.decimals,
+	hasDecimals: !!token.getDecimalsFn,
 	hasPublicBalances: !!token.balanceOfPublicFn,
 	hasPublicTransfers: !!token.transferPublicFn,
 	hasPublicToPrivateTransfers: !!token.transferPublicToPrivateFn,

@@ -13,8 +13,8 @@
 		"test": "bun --bun vitest run"
 	},
 	"dependencies": {
-		"@aztec/aztec.js": "5.2.0",
-		"@aztec/stdlib": "5.2.0",
+		"@aztec-labs/aztec.js": "6.0.0-rc.1",
+		"@aztec-labs/stdlib": "6.0.0-rc.1",
 		"zod": "^4.4.3"
 	},
 	"devDependencies": {

@@ -3,7 +3,6 @@
 	"references": [
 		{ "path": "apps/extension" },
 		{ "path": "apps/playground" },
-		{ "path": "apps/landing" },
-		{ "path": "apps/tools" }
+		{ "path": "apps/landing" }
 	]
 }

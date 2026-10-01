@@ -1,6 +1,6 @@
 import { describe, test, expect, vi } from "vitest"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import type { ContractArtifact } from "@aztec/stdlib/abi"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
 import type { NetworkInfo } from "@nulo/aztec-runtime/pxe"
 import { ArtifactRegistry, defaultPolicy } from "@nulo/aztec-runtime/pxe"
 import type { ArtifactClassIdVerifier, KnownArtifactsLoader } from "@nulo/aztec-runtime/pxe"
@@ -154,7 +154,9 @@ describe("ArtifactRegistry.resolve", () => {
 	})
 
 	test("getKnownInstance returns undefined until ensureKnown; populated after", async () => {
-		const instance = { address: { toString: () => "0xabc" } } as unknown as import("@aztec/stdlib/contract").ContractInstanceWithAddress
+		const instance = {
+			address: { toString: () => "0xabc" },
+		} as unknown as import("@aztec-labs/stdlib/contract").ContractInstanceWithAddress
 		const loader = async () => ({
 			artifacts: new Map(),
 			instances: new Map([["0xabc", instance]]),

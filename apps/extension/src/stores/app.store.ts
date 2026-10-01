@@ -45,6 +45,10 @@ export const useAppStore = defineStore("app", () => {
 	 *  waiter immediately instead of burning the full timeout; cleared at the
 	 *  start of every unlock attempt and on any successful bootstrap. */
 	const bootstrapFailure = ref<{ profileId: string; message: string } | null>(null)
+	/** Bumped by the shell on every lock and on every profile, network or account change. A
+	 *  result that settles under another value belongs to a screen that is gone: it announces
+	 *  nothing, so no amount, recipient or account name reaches the lock screen or another scope. */
+	const scopeEpoch = ref(0)
 
 	const network = ref<Network>()
 	const networkStatus = ref<string>()
@@ -73,6 +77,7 @@ export const useAppStore = defineStore("app", () => {
 		isSessionChecked,
 		pageAwaitingAuth,
 		bootstrapFailure,
+		scopeEpoch,
 		accounts,
 		setupActiveAccount: accountActions.setupActiveAccount,
 		selectAccount: accountActions.selectAccount,

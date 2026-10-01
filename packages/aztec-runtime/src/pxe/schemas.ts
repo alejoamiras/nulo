@@ -1,11 +1,12 @@
-import { EventSelector } from "@aztec/stdlib/abi"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import type { ZodFor } from "@aztec/foundation/schemas"
-import { Note, NoteStatus } from "@aztec/stdlib/note"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { inTxSchema, TxHash } from "@aztec/stdlib/tx"
-import { BlockNumberSchema } from "@aztec/foundation/branded-types"
-import type { PackedPrivateEvent, NotesFilter } from "@aztec/pxe/client/bundle"
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
+import { EventSelector } from "@aztec-labs/stdlib/abi"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { ZodFor } from "@aztec-labs/foundation/schemas"
+import { Note, NoteStatus } from "@aztec-labs/stdlib/note"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { inTxSchema, TxHash } from "@aztec-labs/stdlib/tx"
+import { BlockNumberSchema } from "@aztec-labs/foundation/branded-types"
+import type { PackedPrivateEvent, NotesFilter } from "@aztec-labs/pxe/client/bundle"
 import z from "zod"
 
 export const NoteDaoSchema = z.object({

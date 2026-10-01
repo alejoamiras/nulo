@@ -129,7 +129,7 @@ describe("usdMicroToTokenAmount / usdToTokenAmount (C3 inverse, round-DOWN)", ()
 	})
 })
 
-describe("codex post-impl fixes — ceil rate + machine formatting", () => {
+describe("ceil rate + machine formatting", () => {
 	test("the C3 inverse uses a CEILED rate: sub-micro rates never yield extra tokens", async () => {
 		const { rateToMicroUsdCeil, usdMicroToTokenAmount } = await import("./convert")
 		// 0.0000014 above the micro grid: round would floor the rate (more tokens), ceil must not.

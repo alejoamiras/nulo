@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest"
+import { afterEach, describe, expect, test, vi } from "vitest"
 import {
 	balanceFormatted,
 	clampDecimals,
@@ -7,6 +7,7 @@ import {
 	normalizeAmount,
 	parseAmountToBaseUnits,
 	purgeNumber,
+	readAmountText,
 } from "./amount"
 
 /** Locale-pinned defaults so the tests don't depend on ambient locale.
@@ -225,6 +226,58 @@ describe("amount/normalizeAmount", () => {
 	})
 })
 
+describe("amount/readAmountText", () => {
+	const NBSP = String.fromCodePoint(0xa0)
+	const NNBSP = String.fromCodePoint(0x202f)
+	const THIN = String.fromCodePoint(0x2009)
+
+	test.each([
+		["1234.56", {}, "1234.56"],
+		["1.", {}, "1."],
+		[".5", {}, ".5"],
+		[" 12.5 ", {}, "12.5"],
+		["1.234", {}, "1.234"],
+		["12.345", {}, "12.345"],
+		["0,001", {}, "0.001"],
+		["1,5", {}, "1.5"],
+		[",5", {}, ".5"],
+		["12,50", {}, "12.50"],
+		["1,2345", {}, "1.2345"],
+		["0,123", {}, "0.123"],
+		["1,234.56", {}, "1234.56"],
+		["1,234,567", {}, "1234567"],
+		["1.234,56", {}, "1234.56"],
+		["1.234.567", {}, "1234567"],
+		["1 234,56", {}, "1234.56"],
+		[`1${NNBSP}234,56`, {}, "1234.56"],
+		[`1${NBSP}234.5`, {}, "1234.5"],
+		["1 234", {}, "1234"],
+		[`12${THIN}345${THIN}678`, {}, "12345678"],
+		["$12.50", { currency: "$" as const }, "12.50"],
+		["1,234", { rested: "1,234" }, "1234"],
+		["1,000", { rested: "1,000" }, "1000"],
+		["1,234", {}, "ambiguous"],
+		["12,345", {}, "ambiguous"],
+		["123,456", {}, "ambiguous"],
+		["1,000", {}, "ambiguous"],
+		["1e5", {}, "unreadable"],
+		["1E5", {}, "unreadable"],
+		["1e-7", {}, "unreadable"],
+		["1.5e3", {}, "unreadable"],
+		["12,34.5", {}, "unreadable"],
+		["1,5,", {}, "unreadable"],
+		["1.234,5,", {}, "unreadable"],
+		["1,234,5", {}, "unreadable"],
+		["1.234,5,678901", {}, "unreadable"],
+		["12.5 USDC", {}, "unreadable"],
+		["$5", {}, "unreadable"],
+		["-1", {}, "unreadable"],
+	])("%j %j reads as %s", (text, opts, expected) => {
+		const read = readAmountText(text, opts)
+		expect(read.ok ? read.plain : read.reason).toBe(expected)
+	})
+})
+
 describe("amount/formatBaseUnits", () => {
 	test("zero formats as '0' (no decimal)", () => {
 		expect(formatBaseUnits(0n, 6, PIN)).toBe("0")
@@ -388,5 +441,122 @@ describe("amount/balanceFormatted", () => {
 
 	test("accepts string inputs", () => {
 		expect(balanceFormatted("1500000", 6).value).toMatch(/^1[.,]5$/)
+	})
+})
+
+describe("amount/balanceFormatted — compact", () => {
+	const SEPARATORS = { "en-US": [".", ","], "de-DE": [",", "."], "fr-FR": [",", "\u202f"] } as const
+	type Locale = keyof typeof SEPARATORS
+
+	/** The formatter reads the separators off `(1.1)` and `(1111)`; every other number formats as usual. */
+	const useSeparators = (locale: Locale) => {
+		const [decimal, thousands] = SEPARATORS[locale]
+		const original = Number.prototype.toLocaleString
+		vi.spyOn(Number.prototype, "toLocaleString").mockImplementation(function (this: number, ...args: []) {
+			const n = Number(this)
+			if (n === 1.1) return `1${decimal}1`
+			if (n === 1111) return `1${thousands}111`
+			return original.apply(this, args)
+		})
+	}
+
+	afterEach(() => {
+		vi.restoreAllMocks()
+	})
+
+	const E18 = 10n ** 18n
+	const U128_MAX = 2n ** 128n - 1n
+	const NNBSP = "\u202f"
+
+	type Row = { name: string; locale?: Locale; units: bigint; decimals: number; compact: string; today: string }
+
+	/** `today` is the plain cut every caller without the option keeps. */
+	const AT_8: Row[] = [
+		{
+			name: "whole part fits, cut on the separator",
+			units: 9_999_999n * 10n ** 17n,
+			decimals: 18,
+			compact: "999,999",
+			today: "999,999.",
+		},
+		{ name: "whole part fits exactly", units: 999_995n * E18, decimals: 18, compact: "999,995", today: "999,995" },
+		{ name: "first M", units: 1_000_000n * E18, decimals: 18, compact: "1M", today: "1,000,00" },
+		{ name: "M with a fraction", units: 1_234_567n * E18, decimals: 18, compact: "1.23M", today: "1,234,56" },
+		{ name: "the brief's amount, truncated", units: 123_456_789n * E18, decimals: 18, compact: "123.45M", today: "123,456," },
+		{ name: "at the M/B boundary, never rounded up", units: 999_995_000n * E18, decimals: 18, compact: "999.99M", today: "999,995," },
+		{ name: "top of M", units: 99_999_999_999n * 10n ** 16n, decimals: 18, compact: "999.99M", today: "999,999," },
+		{ name: "first B, decimals 0", units: 10n ** 9n, decimals: 0, compact: "1B", today: "1,000,00" },
+		{ name: "top of T", units: 10n ** 15n - 1n, decimals: 0, compact: "999.99T", today: "999,999," },
+		{ name: "past T", units: 10n ** 15n, decimals: 0, compact: ">999T", today: "1,000,00" },
+		{ name: "u128 maximum, decimals 0", units: U128_MAX, decimals: 0, compact: ">999T", today: "340,282," },
+		{ name: "u128 maximum, decimals 18", units: U128_MAX, decimals: 18, compact: ">999T", today: "340,282," },
+		{ name: "zero", units: 0n, decimals: 18, compact: "0", today: "0" },
+		{ name: "one base unit, the hint wins", units: 1n, decimals: 18, compact: "<0.000001", today: "<0.000001" },
+		{ name: "one base unit, decimals 0", units: 1n, decimals: 0, compact: "1", today: "1" },
+		{
+			name: "comma decimal, dot grouping",
+			locale: "de-DE",
+			units: 123_456_789n * E18,
+			decimals: 18,
+			compact: "123,45M",
+			today: "123.456.",
+		},
+		{
+			name: "comma decimal, narrow-space grouping",
+			locale: "fr-FR",
+			units: 123_456_789n * E18,
+			decimals: 18,
+			compact: "123,45M",
+			today: `123${NNBSP}456${NNBSP}`,
+		},
+		{
+			name: "narrow-space grouping, whole part fits",
+			locale: "fr-FR",
+			units: 9_999_999n * 10n ** 17n,
+			decimals: 18,
+			compact: `999${NNBSP}999`,
+			today: `999${NNBSP}999,`,
+		},
+	]
+
+	test.each(AT_8)("length 8, $name: $compact", ({ locale = "en-US", units, decimals, compact, today }) => {
+		useSeparators(locale)
+		const out = balanceFormatted(units, decimals, 8, { compact: true })
+		expect(out.value).toBe(compact)
+		expect(out.slashed).toBe(out.value !== balanceFormatted(units, decimals).value)
+		expect(balanceFormatted(units, decimals, 8).value).toBe(today)
+	})
+
+	/** The other caps, all at 18 decimals: Home's token-row sides (6), its total and the token page's
+	 *  split (10), the token page's hero (20). */
+	const OTHER_WIDTHS: Array<Omit<Row, "locale" | "decimals"> & { length: number }> = [
+		{ length: 6, name: "whole part fits, the trim", units: 12_345_678n * 10n ** 14n, compact: "1,234", today: "1,234." },
+		{ length: 6, name: "whole part fits exactly", units: 99_999n * E18, compact: "99,999", today: "99,999" },
+		{ length: 6, name: "first K", units: 100_000n * E18, compact: "100K", today: "100,00" },
+		{ length: 6, name: "K with a fraction", units: 123_456n * E18, compact: "123.4K", today: "123,45" },
+		{ length: 6, name: "at the K/M boundary, never rounded up", units: 999_995n * E18, compact: "999.9K", today: "999,99" },
+		{ length: 6, name: "first M", units: 1_000_000n * E18, compact: "1M", today: "1,000," },
+		{ length: 6, name: "the brief's amount with cents", units: 12_345_678_912n * 10n ** 16n, compact: "123.4M", today: "123,45" },
+		{ length: 6, name: "one base unit, the hint wins", units: 1n, compact: "<0.0001", today: "<0.0001" },
+		{ length: 10, name: "whole part fits, the trim", units: 123_456_789n * 10n ** 16n, compact: "1,234,567", today: "1,234,567." },
+		{ length: 10, name: "top of M", units: 999_999_999n * E18, compact: "999.99M", today: "999,999,99" },
+		{ length: 10, name: "B with a fraction", units: 1_234_567_890n * E18, compact: "1.23B", today: "1,234,567," },
+		{ length: 10, name: "the brief's amount with cents", units: 12_345_678_912n * 10n ** 16n, compact: "123.45M", today: "123,456,78" },
+		{
+			length: 20,
+			name: "whole part fits, the trim",
+			units: 9_999_999_999_999_995n * 10n ** 17n,
+			compact: "999,999,999,999,999",
+			today: "999,999,999,999,999.",
+		},
+		{ length: 20, name: "past T", units: 10n ** 15n * E18, compact: ">999T", today: "1,000,000,000,000,00" },
+	]
+
+	test.each(OTHER_WIDTHS)("length $length, $name: $compact", ({ length, units, compact, today }) => {
+		useSeparators("en-US")
+		const out = balanceFormatted(units, 18, length, { compact: true })
+		expect(out.value).toBe(compact)
+		expect(out.slashed).toBe(out.value !== balanceFormatted(units, 18).value)
+		expect(balanceFormatted(units, 18, length).value).toBe(today)
 	})
 })

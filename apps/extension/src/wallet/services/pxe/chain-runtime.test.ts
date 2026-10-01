@@ -1,6 +1,6 @@
 import { describe, test, expect, vi } from "vitest"
-import type { PXE } from "@aztec/pxe/client/bundle"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import type { PXE } from "@aztec-labs/pxe/client/bundle"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import { ChainRuntime, ChainRuntimeRegistry, type NetworkInfo, type PxeFactory } from "@nulo/aztec-runtime/pxe"
 
 const network = (profileId: string, chainId: number, rpcUrl = `https://rpc-${chainId}.example`): NetworkInfo => ({

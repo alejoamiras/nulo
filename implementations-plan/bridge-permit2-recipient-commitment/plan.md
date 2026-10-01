@@ -17,7 +17,7 @@ Three coupled changes to the L1↔L2 bridge stack, one cutover:
 
 Plus: the Foundry suite gains its first fuzz tests; a minimal relayer script ships in bridge-core; the final phase is a focused red-team re-audit of the changed surface.
 
-Companion docs: [brief.md](brief.md) (task + ground truth), [draft-main.md](draft-main.md), [audit-codex.md](audit-codex.md), [audit-fable.md](audit-fable.md), [eli5.html](eli5.html).
+Companion docs: [brief.md](brief.md) (task + ground truth), [draft-main.md](draft-main.md), [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/bridge-permit2-recipient-commitment/audit-codex.md), [audit-fable.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/bridge-permit2-recipient-commitment/audit-fable.md), [eli5.html](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/bridge-permit2-recipient-commitment/eli5.html).
 
 ---
 

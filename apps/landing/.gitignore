@@ -1,4 +1,5 @@
 dist
+.wrangler/
 src/generated/release.json
 src/generated/legal-pages.json
 # Written by scripts/build-legal.ts from legal/*.md

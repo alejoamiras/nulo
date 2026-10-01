@@ -45,11 +45,11 @@ export default defineConfig({
 		// to make any flake fail an iteration (the "zero retries consumed" gate).
 		retry: process.env.NULO_E2E_RETRY ? Number(process.env.NULO_E2E_RETRY) : 2,
 		reporters: e2eReporters(),
-		// Node v24 enforces JSON import attributes; @aztec/accounts imports JSON without them.
+		// Node v24 enforces JSON import attributes; @aztec-labs/accounts imports JSON without them.
 		// Use the unstable loader to relax this check in the global setup process.
 		server: {
 			deps: {
-				inline: [/@aztec/],
+				inline: [/@aztec(-labs|-foundation)?\//],
 			},
 		},
 	},

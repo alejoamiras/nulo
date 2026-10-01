@@ -17,10 +17,10 @@
  * dependencies (node lookup only after endpoint checks pass, etc.).
  */
 
-import { GasFees } from "@aztec/stdlib/gas"
-import type { TxExecutionRequest } from "@aztec/stdlib/tx"
-import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
-import { type MinFeeNode, predictedWorstMinFees } from "@nulo/bridge-core/fee-juice"
+import { GasFees } from "@aztec-labs/stdlib/gas"
+import type { TxExecutionRequest } from "@aztec-labs/stdlib/tx"
+import type { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
+import { type MinFeeNode, predictedWorstMinFees } from "@nulo/aztec-runtime/fee-juice"
 import { PRIORITY_MULTIPLIERS } from "@nulo/wallet-bridge"
 import { SessionEndedError } from "@nulo/extension-messaging/errors"
 import { getErrorMessage } from "@nulo/wallet-core/utils"

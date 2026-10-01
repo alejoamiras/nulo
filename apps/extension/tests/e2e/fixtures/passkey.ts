@@ -1,6 +1,6 @@
 import type { Browser, Page } from "puppeteer"
 import { type VirtualAuthenticator, holdNextCredentialGet, virtualAuthenticator } from "./browser"
-import { clickByTestId, replaceInputValue, waitForHash } from "./extension"
+import { clickByTestId, expectNoNameField, waitForHash } from "./extension"
 
 /** Drive the passkey-register flow on a fresh extension at /popup/register.
  *  Preconditions: `setupPasskeyVirtualAuth` has been called against the popup
@@ -18,9 +18,8 @@ export async function registerPasskeyProfile(page: Page): Promise<void> {
 
 	await clickByTestId(page, "register-create-btn")
 
-	// Wait for the create page to mount before typing the name.
-	await page.waitForSelector('[data-testid="register-name-input"]', { visible: true, timeout: 10_000 })
-	await replaceInputValue(page, '[data-testid="register-name-input"]', "Test Profile")
+	// A fresh install's first profile has no name field; it is created as "Main".
+	await expectNoNameField(page, "register-page", "register-name-input")
 
 	// Switch the method-tabs from password (default) → passkey.
 	await page.waitForSelector('[data-testid="register-method-passkey"]', { visible: true, timeout: 10_000 })

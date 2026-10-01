@@ -3,8 +3,9 @@ name: release
 # Two trigger paths:
 #  - push to main: release-please-action maintains the Release PR; on merge,
 #    it tags + creates the GitHub Release. The same workflow run then runs
-#    the publish chain (gates → build → smoke → assets → cliff notes →
-#    landing). The store uploads are opt-in workflow_dispatch inputs.
+#    the publish chain (gates → build → smoke → assets → cliff notes). The
+#    landing is a Worker that Workers Builds redeploys from pushes to main; no
+#    job here touches it. The store uploads are opt-in workflow_dispatch inputs.
 #  - workflow_dispatch: re-publish artifacts for an existing tag. Skips the
 #    release-please job. Useful when an asset upload failed mid-publish.
 on:
@@ -46,7 +47,7 @@ concurrency:
 # cache ops don't need a `permissions:` scope). The handful of jobs that write
 # (release-please, auto-unstick, attach-assets, sync) escalate explicitly in
 # their own block — so build/test/resolve/deploy/verify/status no longer inherit
-# a write-capable token (codex post-impl audit, Should-fix 3).
+# a write-capable token.
 permissions:
   contents: read
 
@@ -121,6 +122,8 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
       - uses: ./.github/actions/setup-bun
+        with:
+          cache: "false"
       - id: u
         env:
           AUTO_UNSTICK_ENABLED: ${{ vars.AUTO_UNSTICK_ENABLED }}
@@ -268,7 +271,7 @@ jobs:
 
   # ADVISORY: the shipped Firefox zip's contents, smoked on Firefox. Deliberately absent from
   # attach-assets' and status's needs — a red run is visible and cannot fail this publish. It
-  # does hold the `release` concurrency slot until it ends (20-minute timeout, plus any time
+  # does hold the `release` concurrency slot until it ends (30-minute timeout, plus any time
   # queued for a runner). It joins
   # attach-assets.needs after one clean release (CLAUDE.md, "Staged-rollout switches").
   smoke-firefox-against-artifact:
@@ -306,6 +309,8 @@ jobs:
           ref: ${{ needs.resolve.outputs.sha }}
           fetch-depth: 0
       - uses: ./.github/actions/setup-bun
+        with:
+          cache: "false"
 
       - name: Download Chrome build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -318,11 +323,19 @@ jobs:
           name: extension-firefox
           path: dist/release/firefox
 
+      # Every entry is stamped with the commit's own time and written in a fixed order, so a
+      # rebuild of the same commit with the same zip gives the same bytes and a republish leaves
+      # SHASUMS256.txt as it was (the runner image is not pinned: a zip update could still move
+      # them once). The script is taken from the workflow's own revision, not the checkout: a tag
+      # older than the script has none at its commit, and a republish must still package it.
       - name: Zip artifacts + SHASUMS
         run: |
           mkdir -p dist/release
-          (cd dist/release/chrome && zip -r "../nulo-chrome-${VERSION}.zip" .)
-          (cd dist/release/firefox && zip -r "../nulo-firefox-${VERSION}.zip" .)
+          git show "${GITHUB_SHA}:scripts/release/zip-reproducible.ts" > "${RUNNER_TEMP}/zip-reproducible.ts"
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          export SOURCE_DATE_EPOCH
+          bun "${RUNNER_TEMP}/zip-reproducible.ts" dist/release/chrome "dist/release/nulo-chrome-${VERSION}.zip"
+          bun "${RUNNER_TEMP}/zip-reproducible.ts" dist/release/firefox "dist/release/nulo-firefox-${VERSION}.zip"
           cd dist/release
           sha256sum \
             "nulo-chrome-${VERSION}.zip" \
@@ -339,24 +352,55 @@ jobs:
             dist/release/SHASUMS256.txt
           retention-days: 14
 
+      # The tag already exists when this job runs (release-please or auto-unstick
+      # creates it before the chain starts; a dispatch names an existing one), so
+      # `--unreleased` finds nothing after it and left every body empty. The range
+      # is chosen here by ancestry instead: a stable covers everything since the
+      # previous stable, an rc everything since the previous rc or stable —
+      # `git describe` takes the nearest such tag reachable from the release
+      # commit's parent, so the nightly tags dev publishes daily (nightly.yml)
+      # and git-cliff's own timestamp ordering never decide the boundary.
+      - name: Pick the release-notes range
+        env:
+          IS_PRERELEASE: ${{ needs.resolve.outputs.is_prerelease }}
+        run: |
+          # The tag name reaches git-cliff's arguments through a shell, so only the two forms
+          # release-please cuts here are accepted; the range itself is passed as commit ids.
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc(\.[0-9]+)?)?$ ]] \
+            || { echo "::error::release notes: tag ${TAG} is not a stable or rc tag"; exit 1; }
+          exclude=(--exclude 'v*-nightly*' --exclude 'v*-internal*')
+          [ "$IS_PRERELEASE" = "true" ] || exclude+=(--exclude 'v*-rc*')
+          # Without any predecessor (a first release) the range starts after the root commit,
+          # which holds no extension file.
+          prev=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${exclude[@]}" "${TAG}^" 2>/dev/null) \
+            || prev=$(git rev-list --max-parents=0 "$TAG" | tail -n 1)
+          {
+            echo "CLIFF_RANGE=$(git rev-parse "${prev}^{commit}")..$(git rev-parse "${TAG}^{commit}")"
+            # Only this tag exists for git-cliff, so no tag inside the range can split the notes.
+            echo "CLIFF_TAG_PATTERN=^${TAG//./\\.}\$"
+          } >> "$GITHUB_ENV"
+          echo "release notes cover ${prev}..${TAG}"
+
       - name: Generate release notes (git-cliff)
         uses: orhun/git-cliff-action@3d96a18cc4ec17e9dc69ddcc424ccafaf1f78ce2 # v4.9.0
         with:
           config: cliff.toml
-          # --ignore-tags: nightly prerelease tags (published daily by
-          # nightly.yml) must not act as range boundaries here — without this,
-          # a stable cut landing the day after any nightly would generate notes
-          # covering only the last ~24h instead of everything since the
-          # previous stable/rc tag (ignore_tags folds ignored tags' commits
-          # into the next section).
+          # --offline: naming the remote (GITHUB_REPO below) would otherwise make
+          # git-cliff fetch commit metadata from the GitHub API, which the template
+          # never uses.
           args: >-
             --tag ${{ env.TAG }}
-            --unreleased
+            --tag-pattern '${{ env.CLIFF_TAG_PATTERN }}'
             --strip header
-            --ignore-tags '^v[0-9]+\.[0-9]+\.[0-9]+-nightly'
+            --offline
             --include-path 'apps/extension/**'
+            ${{ env.CLIFF_RANGE }}
         env:
           OUTPUT: /tmp/release-notes.md
+          # The template links each commit through remote.github, which git-cliff
+          # reads from the checked-out branch's upstream; a detached checkout has
+          # none, so every link came out empty until the remote was named here.
+          GITHUB_REPO: ${{ github.repository }}
 
       - name: Show generated notes
         run: |
@@ -381,102 +425,6 @@ jobs:
           echo ""
           echo "DRY RUN — would have set release body to:"
           cat /tmp/release-notes.md
-
-  refresh-landing:
-    name: refresh landing (Cloudflare Pages deploy hook)
-    needs: [resolve, attach-assets]
-    if: |
-      always() && !cancelled() &&
-      needs.resolve.result == 'success' &&
-      needs.attach-assets.result == 'success' &&
-      needs.resolve.outputs.is_prerelease == 'false' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
-      github.event.inputs.dry_run != 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    environment: production
-    steps:
-      - name: Trigger Cloudflare Pages deploy
-        env:
-          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK }}
-        run: |
-          if [ -z "$DEPLOY_HOOK" ]; then
-            echo "::error::CLOUDFLARE_PAGES_DEPLOY_HOOK secret is not set"
-            exit 1
-          fi
-          code=$(curl -sS -o /tmp/cf.out -w "%{http_code}" \
-            --retry 3 --retry-all-errors --retry-delay 2 \
-            -X POST "$DEPLOY_HOOK")
-          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
-            echo "::error::deploy-hook curl returned HTTP $code"
-            cat /tmp/cf.out
-            exit 1
-          fi
-          echo "deploy-hook triggered (HTTP $code)"
-
-  # With the tools deploy hook unwired this job logs a notice and succeeds: the app
-  # redeploys through its Cloudflare Git-integration on push:main, so a
-  # workflow_dispatch republish does NOT redeploy it (wire the hook to change that).
-  # `environment: production` so an env-scoped secret is visible here exactly as
-  # it is in refresh-landing.
-  deploy-tools:
-    name: deploy tools (Cloudflare Pages deploy hook)
-    needs: [resolve, attach-assets]
-    if: |
-      always() && !cancelled() &&
-      needs.resolve.result == 'success' &&
-      needs.attach-assets.result == 'success' &&
-      needs.resolve.outputs.is_prerelease == 'false' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
-      github.event.inputs.dry_run != 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    environment: production
-    steps:
-      - name: Trigger Cloudflare Pages deploy (tools)
-        env:
-          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_TOOLS_DEPLOY_HOOK }}
-        run: |
-          if [ -z "$DEPLOY_HOOK" ]; then
-            # Not wired: skip, don't fail. The tools app's Cloudflare dashboard Git-integration
-            # deploys it on push, so an unwired hook never blocks a release.
-            echo "::notice::CLOUDFLARE_TOOLS_DEPLOY_HOOK unset — skipping the CI tools deploy (dashboard Git-integration still deploys it)."
-            exit 0
-          fi
-          code=$(curl -sS -o /tmp/cf-tools.out -w "%{http_code}" \
-            --retry 3 --retry-all-errors --retry-delay 2 \
-            -X POST "$DEPLOY_HOOK")
-          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
-            echo "::error::tools deploy-hook curl returned HTTP $code"
-            cat /tmp/cf-tools.out
-            exit 1
-          fi
-          echo "tools deploy-hook triggered (HTTP $code)"
-
-  verify-live:
-    name: verify live deploys (advisory)
-    needs: [resolve, attach-assets, refresh-landing, deploy-tools]
-    # ADVISORY — deliberately NOT in the `status` aggregator. It reports red
-    # without blocking the release; open nulo.sh / tools.nulo.sh and re-fire the
-    # deploy (refresh-landing.yml break-glass) if it flags a stale site.
-    if: |
-      always() &&
-      needs.resolve.outputs.is_prerelease == 'false' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
-      github.event.inputs.dry_run != 'true' &&
-      needs.attach-assets.result == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.resolve.outputs.sha }}
-      - uses: ./.github/actions/setup-bun
-      - name: Verify the live sites serve this release
-        env:
-          VERSION: ${{ needs.resolve.outputs.version }}
-          SHA: ${{ needs.resolve.outputs.sha }}
-        run: bun scripts/release/verify-live-run.ts
 
   sync-main-to-dev:
     name: sync main → dev (post-release)
@@ -520,6 +468,8 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.app.outputs.token }}
       - uses: ./.github/actions/setup-bun
+        with:
+          cache: "false"
       - name: Open the main→dev sync PR
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -671,8 +621,6 @@ jobs:
         build-firefox,
         smoke-against-artifact,
         attach-assets,
-        refresh-landing,
-        deploy-tools,
         publish-chrome-store,
         publish-firefox-amo,
       ]
@@ -692,8 +640,6 @@ jobs:
             "${{ needs.build-firefox.result }}" \
             "${{ needs.smoke-against-artifact.result }}" \
             "${{ needs.attach-assets.result }}" \
-            "${{ needs.refresh-landing.result }}" \
-            "${{ needs.deploy-tools.result }}" \
             "${{ needs.publish-chrome-store.result }}" \
             "${{ needs.publish-firefox-amo.result }}" \
           ; do

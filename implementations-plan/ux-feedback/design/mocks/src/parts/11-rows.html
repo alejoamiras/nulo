@@ -1,0 +1,95 @@
+<section class="wrap item" id="i11" data-item="i11" aria-labelledby="i11-title">
+	<div class="item-head">
+		<span class="item-num">11</span>
+		<h2 class="item-title" id="i11-title">Some rows look clickable, some are clickable, rarely both</h2>
+		<div class="item-surface"><span class="chip">History</span><span class="chip">Home recent activity</span><span class="chip">Settings rows</span></div>
+	</div>
+	<blockquote class="quote"><cite>Your note</cite>The hover is weird: some transactions have pointers, some don't. Incoming might not have a pointer but you can click on them, etc. Try to improve the consistency. It's confusing.</blockquote>
+	<div class="facts">
+		<div>
+			<h3>What the code does</h3>
+			<ul>
+				<li>Four row types share <code>TransactionCardLayout.vue</code>, which sets no cursor and no hover. Each wrapper adds its own, or doesn't:</li>
+				<li>Settled sends (<code>TransactionCard.vue</code>): pointer and hover. Received (<code>TransactionIncomingCard.vue</code>) and cancelled or failed (<code>TransactionTerminalCard.vue</code>): clickable, with neither. In-flight (<code>TransactionAwaitingCard.vue</code>): pointer only while it waits for approval, no hover.</li>
+				<li>None of them works from the keyboard: they're <code>div</code>s with click handlers. Same story on capability cards, the auth-witness revoke icon and focusable settings rows that Enter doesn't activate.</li>
+			</ul>
+		</div>
+		<div>
+			<h3>What the research says</h3>
+			<ul>
+				<li>Weak signifiers cost time: in NN/g's eyetracking, people spent 22% longer on pages with flat, ambiguous clickables (<a href="https://www.nngroup.com/articles/flat-ui-less-attention-cause-uncertainty/">NN/g</a>).</li>
+				<li>Platforms disagree on whether buttons get the hand cursor (Tailwind v4 dropped it to match browsers). In a dense popup, consistency matters more than which convention you pick.</li>
+				<li>MetaMask, Phantom and Rainbow open a detail view from every activity row; none of the wallets surveyed mixes clickable and inert rows in one list.</li>
+			</ul>
+		</div>
+	</div>
+
+	<div class="opts">
+		<div class="opt current">
+			<div class="opt-head"><span class="opt-key">Current</span><span class="opt-name">Four rows, four behaviors</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop" theme="dark"><div class="n-txlist" style="gap:10px;padding-top:18px;padding-bottom:18px"><div class="n-tx is-click" data-opens="Transaction detail"><span class="n-pin good" style="right:4px;top:-8px">pointer + hover</span><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">north_east</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub">Today · 12:05</div></div></div><div style="display:flex;align-items:center;gap:6px"><div class="n-tx-amt"><span class="n-tx-amount">−250.00</span><span class="n-tx-sym">USDC</span></div></div></div><div class="n-tx" data-opens="Received detail"><span class="n-pin bad" style="right:4px;top:-8px">clickable, no pointer</span><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">south_west</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Receive</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub">Today · 11:40</div></div></div><div style="display:flex;align-items:center;gap:6px"><div class="n-tx-amt"><span class="n-tx-amount">+1,000.00</span><span class="n-tx-sym">USDC</span></div></div></div><div class="n-tx" data-opens="Journal entry"><span class="n-pin bad" style="right:4px;top:-8px">clickable, no pointer</span><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">block</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Public</span></div><div class="n-tx-sub">Cancelled</div></div></div><div style="display:flex;align-items:center;gap:6px"><div class="n-tx-amt"><span class="n-tx-amount">−40.00</span><span class="n-tx-sym">USDC</span></div></div></div><div class="n-tx" data-opens="The approval window" style="cursor:pointer"><span class="n-pin bad" style="right:4px;top:-8px">pointer, no hover</span><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">north_east</span><span class="n-tx-badge"><span class="n-spin"></span></span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub"><span class="n-tx-stage">Waiting for approval</span></div></div></div><div style="display:flex;align-items:center;gap:6px"><div class="n-tx-amt"><span class="n-tx-amount">−12.50</span><span class="n-tx-sym">ETH</span></div></div></div></div></div></div>
+				<div class="cap" aria-live="polite" data-opened>Hover and click the rows</div>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="A">
+			<div class="opt-head"><span class="opt-key">A</span><span class="opt-name">One interactive row, everywhere</span><span class="opt-rec">Recommended</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop" theme="dark"><div class="n-txlist" style="gap:10px;padding-top:18px;padding-bottom:18px"><div class="n-tx is-rowbtn" data-opens="Transaction detail" role="button" tabindex="0"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">north_east</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub">Today · 12:05</div></div></div><div style="display:flex;align-items:center;gap:6px"><div class="n-tx-amt"><span class="n-tx-amount">−250.00</span><span class="n-tx-sym">USDC</span></div></div></div><div class="n-tx is-rowbtn" data-opens="Received detail" role="button" tabindex="0"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">south_west</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Receive</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub">Today · 11:40</div></div></div><div style="display:flex;align-items:center;gap:6px"><div class="n-tx-amt"><span class="n-tx-amount">+1,000.00</span><span class="n-tx-sym">USDC</span></div></div></div><div class="n-tx is-rowbtn" data-opens="Journal entry" role="button" tabindex="0"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">block</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Public</span></div><div class="n-tx-sub">Cancelled</div></div></div><div style="display:flex;align-items:center;gap:6px"><div class="n-tx-amt"><span class="n-tx-amount">−40.00</span><span class="n-tx-sym">USDC</span></div></div></div><div class="n-tx is-rowbtn" data-opens="The approval window" role="button" tabindex="0"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">north_east</span><span class="n-tx-badge"><span class="n-spin"></span></span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub"><span class="n-tx-stage">Waiting for approval</span></div></div></div><div style="display:flex;align-items:center;gap:6px"><div class="n-tx-amt"><span class="n-tx-amount">−12.50</span><span class="n-tx-sym">ETH</span></div></div></div></div></div></div>
+				<div class="cap" aria-live="polite" data-opened>Hover, click, or Tab through them</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>The shared layout becomes the interactive element when a row opens something: pointer, full-row hover tint, and a keyboard focus ring that matches the hover. Wrappers stop adding their own.</li>
+					<li>Real elements: a link when it navigates, a button when it opens a window. Enter and Space work.</li>
+				</ul></div>
+				<div><h4>The rules, for every list in the wallet</h4><ol class="rules">
+					<li>If a row opens something, the whole row is the target: pointer, hover, and a matching focus ring.</li>
+					<li>Rows that do nothing get no hover and no pointer.</li>
+					<li>Buttons inside a row (copy, cancel) are their own targets, at least 24×24, and don't trigger the row.</li>
+					<li>A pending row that can be opened looks exactly like a settled one.</li>
+					<li>The same row behaves the same on Home and in History.</li>
+				</ol></div>
+				<p class="cost">Effort: small to medium. The layout, four wrappers, and the stragglers listed above.</p>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="B">
+			<div class="opt-head"><span class="opt-key">B</span><span class="opt-name">A, plus a chevron on every row</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop" theme="dark"><div class="n-txlist" style="gap:10px;padding-top:18px;padding-bottom:18px"><div class="n-tx is-rowbtn" data-opens="Transaction detail" role="button" tabindex="0"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">north_east</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub">Today · 12:05</div></div></div><div style="display:flex;align-items:center;gap:6px"><div class="n-tx-amt"><span class="n-tx-amount">−250.00</span><span class="n-tx-sym">USDC</span></div><span class="n-tx-chevron"><span class="ms">chevron_right</span></span></div></div><div class="n-tx is-rowbtn" data-opens="Received detail" role="button" tabindex="0"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">south_west</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Receive</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub">Today · 11:40</div></div></div><div style="display:flex;align-items:center;gap:6px"><div class="n-tx-amt"><span class="n-tx-amount">+1,000.00</span><span class="n-tx-sym">USDC</span></div><span class="n-tx-chevron"><span class="ms">chevron_right</span></span></div></div><div class="n-tx is-rowbtn" data-opens="Journal entry" role="button" tabindex="0"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">block</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Public</span></div><div class="n-tx-sub">Cancelled</div></div></div><div style="display:flex;align-items:center;gap:6px"><div class="n-tx-amt"><span class="n-tx-amount">−40.00</span><span class="n-tx-sym">USDC</span></div><span class="n-tx-chevron"><span class="ms">chevron_right</span></span></div></div><div class="n-tx is-rowbtn" data-opens="The approval window" role="button" tabindex="0"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">north_east</span><span class="n-tx-badge"><span class="n-spin"></span></span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub"><span class="n-tx-stage">Waiting for approval</span></div></div></div><div style="display:flex;align-items:center;gap:6px"><div class="n-tx-amt"><span class="n-tx-amount">−12.50</span><span class="n-tx-sym">ETH</span></div><span class="n-tx-chevron"><span class="ms">chevron_right</span></span></div></div></div></div></div>
+				<div class="cap" aria-live="polite" data-opened>Chevron at rest</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>A › at the end of each row says "opens" before anyone hovers, like the settings rows already do.</li>
+					<li>Costs 20px of width that the amount column uses today; long amounts truncate sooner.</li>
+				</ul></div>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="C">
+			<div class="opt-head"><span class="opt-key">C</span><span class="opt-name">A, plus a chevron on hover</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop" theme="dark"><div class="n-txlist" style="gap:10px;padding-top:18px;padding-bottom:18px"><div class="n-tx is-rowbtn hover-chev" data-opens="Transaction detail" role="button" tabindex="0"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">north_east</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub">Today · 12:05</div></div></div><div style="display:flex;align-items:center;gap:6px"><div class="n-tx-amt"><span class="n-tx-amount">−250.00</span><span class="n-tx-sym">USDC</span></div><span class="n-tx-chevron"><span class="ms">chevron_right</span></span></div></div><div class="n-tx is-rowbtn hover-chev" data-opens="Received detail" role="button" tabindex="0"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">south_west</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Receive</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub">Today · 11:40</div></div></div><div style="display:flex;align-items:center;gap:6px"><div class="n-tx-amt"><span class="n-tx-amount">+1,000.00</span><span class="n-tx-sym">USDC</span></div><span class="n-tx-chevron"><span class="ms">chevron_right</span></span></div></div><div class="n-tx is-rowbtn hover-chev" data-opens="Journal entry" role="button" tabindex="0"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">block</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Public</span></div><div class="n-tx-sub">Cancelled</div></div></div><div style="display:flex;align-items:center;gap:6px"><div class="n-tx-amt"><span class="n-tx-amount">−40.00</span><span class="n-tx-sym">USDC</span></div><span class="n-tx-chevron"><span class="ms">chevron_right</span></span></div></div><div class="n-tx is-rowbtn hover-chev" data-opens="The approval window" role="button" tabindex="0"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">north_east</span><span class="n-tx-badge"><span class="n-spin"></span></span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub"><span class="n-tx-stage">Waiting for approval</span></div></div></div><div style="display:flex;align-items:center;gap:6px"><div class="n-tx-amt"><span class="n-tx-amount">−12.50</span><span class="n-tx-sym">ETH</span></div><span class="n-tx-chevron"><span class="ms">chevron_right</span></span></div></div></div></div></div>
+				<div class="cap" aria-live="polite" data-opened>Hover to see the chevron</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>The chevron fades in on hover or focus. Keeps the list clean at rest.</li>
+					<li>Adds nothing on first sight, which was the tester's problem; mostly decoration.</li>
+				</ul></div>
+			</div>
+		</div>
+	</div>
+
+	<div class="recbox">
+		<div>
+			<h3>My pick: A</h3>
+			<p>Every activity row opens something, so the fix is to make them all say so, the same way, from one place, and to make them work from the keyboard. The rules also cover the other lists with the same bug. B's chevron is a reasonable extra if you want a signal at rest, but in a list where every row opens, it repeats the same information on every line.</p>
+			<p class="conf">Confidence: high on A; low-moderate on whether a chevron helps here.</p>
+		</div>
+		<div class="pick" data-pick="i11" data-options="A|B|C|Other"></div>
+	</div>
+</section>

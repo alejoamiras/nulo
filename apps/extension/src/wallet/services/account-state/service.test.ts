@@ -340,8 +340,8 @@ describe("AccountStateService.restore (bounded)", () => {
 		expect(pxe.registerSender).toHaveBeenCalledTimes(1)
 		expect(pxe.registerContract).not.toHaveBeenCalled()
 		expect(result[0].senders[0].restoreError).toContain("timed out")
-		expect(result[0].senders[1].restoreError).toBe("Skipped — couldn't reach the network")
-		expect(result[0].contracts[0].restoreError).toBe("Skipped — couldn't reach the network")
+		expect(result[0].senders[1].restoreError).toBe("Skipped: couldn't reach the network")
+		expect(result[0].contracts[0].restoreError).toBe("Skipped: couldn't reach the network")
 	})
 
 	test("a payload-shaped failure does NOT fail-fast the rest", async () => {

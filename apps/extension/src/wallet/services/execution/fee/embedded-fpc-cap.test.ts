@@ -6,10 +6,10 @@
  * e2e tests accept ok/error so don't catch budget regressions.
  */
 import { describe, expect, test, vi } from "vitest"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { Gas, GasFees, GasSettings } from "@aztec/stdlib/gas"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import { TxContext, type TxExecutionRequest } from "@aztec/stdlib/tx"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { Gas, GasFees, GasSettings } from "@aztec-labs/stdlib/gas"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
+import { TxContext, type TxExecutionRequest } from "@aztec-labs/stdlib/tx"
 import { applyEmbeddedFpcGasCap } from "./embedded-fpc-cap"
 import type { FeeOptions } from "@/wallet/services/execution/client"
 
@@ -72,7 +72,7 @@ describe("applyEmbeddedFpcGasCap", () => {
 	})
 
 	// This IS the private-fuel claim path: PrivateMintAndPayFeePaymentMethod sets feePayer=FPC (≠ from)
-	// → embedded="fpc", and the tools app supplies explicit maxFeesPerGas + teardownGas=0, which
+	// → embedded="fpc", and the claiming dApp supplies explicit maxFeesPerGas + teardownGas=0, which
 	// must pass through verbatim so mint_and_pay_fee's `gasLimits * maxFeesPerGas <= amount` assertion holds.
 	test("3. embedded='fpc', dApp supplied explicit maxFeesPerGas → uses provided values; node NOT consulted (the private-fuel path)", async () => {
 		const node = fakeNode()

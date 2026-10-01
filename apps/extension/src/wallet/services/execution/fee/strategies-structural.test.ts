@@ -14,9 +14,10 @@
  */
 
 import { describe, expect, test, vi } from "vitest"
-import { Gas, GasFees, GasSettings } from "@aztec/stdlib/gas"
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
-import type { TxSimulationResult } from "@aztec/stdlib/tx"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { Gas, GasFees, GasSettings } from "@aztec-labs/stdlib/gas"
+import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
+import type { TxSimulationResult } from "@aztec-labs/stdlib/tx"
 import { FpcType } from "@/wallet/services/fpc/service"
 import type { FeeStrategyContext, FeeStrategyDeps } from "./fee-strategy"
 import { FeeJuiceStrategy } from "./fee-juice-strategy"
@@ -832,5 +833,72 @@ describe("FeeJuiceStrategy folded + INIT-WRAPPED with discovery", () => {
 			scopes: [builtB.account.address],
 		})
 		expect(ctx.op.actions).toEqual([{ kind: "call", contract: "0xtoken", method: "transfer", args: [] }, DISCOVERED_IW])
+	})
+})
+
+describe("FpcStrategy names the sponsor only when the kernel's fee payer is the row", () => {
+	const ROW = AztecAddress.fromNumberUnsafe(0x5f)
+	const ACCOUNT = AztecAddress.fromNumberUnsafe(0xacc)
+	const ELSEWHERE = AztecAddress.fromNumberUnsafe(0x60)
+
+	/** A build paying in Fee Juice names the account as payer, as Pass 1's kernel does; a build
+	 *  paying through the contract names `externalPayer`, whatever the contract made it. */
+	async function estimate(opts: { isProtocol: boolean; type?: FpcType; rowChainId?: number; externalPayer?: AztecAddress }) {
+		const fpc = {
+			infoData: {
+				id: "fpc-1",
+				type: opts.type ?? FpcType.DefaultSponsoredFpc,
+				isProtocol: opts.isProtocol,
+				address: ROW.toString(),
+				chainId: opts.rowChainId ?? 7,
+			},
+			getTotalGas: () => new Gas(1_000, 2_000),
+			getTeardownGas: () => new Gas(100, 200),
+			getFeePayload: vi.fn(() => [
+				{ kind: "call", contract: ROW.toString(), method: "sponsor_unconditionally", args: [] } as unknown as Action,
+			]),
+		}
+		const buildStandard = vi.fn(async (_op: unknown, _fence: unknown, method: AccountFeePaymentMethodOptions) => ({
+			...makeBuilt(),
+			network: { marker: "network", chainId: 7 },
+			txRequest: { ...sentinelTxRequest(), method },
+		}))
+		const simulateTxTask = vi.fn(async (_pxe: unknown, txRequest: { method: AccountFeePaymentMethodOptions }) => {
+			const feePayer = txRequest.method === AccountFeePaymentMethodOptions.EXTERNAL ? opts.externalPayer : ACCOUNT
+			return { ...sentinelSim(), ...(feePayer ? { publicInputs: { feePayer } } : {}) } as unknown as TxSimulationResult
+		})
+		const deps = {
+			txBuilder: { buildStandard },
+			simulateTxTask,
+			fpcService: { getFpcImpl: vi.fn(async () => fpc) },
+			tasks: { startNewTask: () => fakeTask },
+			logger: { log: () => {} },
+		} as unknown as FeeStrategyDeps
+		const ctx = makeCtx({ actions: [{ kind: "call", contract: "0xtoken", method: "transfer", args: [] } as unknown as Action] })
+		ctx.feeSettings = { paymentMethod: { kind: "fpc", fpcId: "fpc-1" } } as never
+		const result = await new FpcStrategy(deps).buildAndEstimate(ctx)
+		return { result, buildStandard }
+	}
+
+	test.each([
+		{ path: "fast path", isProtocol: true, rowChainId: undefined, builds: 1 },
+		{ path: "two-pass path", isProtocol: false, rowChainId: undefined, builds: 2 },
+		{ path: "chain-mismatch fallback", isProtocol: true, rowChainId: 999, builds: 3 },
+	])("the $path names the row its final simulation paid through", async ({ isProtocol, rowChainId, builds }) => {
+		const { result, buildStandard } = await estimate({ isProtocol, rowChainId, externalPayer: ROW })
+
+		expect(buildStandard).toHaveBeenCalledTimes(builds)
+		expect(result.sponsor?.fpcId).toBe("fpc-1")
+		expect(result.sponsor?.address.equals(ROW)).toBe(true)
+	})
+
+	test.each([
+		{ row: "a contract that hands the payer role elsewhere", isProtocol: false, type: undefined, externalPayer: ELSEWHERE },
+		{ row: "a simulation that names no payer", isProtocol: true, type: undefined, externalPayer: undefined },
+		{ row: "a PrivateFPC row, even when it pays", isProtocol: true, type: FpcType.PrivateFpc, externalPayer: ROW },
+	])("no sponsor for $row", async ({ isProtocol, type, externalPayer }) => {
+		const { result } = await estimate({ isProtocol, type, externalPayer })
+
+		expect(result).not.toHaveProperty("sponsor")
 	})
 })

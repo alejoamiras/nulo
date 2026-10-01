@@ -4,7 +4,7 @@ Owner's standing protocol: plan-time gates resolve by iterating with codex to co
 
 ## Round 1 — codex (session `01a035c3-c86a-7590-bc9d-9bb0ebfb8aca`, xhigh) — **conditional approve**
 
-Transcript: [audit-codex.md](../audit-codex.md). Disposition, finding by finding:
+Transcript: [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/vitest-on-bun/audit-codex.md). Disposition, finding by finding:
 
 | # | Finding | Verified? | Disposition |
 |---|---|---|---|
@@ -33,7 +33,7 @@ Transcript: [audit-codex.md](../audit-codex.md). Disposition, finding by finding
 
 ## Round 1 — fable (Plan agent on Fable) — **conditional approve**
 
-Transcript: [audit-fable.md](../audit-fable.md). Disposition:
+Transcript: [audit-fable.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/vitest-on-bun/audit-fable.md). Disposition:
 
 | # | Finding | Verified? | Disposition |
 |---|---|---|---|

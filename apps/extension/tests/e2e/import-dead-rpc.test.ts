@@ -25,8 +25,6 @@
  * interception to a stub on an ephemeral, run-owned port — the seed's port is never bound.
  */
 import { existsSync, mkdtempSync, rmSync } from "node:fs"
-import { createServer, type Server } from "node:http"
-import type { AddressInfo, Socket } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
@@ -44,83 +42,10 @@ import {
 	TEST_PASSWORD,
 	writeBackupToTemp,
 } from "./helpers/import-drivers"
+import { nodeInfoResult, planBatchReplies, startStub } from "./helpers/rpc-stub"
 
 /** The LOCAL seed's compiled-in endpoint (`LOCAL_NETWORK_RPC_URL`'s default and env override). */
 const LOCAL_RPC = process.env.VITE_LOCAL_NETWORK_RPC_URL ?? "http://localhost:8080"
-
-const ZERO_ETH = `0x${"00".repeat(20)}`
-const ZERO_AZTEC = `0x${"00".repeat(32)}`
-
-/** Schema-valid `getNodeInfo` result for the stateful stub (NodeInfoSchema:
- *  @aztec/stdlib contract/interfaces/node-info). It answers as the LOCAL seed: the exact
- *  `l1ChainId` is what the identity check pins for chain 0 (the composite is skipped there). */
-function nodeInfoResult(): Record<string, unknown> {
-	return {
-		nodeVersion: "0.0.0-stub",
-		l1ChainId: LOCAL_L1_CHAIN_ID,
-		rollupVersion: LOCAL_L1_CHAIN_ID,
-		l1ContractAddresses: Object.fromEntries(
-			[
-				"rollupAddress",
-				"registryAddress",
-				"inboxAddress",
-				"outboxAddress",
-				"feeJuiceAddress",
-				"feeJuicePortalAddress",
-				"coinIssuerAddress",
-				"rewardDistributorAddress",
-				"governanceProposerAddress",
-				"governanceAddress",
-				"stakingAssetAddress",
-			].map((k) => [k, ZERO_ETH]),
-		),
-		protocolContractAddresses: {
-			classRegistry: ZERO_AZTEC,
-			feeJuice: ZERO_AZTEC,
-			instanceRegistry: ZERO_AZTEC,
-			multiCallEntrypoint: ZERO_AZTEC,
-		},
-		realProofs: false,
-		txsLimits: { gas: { daGas: 0, l2Gas: 0 } },
-	}
-}
-
-interface StubServer {
-	url: string
-	methods: string[]
-	close: () => Promise<void>
-}
-
-type BatchPlan = { kind: "unparsed" } | { kind: "blackhole" } | { kind: "replies"; payload: unknown }
-
-/** Plans the stub's answer to one request body. The aztec JSON-RPC client BATCHES: bodies
- *  arrive as arrays of request envelopes (the Phase-1 evidence harness learned this the hard
- *  way). Every element is logged into `methods` and asked of `answer`, in order, even after one
- *  proves unanswerable — a batch with ANY unanswerable element blackholes whole (no partial
- *  responses); a bare request answers as a bare object. An `answer` throw escapes. */
-function planBatchReplies(body: string, answer: (method: string) => unknown | undefined, methods: string[]): BatchPlan {
-	let entries: Array<{ method?: string; id?: unknown }>
-	let wasBatch = false
-	try {
-		const parsed = JSON.parse(body) as { method?: string } | Array<{ method?: string }>
-		wasBatch = Array.isArray(parsed)
-		entries = Array.isArray(parsed) ? parsed : [parsed]
-	} catch {
-		methods.push(`<unparsed:${body.slice(0, 60)}>`)
-		return { kind: "unparsed" }
-	}
-	const replies: unknown[] = []
-	let blackhole = false
-	for (const entry of entries) {
-		const method = entry?.method ?? "<no-method>"
-		methods.push(method)
-		const result = answer(method)
-		if (result === undefined) blackhole = true
-		else replies.push({ jsonrpc: "2.0", id: entry?.id ?? null, result })
-	}
-	if (blackhole) return { kind: "blackhole" }
-	return { kind: "replies", payload: wasBatch ? replies : replies[0] }
-}
 
 describe("planBatchReplies (no browser)", () => {
 	const answer = (method: string) => (method === "ok" ? { fine: true } : undefined)
@@ -165,44 +90,6 @@ describe("planBatchReplies (no browser)", () => {
 		expect(asked).toEqual(methods)
 	})
 })
-
-/** Local stub bound to an OS-assigned port (parallel-agent safe). Logs every
- *  JSON-RPC method it receives; `answer` decides which methods get a real
- *  response — everything else blackholes (accepted, never answered). */
-function startStub(answer: (method: string) => unknown | undefined): Promise<StubServer> {
-	return new Promise((resolve) => {
-		const methods: string[] = []
-		const sockets = new Set<Socket>()
-		const server: Server = createServer((req, res) => {
-			let body = ""
-			req.on("data", (c) => {
-				body += String(c)
-			})
-			req.on("end", () => {
-				const plan = planBatchReplies(body, answer, methods)
-				if (plan.kind !== "replies") return
-				res.setHeader("content-type", "application/json")
-				res.end(JSON.stringify(plan.payload))
-			})
-		})
-		server.on("connection", (s) => {
-			sockets.add(s)
-			s.on("close", () => sockets.delete(s))
-		})
-		server.listen(0, "127.0.0.1", () => {
-			const port = (server.address() as AddressInfo).port
-			resolve({
-				url: `http://127.0.0.1:${port}`,
-				methods,
-				close: () =>
-					new Promise<void>((r) => {
-						for (const s of sockets) s.destroy()
-						server.close(() => r())
-					}),
-			})
-		})
-	})
-}
 
 /** Synthetic backup with a senders-only account-state item on the LOCAL chain — the minimum
  *  registrable work that forces the chain-registration leg to dial the (rerouted) seed. */
@@ -312,7 +199,9 @@ describe.skipIf(isFirefox)(CHROME_ONLY.cdpFetch, () => {
 		// ONLY the 30s registration deadline can unpark this variant. The observed
 		// method sequence proves the race actually engaged (probe answered BEFORE
 		// the boot call arrived). Budget: restore ≤15s + probe ≈0 + 30s + margin.
-		const stub = await startStub((method) => (method === "aztec_getNodeInfo" ? nodeInfoResult() : undefined))
+		const stub = await startStub((method) =>
+			method === "aztec_getNodeInfo" ? nodeInfoResult(LOCAL_L1_CHAIN_ID, LOCAL_L1_CHAIN_ID) : undefined,
+		)
 		try {
 			const backup = await deadRpcBackup()
 			await withFreshExtension({ kind: "redirect", to: stub.url }, async (page) => {

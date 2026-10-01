@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 import { bytesToHex } from "@nulo/wallet-core/utils"
 import { asPasshash, type Passhash } from "./secret-types"
 import { zeroize } from "./zeroize"

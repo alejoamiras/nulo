@@ -11,6 +11,8 @@ export interface LaunchOptions {
 	/** Persists profile state across launches, which is what makes a relaunch a real cold boot. */
 	userDataDir?: string
 	headless: boolean
+	/** `false` drops the fixed window size a driver launches with; only Chrome's launch has one. */
+	fixedWindowSize?: boolean
 }
 
 export interface LaunchedBrowser {
@@ -45,6 +47,11 @@ export interface PxeHostState {
 	visibility: string[]
 }
 
+/** A tab or window `waitForNewTab` found. */
+export interface OpenedTab {
+	close(): Promise<void>
+}
+
 export interface BrowserDriver {
 	readonly kind: BrowserKind
 	/** Extension URL scheme, trailing `//` included. */
@@ -76,12 +83,12 @@ export interface BrowserDriver {
 	/** Reload an extension page in place. Over BiDi a reload strands the `Page` just as a navigation does. */
 	reloadExtensionPage(page: Page): Promise<void>
 	/**
-	 * An extension page with `chrome.*` that stays open on a wallet that has not finished onboarding,
-	 * for the launch fixture to settle the extension through. It has to be a driver's job because
-	 * the popup redirects to the onboarding tab and calls `window.close()`: Chrome ignores the
-	 * call on a tab no script opened, Firefox honours it and the page dies under the fixture.
+	 * An extension page with `chrome.*` for the launch fixture to settle the extension through, whose
+	 * lifetime no onboarding state decides: both browsers honour the `window.close()` that the popup
+	 * and the onboarding page call when they redirect. Both drivers load the setup page, static text
+	 * that no product code opens, so deleting it as dead code fails every launch.
 	 */
-	openScratchPage(browser: Browser, extensionId: string, opts: { freshProfile: boolean }): Promise<Page>
+	openScratchPage(browser: Browser, extensionId: string): Promise<Page>
 	/**
 	 * Resolve with the first target matching `predicate`, or reject after `timeout` ms. Over BiDi a
 	 * window is born `about:blank` and no event reports the URL it then loads, so Puppeteer's own
@@ -97,6 +104,13 @@ export interface BrowserDriver {
 	 */
 	waitForOpenedUrl(browser: Browser, url: string, timeout: number): Promise<void>
 	/**
+	 * Run `open`, then resolve with the tab or window it opened, or reject once `timeout` ms pass after
+	 * it without one. Nothing else may open a tab or window meanwhile: being new is what identifies it.
+	 * For a tab the browser opens by itself, such as a modified click's, which Firefox's BiDi can leave
+	 * unannounced for good, so `targets()` never lists it.
+	 */
+	waitForNewTab(browser: Browser, open: () => Promise<void>, timeout: number): Promise<OpenedTab>
+	/**
 	 * Answer every request the browser makes to `fromOrigin` — whichever of the extension's
 	 * contexts issues it — without touching the network. Resolves once no request can escape.
 	 */
@@ -106,6 +120,14 @@ export interface BrowserDriver {
 	 * person's click — neither focuses the window nor, on every browser, counts as a user gesture.
 	 */
 	prepareClick(page: Page): Promise<void>
+	/**
+	 * Runs before keys pressed at `page` once the wallet has opened a window from it, after that
+	 * window shows its page, and resolves once `page` has focus. Headless Firefox focuses every window
+	 * the wallet opens, and a key sent to a page whose window lost focus reaches its focused element
+	 * with no default action: Space on a button fires keydown and keyup but no click. A person goes
+	 * back to the popup before pressing it.
+	 */
+	prepareKeys(page: Page): Promise<void>
 	/** Answer the file picker that `open` asks for with `filePath`. `open` is a scripted click. */
 	pickFile(page: Page, open: () => Promise<void>, filePath: string): Promise<void>
 	/** A PRF-capable virtual authenticator. `anchorPage` matters where one is scoped to a page. */
@@ -131,6 +153,12 @@ export interface BrowserDriver {
 	stopBackground(browser: Browser, extensionId: string): Promise<void>
 	/** Whether a background instance runs right now. Both browsers reap an idle one. */
 	backgroundAlive(browser: Browser, extensionId: string): Promise<boolean>
+	/**
+	 * Run `body`, the source of a function body, in the running background with the globals the
+	 * extension's own code holds there, and resolve with the JSON value it returns. Rejects when no
+	 * background runs, or with the message `body` throws.
+	 */
+	evaluateInBackground<T>(browser: Browser, extensionId: string, body: string): Promise<T>
 	/**
 	 * How this driver's protocol words "the window went away under the call", beyond the CDP
 	 * phrases the fixtures already match. An approval window closes itself on the click that
@@ -160,6 +188,12 @@ export const credentialOutlivesPage = driver.credentialOutlivesPage
 export const CHROME_ONLY = {
 	backgroundKillUnderPage: "ends the background under an open extension page; Firefox will not end an event page one keeps busy",
 	cdpFetch: "arms CDP Fetch interception on held targets; BiDi has no equivalent",
+	hangingRequest: "stalls a network on a request that hangs, which Firefox's interception cannot make",
+} as const
+
+/** Why a test does not run on Chrome: a state headless Chrome cannot be driven into — never a failing test. */
+export const FIREFOX_ONLY = {
+	windowRefocus: "refocuses an approval popup; headless Chrome moves focus only by creating a window",
 } as const
 
 /** The launch a background call is made against; every `ExtensionContext` is one. */
@@ -179,15 +213,17 @@ export const waitForTarget = (browser: Browser, predicate: (target: Target) => b
 	driver.waitForTarget(browser, predicate, timeout)
 export const waitForOpenedUrl = (browser: Browser, url: string, timeout: number): Promise<void> =>
 	driver.waitForOpenedUrl(browser, url, timeout)
+export const waitForNewTab = (browser: Browser, open: () => Promise<void>, timeout: number): Promise<OpenedTab> =>
+	driver.waitForNewTab(browser, open, timeout)
 export const interceptRpc = (
 	browser: Browser,
 	extensionId: string,
 	fromOrigin: string,
 	mode: RpcInterception,
 ): Promise<ArmedInterception> => driver.interceptRpc(browser, extensionId, fromOrigin, mode)
-export const openScratchPage = (browser: Browser, extensionId: string, opts: { freshProfile: boolean }): Promise<Page> =>
-	driver.openScratchPage(browser, extensionId, opts)
+export const openScratchPage = (browser: Browser, extensionId: string): Promise<Page> => driver.openScratchPage(browser, extensionId)
 export const prepareClick = (page: Page): Promise<void> => driver.prepareClick(page)
+export const prepareKeys = (page: Page): Promise<void> => driver.prepareKeys(page)
 export const pickFile = (page: Page, open: () => Promise<void>, filePath: string): Promise<void> => driver.pickFile(page, open, filePath)
 export const virtualAuthenticator = (browser: Browser, anchorPage: Page): Promise<VirtualAuthenticator> =>
 	driver.virtualAuthenticator(browser, anchorPage)
@@ -195,3 +231,5 @@ export const holdNextCredentialGet = (page: Page): Promise<void> => driver.holdN
 export const pxeHostState = (page: Page): Promise<PxeHostState> => driver.pxeHostState(page)
 export const stopBackground = (owner: BackgroundOwner): Promise<void> => driver.stopBackground(owner.browser, owner.extensionId)
 export const backgroundAlive = (owner: BackgroundOwner): Promise<boolean> => driver.backgroundAlive(owner.browser, owner.extensionId)
+export const evaluateInBackground = <T>(owner: BackgroundOwner, body: string): Promise<T> =>
+	driver.evaluateInBackground<T>(owner.browser, owner.extensionId, body)

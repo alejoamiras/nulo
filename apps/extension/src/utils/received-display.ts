@@ -1,14 +1,15 @@
 /**
- * Receiver-honest display resolution for incoming receipts (D5-B/D). Maps a discriminated
+ * Receiver-honest display resolution for incoming receipts. Maps a discriminated
  * `IncomingTransferRecord` to:
- *  - a THREE-label vocabulary + "Minted" (D7 dropped, so pub→priv is NOT distinguished — it's a
- *    note record shown as "Received privately");
+ *  - a THREE-label vocabulary + "Minted" (pub→priv is NOT distinguished — it's a note record shown
+ *    as "Received privately");
  *  - a "From" treatment that states the truth without ever rendering the MAGIC/zero sentinel as a
  *    raw address.
  */
 import { PRIVATE_ADDRESS_MAGIC_VALUE } from "@nulo/aztec-runtime/pxe/public-events"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import type { IncomingTransferRecord } from "@/wallet/services/incoming-transfer/spec"
+import type { TokenInfo } from "@/wallet/services/token/spec"
 
 const ZERO_ADDRESS = AztecAddress.ZERO.toString().toLowerCase()
 const MAGIC = PRIVATE_ADDRESS_MAGIC_VALUE.toLowerCase()
@@ -26,7 +27,7 @@ export type FromDisplay =
 const isMagic = (from: string): boolean => from.toLowerCase() === MAGIC
 const isZero = (from: string): boolean => from.toLowerCase() === ZERO_ADDRESS
 
-/** Resolve the receiver-honest type. Notes are always "Received privately" (D7 dropped). */
+/** Resolve the receiver-honest type. Notes are always "Received privately". */
 export function resolveReceivedType(record: IncomingTransferRecord): ReceivedType {
 	if (record.kind === "note") return "received-privately"
 	if (isZero(record.from)) return "minted"
@@ -54,18 +55,32 @@ export function resolveFromDisplay(record: IncomingTransferRecord): FromDisplay 
 	return { kind: "address", address: record.from }
 }
 
-/** Props of the incoming-transfer activity card; callers supply their own token and fiat lookups. */
+/** The token a receipt names: by `tokenId`, else by contract, since a re-added token gets a new id. */
+export function tokenForReceipt<T extends Pick<TokenInfo, "id" | "contract">>(
+	tokens: readonly T[],
+	inc: Pick<IncomingTransferRecord, "tokenId" | "contract">,
+): T | undefined {
+	const byId = inc.tokenId === undefined ? undefined : tokens.find((t) => t.id === inc.tokenId)
+	return byId ?? tokens.find((t) => t.contract === inc.contract)
+}
+
+/**
+ * Props of the incoming-transfer activity card, the one builder Home and History share. Without a
+ * token in `tokens` the row has no amount and no dollar value: `tokenDecimals` is `null`, since
+ * `undefined` would take the card's default of 0 and print the raw integer.
+ */
 export function buildIncomingCardProps(
 	inc: IncomingTransferRecord,
-	token: { symbol?: string; decimals?: number } | undefined,
-	amountFiat: string | null,
+	tokens: readonly TokenInfo[],
+	fiatLabel: (token: TokenInfo, raw: bigint) => string | undefined,
 ) {
+	const token = tokenForReceipt(tokens, inc)
 	return {
 		tokenSymbol: token?.symbol || "Token",
 		amountRaw: inc.amountRaw,
-		tokenDecimals: token?.decimals || 0,
+		tokenDecimals: token?.decimals ?? null,
 		txHash: inc.txHash,
-		amountFiat,
+		amountFiat: token ? (fiatLabel(token, BigInt(inc.amountRaw || 0)) ?? null) : null,
 		receivedLabel: receivedLabel(resolveReceivedType(inc)),
 	}
 }

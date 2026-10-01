@@ -119,7 +119,6 @@ vi.mock("@/utils/core", () => ({
 }))
 vi.mock("@/composables/toast.js", () => ({
 	useToast: () => ({ openToast: mocks.openToast }),
-	TOAST_DURATION: { DEFAULT: 2000, LONG: 4000 },
 }))
 const route = reactive({ name: "popup-send", path: "/popup/send", query: {} as Record<string, string>, meta: {} })
 vi.mock("vue-router", () => ({
@@ -135,6 +134,7 @@ import { useAppStore } from "@/stores/app.store"
 import { INIT_RETRY_BACKOFF_MS } from "@/stores/balances.store"
 import { useCacheStore } from "@/stores/cache.store"
 import { usePopupStore } from "@/stores/popup.store"
+import { PriceServiceClient } from "@/wallet/services/price/client"
 import { installChromeStorage } from "../../../tests/helpers/chrome-storage-mock"
 import Send from "./send.vue"
 
@@ -152,7 +152,7 @@ const STUBS = {
 		emits: ["click"],
 		inheritAttrs: false,
 	},
-	SelectTokenCard: { template: '<div data-testid="stub-token-card" />', props: ["token"] },
+	SelectTokenCard: { template: '<div data-testid="stub-token-card" />', props: ["token", "loading"] },
 	RecipientField: {
 		template: '<input data-testid="stub-recipient" :value="searchTerm" @input="$emit(\'update:searchTerm\', $event.target.value)" />',
 		props: ["searchTerm", "selectedContact", "candidates"],
@@ -166,7 +166,7 @@ const STUBS = {
 	},
 	// The card's read-only rows, and the menu chrome around the real selector's items.
 	FeeMethodRow: { template: '<div data-testid="stub-fee-method-row" />' },
-	FeeCostReadout: { template: '<div data-testid="stub-fee-cost" />' },
+	FeeCostReadout: { props: ["estimate"], template: '<div data-testid="stub-fee-cost" :data-usd="estimate?.usd" />' },
 	FeePriorityRow: { template: '<div data-testid="stub-fee-priority" />' },
 	DropdownRoot: { template: '<div data-testid="stub-dropdown"><slot name="trigger" /><slot name="popup" /></div>' },
 	Popup: {
@@ -186,20 +186,26 @@ const STUBS = {
 
 type W = ReturnType<typeof mount>
 type Gas = { publicFeeJuice: string | null; privateFeeJuice: string | null }
-type Funding = { gas: Gas; fpcs: unknown[] }
+type Funding = { gas: Gas; fpcs: unknown[]; storage?: Record<string, unknown> }
 
 const HELD = "1000000000000000000"
 const PRIVATE_FPC = { id: "p1", type: 2, name: "Private FPC", isProtocol: true }
 const SPONSOR = { id: "s1", type: 1, name: "Sponsor", isProtocol: true }
 const HAND_ADDED = { id: "s2", type: 1, name: "Mine", isProtocol: false }
 const SEND_PICKS = UI_STORAGE_KEYS.SEND_FEE_PAYMENT_METHODS
+/** A hand-added sponsor pays only once picked: saved for both origins. */
+const HAND_ADDED_PICKED = { [ACCOUNT]: { private: { type: "fpc", fpc: { id: "s2" } }, public: { type: "fpc", fpc: { id: "s2" } } } }
 
 const FUNDING = {
 	"no gas, a sponsor": { gas: { publicFeeJuice: "0", privateFeeJuice: "0" }, fpcs: [PRIVATE_FPC, SPONSOR] },
 	"public Fee Juice only": { gas: { publicFeeJuice: HELD, privateFeeJuice: "0" }, fpcs: [PRIVATE_FPC, SPONSOR] },
 	"private Fee Juice only": { gas: { publicFeeJuice: "0", privateFeeJuice: HELD }, fpcs: [PRIVATE_FPC, SPONSOR] },
 	"both Fee Juices": { gas: { publicFeeJuice: HELD, privateFeeJuice: HELD }, fpcs: [PRIVATE_FPC, SPONSOR] },
-	"no gas, a hand-added sponsor": { gas: { publicFeeJuice: "0", privateFeeJuice: "0" }, fpcs: [PRIVATE_FPC, HAND_ADDED] },
+	"no gas, a hand-added sponsor picked": {
+		gas: { publicFeeJuice: "0", privateFeeJuice: "0" },
+		fpcs: [PRIVATE_FPC, HAND_ADDED],
+		storage: { [SEND_PICKS]: HAND_ADDED_PICKED },
+	},
 } satisfies Record<string, Funding>
 
 type Deferred<T> = { promise: Promise<T>; resolve: (v: T) => void }
@@ -211,8 +217,8 @@ function deferred<T>(): Deferred<T> {
 	return { promise, resolve }
 }
 
-async function mountSend(funding: Funding, opts: { storage?: Record<string, unknown>; holdGas?: boolean } = {}) {
-	installChromeStorage(opts.storage ?? {})
+async function mountSend(funding: Funding, opts: { storage?: Record<string, unknown>; holdGas?: boolean; realTokenCard?: boolean } = {}) {
+	installChromeStorage(opts.storage ?? funding.storage ?? {})
 	mocks.getFpcs.mockResolvedValue(funding.fpcs)
 	const gas = deferred<Gas>()
 	if (opts.holdGas) mocks.getGasBalances.mockReturnValue(gas.promise)
@@ -227,7 +233,11 @@ async function mountSend(funding: Funding, opts: { storage?: Record<string, unkn
 	const popupStore = usePopupStore(pinia)
 	const w = mount(Send, {
 		attachTo: document.body,
-		global: { plugins: [pinia], stubs: STUBS, mocks: { getChainName: () => "Test" } },
+		global: {
+			plugins: [pinia],
+			stubs: opts.realTokenCard ? { ...STUBS, SelectTokenCard: false } : STUBS,
+			mocks: { getChainName: () => "Test" },
+		},
 	})
 	await flushPromises()
 	return { w, appStore, cacheStore, popupStore, gas }
@@ -288,8 +298,8 @@ const SWEEP: Array<[keyof typeof FUNDING, TransferSide, Visibility, PayerKind, {
 	["private Fee Juice only", "public", "public", "contract", { kind: "fpc", fpcId: "p1" }],
 	["both Fee Juices", "private", "hidden", "contract", { kind: "fpc", fpcId: "p1" }],
 	["both Fee Juices", "public", "public", "account", { kind: "fj" }],
-	["no gas, a hand-added sponsor", "private", "unknown", "unvouched", { kind: "fpc", fpcId: "s2" }],
-	["no gas, a hand-added sponsor", "public", "public", "unvouched", { kind: "fpc", fpcId: "s2" }],
+	["no gas, a hand-added sponsor picked", "private", "unknown", "unvouched", { kind: "fpc", fpcId: "s2" }],
+	["no gas, a hand-added sponsor picked", "public", "public", "unvouched", { kind: "fpc", fpcId: "s2" }],
 ]
 const SIDE_CELLS = {
 	"private→private": { to: "hidden", amount: "hidden" },
@@ -343,8 +353,11 @@ describe("send page with the real fee card — nothing to send", () => {
 		w.unmount()
 	})
 
-	test("no gas and no sponsor: the footer asks for gas, and the strip vouches for nothing", async () => {
-		const { w } = await mountSend({ gas: { publicFeeJuice: "0", privateFeeJuice: "0" }, fpcs: [PRIVATE_FPC] })
+	test.each([
+		["no sponsor", [PRIVATE_FPC]],
+		["only one added by hand, never picked", [PRIVATE_FPC, HAND_ADDED]],
+	])("no gas and %s: the footer asks for gas, and the strip vouches for nothing", async (_case, fpcs) => {
+		const { w } = await mountSend({ gas: { publicFeeJuice: "0", privateFeeJuice: "0" }, fpcs })
 		await fillForm(w)
 		expect(w.find('[data-testid="send-submit"]').exists()).toBe(false)
 		expect(w.get('[data-testid="send-get-fee-juice"]').text()).toBe("Get private gas")
@@ -399,7 +412,7 @@ describe("send page with the real fee card — transitions", () => {
 
 		fpcEvents.onFpcDeleted.invoke(SPONSOR)
 		await nextTick()
-		expect(mocks.openToast).toHaveBeenCalledWith({ label: "Selected FPC was deleted" })
+		expect(mocks.openToast).toHaveBeenCalledWith({ kind: "success", label: "Selected FPC was deleted" })
 		expect(feeTrigger(w)).toBe("public")
 		expect(settled(w)).toMatchObject({ you: "exposed", action: "review" })
 		await submit(w).trigger("click")
@@ -423,8 +436,9 @@ describe("send page with the real fee card — transitions", () => {
 		w.unmount()
 	})
 
-	test("the protocol sponsor's row updated to a custom address under the same id: HIDDEN is withdrawn", async () => {
-		const { w } = await mountSend(FUNDING["no gas, a sponsor"])
+	test("the picked protocol sponsor's row updated to a custom address under the same id: HIDDEN is withdrawn", async () => {
+		const picks = { [ACCOUNT]: { private: { type: "fpc", fpc: { id: "s1", name: "Sponsor" } } } }
+		const { w } = await mountSend(FUNDING["no gas, a sponsor"], { storage: { [SEND_PICKS]: picks } })
 		await fillForm(w)
 		expect(settled(w)).toMatchObject({ you: "hidden", action: "send" })
 
@@ -434,6 +448,19 @@ describe("send page with the real fee card — transitions", () => {
 		await strip(w).trigger("click")
 		expect(w.get('[data-testid="send-review-fee"]').attributes("data-payer")).toBe("unvouched")
 		expect(w.get('[data-testid="send-review-row-you"]').text()).toContain("added by hand")
+		w.unmount()
+	})
+
+	test("the default sponsor's row updated to a custom address under the same id: it no longer pays unasked", async () => {
+		const { w } = await mountSend(FUNDING["no gas, a sponsor"])
+		await fillForm(w)
+		expect(settled(w)).toMatchObject({ you: "hidden", action: "send" })
+
+		fpcEvents.onFpcUpdated.invoke({ ...SPONSOR, isProtocol: false })
+		await nextTick()
+		expect(w.find('[data-testid="send-submit"]').exists()).toBe(false)
+		expect(w.get('[data-testid="send-get-fee-juice"]').text()).toBe("Get private gas")
+		expect(strip(w).attributes("data-you")).toBe("unknown")
 		w.unmount()
 	})
 
@@ -509,6 +536,108 @@ describe("send page with the real fee card — transitions", () => {
 		expect((w.get('[data-testid="stub-amount"]').element as HTMLInputElement).value).toBe("1.5")
 		expect((w.get('[data-testid="stub-recipient"]').element as HTMLInputElement).value).toBe(DESTINATION)
 		expect(settled(w)).toMatchObject({ you: "exposed", action: "review" })
+		w.unmount()
+	})
+})
+
+describe("send page with the real fee card — a sponsor that can't cover the fee", () => {
+	const SPONSOR_AT = `0x${"0a".repeat(32)}`
+	const PICKED_SPONSOR: Funding = {
+		gas: { publicFeeJuice: HELD, privateFeeJuice: "0" },
+		fpcs: [PRIVATE_FPC, { ...SPONSOR, address: SPONSOR_AT }],
+		storage: { [SEND_PICKS]: { [ACCOUNT]: { private: { type: "fpc", fpc: { id: "s1" } } } } },
+	}
+	const ESTIMATE = { maxFee: "1000", maxFeeFormatted: "0.000000000000001", gasDetails: {} }
+	const SHORT = { ...ESTIMATE, sponsorFunding: { fpcId: "s1", address: SPONSOR_AT, funded: false } }
+	const notice = (w: W) => w.find('[data-testid="fee-sponsor-short"]')
+	/** The menu item is unresolved here, so its `disabled` prop lands as an attribute. */
+	const offered = (w: W, subtitle: "public" | "sponsored") => {
+		const item = w.get(`[data-testid="send-fee-method-${subtitle}"]`)
+		return item.attributes("disabled") === undefined && item.attributes("aria-disabled") !== "true"
+	}
+
+	/** The picked sponsor's first estimate, held until `release`. */
+	async function heldEstimate() {
+		vi.useFakeTimers()
+		const held = deferred<unknown>()
+		mocks.estimateTransferFee.mockReturnValueOnce(held.promise).mockResolvedValue(ESTIMATE)
+		const mounted = await mountSend(PICKED_SPONSOR)
+		await fillForm(mounted.w)
+		await vi.advanceTimersByTimeAsync(800)
+		expect(mocks.estimateTransferFee).toHaveBeenCalledTimes(1)
+		expect(feeTrigger(mounted.w)).toBe("sponsored")
+		const release = async () => {
+			held.resolve(SHORT)
+			await vi.advanceTimersByTimeAsync(0)
+			await flushPromises()
+		}
+		return { ...mounted, release }
+	}
+
+	test("its verdict lands: the sponsor is set aside, the account's Fee Juice pays, and the send goes through review", async () => {
+		const { w, release } = await heldEstimate()
+		await release()
+		expect(notice(w).text()).toBe("The sponsor can't cover this fee right now, so Public Fee Juice pays it.")
+		expect(feeTrigger(w)).toBe("public")
+		expect(offered(w, "sponsored")).toBe(false)
+		expect(settled(w)).toMatchObject({ you: "exposed", action: "review" })
+		w.unmount()
+	})
+
+	test.each([
+		["profile", { profile: { id: "p2" } }],
+		["account", { account: { address: "0xother" } }],
+		["network", { network: { id: "n2", chainId: TOKEN.chainId } }],
+	])("the %s switched while its estimate was out: no notice, and both rows offered", async (_case, identity) => {
+		const { w, appStore, release } = await heldEstimate()
+		Object.assign(appStore, identity)
+		await flushPromises()
+		await release()
+		expect(notice(w).exists()).toBe(false)
+		expect(offered(w, "sponsored")).toBe(true)
+		expect(offered(w, "public")).toBe(true)
+		w.unmount()
+	})
+})
+
+describe("send page with the real fee card — the review sheet's fee", () => {
+	test("repeats the card's dollars, never the page's own quote", async () => {
+		mocks.estimateTransferFee.mockResolvedValue({ maxFee: HELD, maxFeeFormatted: "1", gasDetails: {} })
+		const { w } = await mountSend(FUNDING["public Fee Juice only"])
+		await fillForm(w)
+		// The page debounces its estimate by 800 ms.
+		await new Promise((r) => setTimeout(r, 900))
+		await flushPromises()
+		// Every price client holds a different quote, as after a reconnect that refreshed only one.
+		vi.mocked(PriceServiceClient).mock.results.forEach(({ value }, i) => {
+			value.onQuotesUpdated.invoke({
+				aztec: { coingeckoId: "aztec", usd: 0.01 * (i + 1), fetchedAt: Date.now(), providerUpdatedAt: null },
+			})
+		})
+		await flushPromises()
+		expect(vi.mocked(PriceServiceClient).mock.results.length).toBeGreaterThan(1)
+
+		const shown = w.get('[data-testid="stub-fee-cost"]').attributes("data-usd")
+		expect(shown).toMatch(/^\$0\.0\d0$/)
+		await strip(w).trigger("click")
+		expect(w.get('[data-testid="send-review-fee"] span').text()).toBe(`Fee · ~1 FJ (${shown})`)
+		w.unmount()
+	})
+})
+
+describe("send page — the real token card while the tokens load", () => {
+	test("a tap during the load opens nothing; once the tokens arrive, a tap opens the picker", async () => {
+		const tokens = deferred<unknown[]>()
+		mocks.getTokens.mockReturnValueOnce(tokens.promise)
+		const { w, popupStore } = await mountSend(FUNDING["both Fee Juices"], { realTokenCard: true })
+		await w.get('[data-testid="send-token-trigger"]').trigger("click")
+		expect(popupStore.isOpened("new_token")).toBe(false)
+		expect(popupStore.isOpened("select_token")).toBe(false)
+
+		tokens.resolve([TOKEN])
+		await flushPromises()
+		await w.get('[data-testid="send-token-trigger"]').trigger("click")
+		expect(popupStore.isOpened("select_token")).toBe(true)
 		w.unmount()
 	})
 })

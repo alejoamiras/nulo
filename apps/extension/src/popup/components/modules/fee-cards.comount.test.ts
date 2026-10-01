@@ -126,7 +126,7 @@ beforeEach(() => {
 	stubChromeStorage()
 	mocks.getGasBalances.mockReset().mockResolvedValue(FJ(42n))
 	mocks.peekGasBalances.mockReset().mockResolvedValue(null)
-	mocks.getFpcs.mockReset().mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+	mocks.getFpcs.mockReset().mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor", isProtocol: true }])
 })
 
 afterEach(() => {
@@ -196,7 +196,7 @@ describe("fee cards co-mounted on one key", () => {
 	})
 
 	test("a forced success resets the gas overlay without re-entering the fee card's snapshot", async () => {
-		const { AccountFeePaymentMethodOptions } = await import("@aztec/entrypoints/account")
+		const { AccountFeePaymentMethodOptions } = await import("@aztec-labs/entrypoints/account")
 		const { gas, fee } = await mountBoth()
 		const feeEmits = (fee.emitted<unknown[]>("update:modelValue") ?? []).length
 		expect(feeEmits).toBeGreaterThan(0) // the fee card committed (sponsored auto-select)

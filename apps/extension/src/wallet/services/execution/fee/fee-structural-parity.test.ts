@@ -14,9 +14,9 @@
  */
 
 import { describe, expect, test } from "vitest"
-import { Gas, GasFees, GasSettings } from "@aztec/stdlib/gas"
-import type { TxExecutionRequest, TxSimulationResult } from "@aztec/stdlib/tx"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import { Gas, GasFees, GasSettings } from "@aztec-labs/stdlib/gas"
+import type { TxExecutionRequest, TxSimulationResult } from "@aztec-labs/stdlib/tx"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import { finalizeGasLimits, suggestGasLimits } from "./fee-strategy"
 
 const PRIORITY = new GasFees(7n, 8n)

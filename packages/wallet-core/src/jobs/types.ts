@@ -26,6 +26,11 @@
  */
 export type JobStage = "queued" | "pending" | "simulating" | "proving" | "submitting" | "succeeded" | "failed" | "cancelled"
 
+export type TerminalStage = "succeeded" | "failed" | "cancelled"
+
+/** The stages a job can still leave. */
+export type ActiveStage = Exclude<JobStage, TerminalStage>
+
 /**
  * Terminal stages. Records in these stages never transition further; the
  * journal keeps them with `terminalAt` set (Carry #2) so resume sweeps,
@@ -34,9 +39,13 @@ export type JobStage = "queued" | "pending" | "simulating" | "proving" | "submit
 export const TERMINAL_STAGES: ReadonlySet<JobStage> = new Set<JobStage>(["succeeded", "failed", "cancelled"])
 
 /** True if `stage` is terminal — i.e. no further transitions are legal. */
-export function isTerminal(stage: JobStage): boolean {
+export function isTerminal(stage: JobStage): stage is TerminalStage {
 	return TERMINAL_STAGES.has(stage)
 }
+
+/** What the network answered for a failed send that may have reached it. `unconfirmed`: no
+ *  answer within the check's window. */
+export type SendCheckOutcome = "sent" | "reverted" | "unconfirmed"
 
 export type ProveBackend = "presto" | "browser"
 
@@ -60,7 +69,8 @@ export type JobProgress =
 	| { stage: "pending" }
 	| { stage: "simulating" }
 	| { stage: "proving"; enteredProveAt: number; backend?: ProveBackend }
-	| { stage: "submitting"; txHash?: string }
+	/** `submittedEndpointUrl`: the endpoint the send goes out through, where a lost answer is checked. */
+	| { stage: "submitting"; txHash?: string; submittedEndpointUrl?: string }
 	/**
 	 * `txHash` is present for on-chain ops (`transfer`, `dapp_execute`) and
 	 * absent for non-tx ops (`token_import`, future imports). The journal
@@ -68,7 +78,11 @@ export type JobProgress =
 	 * so the structural optionality here can't be misused by a caller.
 	 */
 	| { stage: "succeeded"; txHash?: string }
-	| { stage: "failed" }
+	/**
+	 * Every field is the journal's own: `from` is the stage the row left, the hash and endpoint
+	 * are carried from `submitting`, and `check` is the network's answer. A caller's are discarded.
+	 */
+	| { stage: "failed"; from?: ActiveStage; txHash?: string; submittedEndpointUrl?: string; check?: SendCheckOutcome }
 	| { stage: "cancelled" }
 
 /**
@@ -78,7 +92,7 @@ export type JobProgress =
  * autocomplete + the runtime drift guard, NOT for compiler exhaustiveness.
  *
  * Producers: `normalizeError(…, "transfer" | "dapp_execute" | "prover" |
- * "network" | "unknown")`, `{ kind: "popup_bound" }` (wallet-sdk), the reaper
+ * "network" | "unknown")`, `popup_bound` and `scope_refused` (wallet-sdk), the reaper
  * (`sw_restart_post_prove` | `stuck_proving` | `stuck_queued` | `stale_on_resume`),
  * and `classifyTokenImportError` (`network_unreachable` | `contract_invalid` |
  * `metadata_fetch` | `unknown`). `user_rejected` | `network` | `simulation` are
@@ -87,6 +101,7 @@ export type JobProgress =
 export type KnownJobErrorKind =
 	| "user_rejected"
 	| "popup_bound"
+	| "scope_refused"
 	| "sw_restart_post_prove"
 	| "stale_on_resume"
 	| "stuck_proving"
@@ -115,6 +130,7 @@ export type JobErrorKind = KnownJobErrorKind | (string & {})
 const KNOWN_JOB_ERROR_KIND_TABLE = {
 	user_rejected: true,
 	popup_bound: true,
+	scope_refused: true,
 	sw_restart_post_prove: true,
 	stale_on_resume: true,
 	stuck_proving: true,

@@ -67,6 +67,8 @@ export type TokenInfo = {
 	symbol: string
 	/** Token decimals. */
 	decimals: number
+	/** Whether the token has a decimals getter; without one, `decimals` is stored as 0. */
+	hasDecimals: boolean
 	/** Whether or not the token has this functionality. */
 	hasPublicBalances: boolean
 	/** Whether or not the token has this functionality. */
@@ -263,14 +265,17 @@ export type Methods = {
 /**
  * `onTokenDeleted` payload. `TokenInfo` is deliberately profile-stripped (it's
  * the RPC-facing shape), but deletion consumers MUST scope to the DELETED token's
- * profile — using the active profile instead wipes the wrong profile's data
- * (finding C). So the deletion event carries the authoritative `profileId`.
+ * profile — using the active profile instead wipes the wrong profile's data.
+ * So the deletion event carries the authoritative `profileId`.
  */
 export type TokenDeleted = TokenInfo & { profileId: string }
 
+/** `onTokenAdded` payload, carrying `profileId` too: an add can finish after a profile switch. */
+export type TokenAdded = TokenInfo & { profileId: string }
+
 export type Events = {
 	/** Emitted when a new token is created */
-	onTokenAdded: TokenInfo
+	onTokenAdded: TokenAdded
 	/** Emitted when an existing token is updated */
 	onTokenUpdated: TokenInfo
 	/** Emitted when an existing token is deleted */

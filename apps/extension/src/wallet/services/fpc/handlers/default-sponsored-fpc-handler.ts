@@ -1,5 +1,6 @@
-import type { ContractArtifact } from "@aztec/stdlib/abi"
-import { Gas } from "@aztec/stdlib/gas"
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
+import { type ContractArtifact, getFunctionReturnType } from "@aztec-labs/stdlib/abi"
+import { Gas } from "@aztec-labs/stdlib/gas"
 import type { Action } from "@/wallet/services/execution/spec"
 import type { FpcInfo } from "../spec"
 import type { IFpcHandler } from "."
@@ -10,7 +11,7 @@ export class DefaultSponsoredFpcHandler implements IFpcHandler {
 		if (!fn) {
 			throw new Error("Function `sponsor_unconditionally` not found")
 		}
-		if (fn.parameters.length !== 0 || fn.returnTypes.length !== 0) {
+		if (fn.parameters.length !== 0 || getFunctionReturnType(fn) !== undefined) {
 			throw new Error("Function `sponsor_unconditionally` has unsupported signature")
 		}
 	}

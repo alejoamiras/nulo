@@ -5,8 +5,10 @@
  */
 
 import { expect, inject } from "vitest"
-import { test, openPopup, waitForHash, clickByTestId } from "../fixtures/extension"
-import { importTokenAndWaitForBalance, selectSendToken } from "../fixtures/helpers"
+import { test as base, openPopup, waitForHash, clickByTestId } from "../fixtures/extension"
+import { extraTokensFixture } from "../fixtures/extra-tokens"
+import { selectSendToken } from "../fixtures/helpers"
+import { openSend } from "../fixtures/send-page"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -14,21 +16,19 @@ const hasConfig = aztecConfig !== undefined
 
 const ONE = 10n ** 18n
 
+const test = base.extend<{ extraTokens: Record<string, string> }>({
+	extraTokens: extraTokensFixture([{ symbol: "ALT", amount: 25n * ONE }]),
+})
+
 test.skipIf(!hasConfig)(
 	"send picker: choosing another token updates the trigger and marks the row selected",
 	{ timeout: 420_000 },
-	async ({ tokenReadyExtension }) => {
-		const { deployExtraTokensForAccount } = await import("../fixtures/aztec")
-		const addresses = await deployExtraTokensForAccount(aztecConfig!, tokenReadyExtension.accountAddress, [
-			{ symbol: "ALT", amount: 25n * ONE },
-		])
-
+	async ({ tokenReadyExtension, extraTokens: _extraTokens }) => {
 		const page = await openPopup(tokenReadyExtension)
 		await waitForHash(page, "#/popup/general")
-		await importTokenAndWaitForBalance(page, tokenReadyExtension.accountAddress, addresses.ALT, (25n * ONE).toString())
 
-		await clickByTestId(page, "actions-send")
-		await page.waitForSelector('[data-testid="send-token-trigger"]', { visible: true, timeout: 15_000 })
+		// The trigger is inert until the page's tokens load; openSend waits for the token itself.
+		await openSend(page)
 
 		// Two tokens: no search box, both rows listed, the current token marked selected.
 		await clickByTestId(page, "send-token-trigger")

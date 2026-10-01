@@ -12,8 +12,8 @@
  */
 
 import { describe, expect, test, vi } from "vitest"
-import type { ContractArtifact } from "@aztec/stdlib/abi"
-import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
+import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
+import type { ContractInstanceWithAddress } from "@aztec-labs/stdlib/contract"
 import type { ConfigProp, IConfig } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
@@ -190,14 +190,14 @@ describe("ContractResolver.resolveArtifacts", () => {
 // ── Q17 additions: function lookups + ensure-registered ────────────────
 
 import { findFunctionByName, findFunctionBySelector } from "./contract-resolver"
-import { FunctionSelector } from "@aztec/stdlib/abi"
+import { FunctionSelector } from "@aztec-labs/stdlib/abi"
 
 // Selector derivation hits Barretenberg's poseidon hash, which isn't
 // booted in the unit environment. Stub ONLY fromNameAndParameters with a
 // deterministic shape; the lookup logic under test is order/equality, not
 // hashing. (vi.mock hoists above all imports.)
-vi.mock("@aztec/stdlib/abi", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@aztec/stdlib/abi")>()
+vi.mock("@aztec-labs/stdlib/abi", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@aztec-labs/stdlib/abi")>()
 	return {
 		...actual,
 		FunctionSelector: {

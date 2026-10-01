@@ -35,7 +35,9 @@ jobs:
   smoke:
     name: Vitest + Puppeteer
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Firefox's wall time reaches ~20m on a slow runner. 30m gives headroom without masking a
+    # real hang.
+    timeout-minutes: 30
     env:
       NULO_E2E_BROWSER: ${{ inputs.browser }}
       EXTENSION_PATH: ${{ inputs.extension_path }}
@@ -93,15 +95,11 @@ jobs:
         env:
           BROWSER: ${{ inputs.browser }}
           VITE_NULO_E2E_MIGRATION_FIXTURE: ${{ env.MIGRATION_FIXTURE_ARMED }}
-          # Pin the seeded ACTIVE network to Testnet for smoke: CI runners cannot reliably reach the
-          # public Alpha mainnet RPC, and a blackholed default RPC makes chain-adjacent flows eat the
-          # node client's full timeout envelope. Test-build-only; prod defaults stay Alpha.
-          VITE_NULO_E2E_DEFAULT_NET: testnet
           # Arm the e2e token-seed source with NO storage key, so the seed list
-          # resolves EMPTY. Testnet carries a real default-token seed, and every
-          # smoke profile now creates an account — which triggers seeding. Without
-          # this, each fresh profile would call the public dRPC endpoint and a
-          # required gate would depend on a server we don't own.
+          # resolves EMPTY. Every smoke profile creates an account, which triggers
+          # seeding. Without this, a shipped Testnet seed would make each fresh
+          # profile call the public dRPC endpoint and a required gate would depend
+          # on a server we don't own.
           VITE_NULO_E2E_TOKEN_SEEDS: "1"
           VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM: "1"
 

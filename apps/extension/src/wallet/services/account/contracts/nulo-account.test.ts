@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { SchnorrAccountContractArtifact } from "@aztec/accounts/schnorr"
+import { SchnorrAccountContractArtifact } from "@aztec-labs/accounts/schnorr"
 
 /**
  * Surface-level guard. The full reference-determinism check (matching

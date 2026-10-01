@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 /** Protocol-shape types for dApp-initiated interactions.
  *
  *  These mirror each `Operation` variant but replace `networkId` /
@@ -145,18 +146,32 @@ export type CapabilityParams = {
 	manifest: unknown
 	delta: unknown[]
 	existingGrants: unknown[]
+	/** Every stored grant at dispatch entry, for the defaults, the fold and Details;
+	 *  `existingGrants` drops a type with a stored rejection, for the echo. */
+	heldGrants?: unknown[]
+	/** The consent at dispatch entry; the window never reads the session it re-reads. */
+	authorizationsWithoutAsking?: { broad: boolean }
 	reRequested?: string[]
 	availableAccounts?: Array<{ address: string; name: string; chainId: number }>
+	/** The session's accounts on its chain at dispatch entry; `name` is the wallet's own, absent for
+	 *  an account the wallet no longer lists. */
+	heldAccounts?: Array<{ address: string; name?: string }>
 	/** Raw hex addresses the session already holds on its chain (wallet-derived). Present only
 	 *  when the session has an accounts grant: the popup locks these rows and pre-selects them. */
 	grantedAccounts?: string[]
 	/** The accounts request differs from the stored grant only by membership (same flags): the
-	 *  authwit rider renders as already granted and the decision never replaces the grant. */
+	 *  authorizations permission shows as already granted and the decision never replaces the
+	 *  grant. */
 	accountsMembershipOnly?: boolean
+	/** Contracts the wallet names by construction, addresses lower-cased. The wallet sets it when it
+	 *  opens the window, replacing any value that arrived with the request. */
+	knownContracts?: Array<{ address: string; name: string }>
 }
 
 export type CapabilityResult = {
 	granted: unknown[]
 	selectedAccounts?: string[]
 	accountAliases?: Record<string, string>
+	/** Present only when the window showed the authorizations switch. */
+	authorizationsWithoutAsking?: boolean
 }

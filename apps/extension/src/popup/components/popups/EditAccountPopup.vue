@@ -1,6 +1,6 @@
 <script setup>
 /** Composables */
-import { useToast, TOAST_DURATION } from "@/composables/toast"
+import { useToast } from "@/composables/toast"
 import { useFormState } from "@/composables/useFormState"
 import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
@@ -61,7 +61,7 @@ const handleUpdateAccount = async () => {
 	try {
 		await appStore.updateAccount(cacheStore.accountToEditIdx, nameTerm.value)
 	} catch {
-		openToast({ label: "Something went wrong", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Something went wrong" })
 		return
 	} finally {
 		isAccountUpdateInProgress.value = false
@@ -69,7 +69,7 @@ const handleUpdateAccount = async () => {
 
 	emit("onClose")
 
-	openToast({ label: "Account is updated" })
+	openToast({ kind: "success", label: "Account is updated" })
 }
 
 usePopupEntity(() => props.show, {

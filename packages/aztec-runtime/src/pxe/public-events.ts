@@ -19,19 +19,19 @@
  * This module never filters by recipient; it only decodes + validates.
  */
 import { memoizeAsync } from "./async-memo"
-import { DomainSeparator } from "@aztec/constants"
-import { BlockNumber } from "@aztec/foundation/branded-types"
-import type { Fr } from "@aztec/foundation/curves/bn254"
-import { decodeFromAbi } from "@aztec/stdlib/abi"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { BlockHash } from "@aztec/stdlib/block"
-import { getContractClassFromArtifact } from "@aztec/stdlib/contract"
-import { computeLogTag } from "@aztec/stdlib/hash"
-import { MAX_LOGS_PER_TAG } from "@aztec/stdlib/interfaces/api-limit"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import { type LogResult, LogCursor, Tag } from "@aztec/stdlib/logs"
+import { DomainSeparator } from "@aztec-labs/constants"
+import { BlockNumber } from "@aztec-labs/foundation/branded-types"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { decodeFromAbi } from "@aztec-labs/stdlib/abi"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { BlockHash } from "@aztec-labs/stdlib/block"
+import { getContractClassFromArtifact } from "@aztec-labs/stdlib/contract"
+import { computeLogTag } from "@aztec-labs/stdlib/hash"
+import { MAX_LOGS_PER_TAG } from "@aztec-labs/stdlib/interfaces/api-limit"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
+import { type LogResult, LogCursor, Tag } from "@aztec-labs/stdlib/logs"
 // The user-added token is the aztec-standards Token (verified: token/functions/descriptors.ts,
-// package pins). The `@aztec/noir-contracts.js/Token` in the artifact catalog is a DIFFERENT
+// package pins). The `@aztec-labs/noir-contracts.js/Token` in the artifact catalog is a DIFFERENT
 // (protocol test) token, so the class gate + event metadata must come from aztec-standards.
 import { TokenContract, TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import z from "zod"
@@ -365,7 +365,7 @@ function validatePageOrdering(
 /** Decode a single `Transfer` log, or `undefined` (with a warn) on any per-item failure. */
 function decodePublicTransfer(entry: LogResult, log?: PublicEventLogger): PublicTransferEvent | undefined {
 	try {
-		const decoded = decodeFromAbi([TRANSFER_EVENT.abiType], entry.logData.slice(1)) as {
+		const decoded = decodeFromAbi(TRANSFER_EVENT.abiType, entry.logData.slice(1)) as {
 			from: AztecAddress
 			to: AztecAddress
 			amount: bigint

@@ -24,7 +24,9 @@ import { PriceServiceClient } from "@/wallet/services/price/client"
 import { buildActivityRows } from "@/utils/activity-rows"
 
 /** Composables */
+import { ARRIVALS_KEY } from "@/composables/useArrivals"
 import { useIncomingTransfers } from "@/composables/useIncomingTransfers"
+import { useScopedTokens } from "@/composables/useScopedTokens"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -33,29 +35,24 @@ const appStore = useAppStore()
 
 /** Service clients */
 const transactionService = new TransactionServiceClient()
-/** Phase 2 follow-up: merge journal terminal records (cancel / interrupted /
- *  failed paths that never produced an on-chain tx) into the History list
- *  alongside settled chain transactions. */
+/** Journal terminal records (cancel / interrupted / failed paths that never produced an on-chain
+ *  tx) merge into the History list alongside settled chain transactions. */
 const journalService = new OperationJournalServiceClient()
-/** Phase 2 follow-up v4: tokens lookup so terminal transfer rows can format
- *  their amounts. Same pattern as RecentActivityView. */
 const tokenService = new TokenServiceClient()
-const tokens = ref([])
-const tokensById = computed(() => {
-	const map = {}
-	for (const t of tokens.value) map[t.id] = t
-	return map
+const scopedTokens = useScopedTokens({
+	tokenService,
+	scope: () => (appStore.profile && appStore.network ? { profileId: appStore.profile.id, chainId: appStore.network.chainId } : undefined),
 })
+const { tokens } = scopedTokens
 
 /** Incoming-receive surface — third source for the activity row merge.
  *  Filtered by trust state at the service layer; only visible (trusted)
  *  records arrive via getIncomingTransfers. */
-// Parent owns the client lifecycle (connect/disconnect below); the composable
-// wires the listeners + optimistic merges + the `incomingTransfersVisible`
-// toggle reload. Shared verbatim with the home Recent-Activity widget.
+// Parent owns the client lifecycle (connect/disconnect below).
 const incomingTransferService = new IncomingTransferServiceClient()
 const configService = new ConfigServiceClient()
 const incomingPriceService = new PriceServiceClient()
+const arrivals = inject(ARRIVALS_KEY, undefined)
 const {
 	incomingTransfers,
 	refresh: loadIncomingTransfers,
@@ -68,9 +65,10 @@ const {
 		appStore.profile?.id && appStore.network?.id && appStore.account?.address
 			? { profileId: appStore.profile.id, networkId: appStore.network.id, account: appStore.account.address }
 			: undefined,
+	afterRead: arrivals?.load,
 })
 
-/** Journal terminal records (Phase 2 follow-up).
+/** Journal terminal records.
  *  Loaded on mount + refreshed on every journal event so the list reacts to
  *  late-arriving cancellations / failures while the user is on this page. */
 const terminalJournalOps = ref([])
@@ -125,16 +123,7 @@ const heroRef = useTemplateRef("heroRef")
 const heroVisible = ref(true)
 let heroObserver = null
 
-async function loadTokens() {
-	if (!appStore.profile?.id || !appStore.network?.chainId) return
-	tokens.value = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
-}
-
-// Keep the tokens map fresh during this session — without this, an
-// incoming-transfer record for a just-added token renders with the
-// "Token" placeholder until the user re-opens the extension. Same
-// pattern as RecentActivityView.
-tokenService.onTokenAdded.add(loadTokens)
+watch(activityRows, (rows) => arrivals?.present(rows.filter((row) => row.type === "incoming").map((row) => row.inc)), { flush: "post" })
 
 /** Lifecycle hooks */
 onMounted(async () => {
@@ -147,8 +136,9 @@ onMounted(async () => {
 		)
 		heroObserver.observe(heroRef.value)
 	}
+	// Never behind the journal read: a rejected one would leave every row without its token.
+	void scopedTokens.reload()
 	await loadTerminalJournalOps()
-	await loadTokens()
 	await loadIncomingTransfers()
 	// Trigger an explicit ConfigService connect so the onUpdate listener
 	// receives runtime toggle changes (ServiceClient registers but doesn't
@@ -168,6 +158,7 @@ onBeforeUnmount(() => {
 	configService.disconnect()
 	incomingPriceService.disconnect()
 	disposeIncomingTransfers()
+	scopedTokens.dispose()
 	heroObserver?.disconnect()
 })
 </script>
@@ -181,19 +172,19 @@ onBeforeUnmount(() => {
 		:data-active-account="appStore.account?.address"
 	>
 		<div :class="[$style.page_title_bar, !heroVisible && $style.page_title_bar_visible]">
-			<span :class="$style.page_title_label">HISTORY</span>
+			<span :class="$style.page_title_label" data-testid="page-title-bar">HISTORY</span>
 		</div>
 
 		<div ref="heroRef">
-			<Flex direction="column" align="center" gap="16" :class="$style.hero">
-				<h1 :class="$style.hero_title">HISTORY</h1>
+			<Flex direction="column" align="center" gap="16" :class="$style.hero" data-testid="page-hero">
+				<h1 :class="$style.hero_title" data-testid="page-hero-title">HISTORY</h1>
 				<div :class="$style.hero_bar" />
 			</Flex>
 		</div>
 
 		<Flex direction="column" gap="24" :class="$style.content">
 			<!-- Mixed activity list (chain tx + journal terminal records) -->
-			<TransactionsList v-if="activityRows.length" :rows="activityRows" :tokensById="tokensById" />
+			<TransactionsList v-if="activityRows.length" :rows="activityRows" :tokens="tokens" :isArriving="arrivals?.isArriving" />
 
 			<!-- Empty state -->
 			<Flex
@@ -224,61 +215,27 @@ onBeforeUnmount(() => {
 }
 
 .page_title_bar {
-	position: sticky;
-	top: 0;
-	z-index: 5;
-
-	display: flex;
-	align-items: center;
-
-	padding: 12px 24px;
-
-	background: var(--app-bg);
-
-	opacity: 0;
-	pointer-events: none;
-
-	transition: opacity 0.18s cubic-bezier(0.4, 0, 1, 1);
+	composes: page_title_bar from "./tab-hero.module.css";
 }
 
 .page_title_bar_visible {
-	opacity: 1;
-	pointer-events: auto;
+	composes: page_title_bar_visible from "./tab-hero.module.css";
 }
 
 .page_title_label {
-	font-family: var(--font-headline);
-	font-size: 13px;
-	font-weight: 700;
-	letter-spacing: 0.12em;
-	text-transform: uppercase;
-	color: var(--txt-primary);
-
-	text-decoration: underline;
-	text-decoration-color: var(--nulo-accent);
-	text-decoration-thickness: 2px;
-	text-underline-offset: 4px;
+	composes: page_title_label from "./tab-hero.module.css";
 }
 
 .hero {
-	padding: 0 24px 32px 24px;
+	composes: hero from "./tab-hero.module.css";
 }
 
 .hero_title {
-	font-family: var(--font-headline);
-	font-size: 48px;
-	font-weight: 700;
-	letter-spacing: -0.04em;
-	text-transform: uppercase;
-	color: var(--txt-primary);
-	line-height: 1;
-	margin: 0;
+	composes: hero_title from "./tab-hero.module.css";
 }
 
 .hero_bar {
-	width: 24px;
-	height: 1px;
-	background: var(--nulo-accent);
+	composes: hero_bar from "./tab-hero.module.css";
 }
 
 .content {

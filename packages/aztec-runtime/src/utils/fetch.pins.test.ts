@@ -3,7 +3,7 @@
  * error message and status-classification branch is the contract callers
  * (connectivity classification, retry policy) match on.
  */
-import { NoRetryError } from "@aztec/foundation/retry"
+import { NoRetryError } from "@aztec-labs/foundation/retry"
 import { afterEach, describe, expect, test, vi } from "vitest"
 import { makeFetchWithTimeout, makeSingleAttemptFetch } from "./fetch"
 

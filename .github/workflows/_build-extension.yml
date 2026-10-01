@@ -55,7 +55,11 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.ref }}
 
+      # Release, nightly and source-rebuild builds produce bytes that ship, so they install from
+      # the registry against bun.lock; only pull-request builds take the shared cache.
       - uses: ./.github/actions/setup-bun
+        with:
+          cache: ${{ github.event_name == 'pull_request' }}
 
       - name: Patch extension version
         if: inputs.version_override != '' || inputs.version_suffix != ''

@@ -10,7 +10,7 @@
 import { expect } from "vitest"
 import type { Page } from "puppeteer"
 import { TEST_PASSWORD } from "./fixtures/constants"
-import { clickByTestId, openPopup, replaceInputValue, test, waitForHash } from "./fixtures/extension"
+import { clickByTestId, expectNameFieldPrefill, openPopup, replaceInputValue, test, waitForHash } from "./fixtures/extension"
 import { acceptConfirmPopup, closeStuckPopup, navigateByHash, revealSeedPhrase } from "./fixtures/helpers"
 
 /** Read the revealed recovery phrase out of the reveal card. */
@@ -24,14 +24,15 @@ async function readRevealedPhrase(page: Page): Promise<string> {
 	return phrase.trim()
 }
 
-/** Fill the popup import form for the recovery-phrase option and submit. */
-async function submitSeedImport(page: Page, phrase: string, profileName: string): Promise<void> {
+/** Fill the popup import form for the recovery-phrase option and submit. The wallet already
+ *  holds "Main", so the name field shows prefilled "Profile 2", kept as is. */
+async function submitSeedImport(page: Page, phrase: string): Promise<void> {
 	await navigateByHash(page, "#/popup/import", 15_000)
 	await page.waitForFunction(() => !document.querySelector('[data-testid="global-loader"]'), { timeout: 15_000, polling: 300 })
 	await page.waitForSelector('[data-testid="import-option-seed"]', { visible: true, timeout: 15_000 })
+	await expectNameFieldPrefill(page, "import-page", "import-name-input", "Profile 2")
 	await clickByTestId(page, "import-option-seed")
 	await page.waitForSelector('[data-testid="import-seed-input"] input', { visible: true, timeout: 15_000 })
-	await replaceInputValue(page, '[data-testid="import-name-input"] input', profileName)
 	await replaceInputValue(page, '[data-testid="import-seed-input"] input', phrase)
 	await replaceInputValue(page, '[data-testid="import-password-input"] input', TEST_PASSWORD)
 	await replaceInputValue(page, '[data-testid="import-password-confirm-input"] input', TEST_PASSWORD)
@@ -56,7 +57,7 @@ test("importing an EXISTING recovery phrase warns, and confirming creates the du
 	const phrase = await readRevealedPhrase(page)
 	await closeStuckPopup(page)
 
-	await submitSeedImport(page, phrase, "Duplicate Profile")
+	await submitSeedImport(page, phrase)
 
 	// The guard fires: the shared confirm dialog appears instead of an immediate import.
 	await page.waitForSelector('[data-testid="confirm-submit"]', { visible: true, timeout: 30_000 })
@@ -83,7 +84,7 @@ test("declining the duplicate warning leaves only the original profile", { timeo
 	const phrase = await readRevealedPhrase(page)
 	await closeStuckPopup(page)
 
-	await submitSeedImport(page, phrase, "Declined Profile")
+	await submitSeedImport(page, phrase)
 	await page.waitForSelector('[data-testid="confirm-cancel"]', { visible: true, timeout: 30_000 })
 	await clickByTestId(page, "confirm-cancel")
 	await closeStuckPopup(page)

@@ -288,7 +288,7 @@ Pure additive + style change. Rollback = revert the PR. No storage migration, no
 
 ## Audit reconciliation
 
-Both audit transcripts ([`audit-codex.md`](audit-codex.md), [`audit-opus.md`](audit-opus.md)) returned **yellow** and converged on the same three top issues. Audit-driven changes adopted in this revision:
+Both audit transcripts ([`audit-codex.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/onboarding-width-unification/audit-codex.md), [`audit-opus.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/onboarding-width-unification/audit-opus.md)) returned **yellow** and converged on the same three top issues. Audit-driven changes adopted in this revision:
 
 | # | Source | Finding | Resolution |
 |---|---|---|---|
@@ -319,4 +319,4 @@ Audit-flagged points **NOT adopted**, with rationale:
 - [`packages/extension/vite.config.ts`](../../packages/extension/vite.config.ts) — `useComponents` auto-import configuration (lines 174–177 cover `src/onboarding/components/`).
 - [`CLAUDE.md`](../../CLAUDE.md) — testid preservation rule, code-comment style, validation gates.
 - Earlier related plan: [`implementations-plan/onboarding-extraction/`](../onboarding-extraction/) — when the onboarding tab was carved out of the popup.
-- Audit transcripts: [`audit-codex.md`](audit-codex.md), [`audit-opus.md`](audit-opus.md).
+- Audit transcripts: [`audit-codex.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/onboarding-width-unification/audit-codex.md), [`audit-opus.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/onboarding-width-unification/audit-opus.md).

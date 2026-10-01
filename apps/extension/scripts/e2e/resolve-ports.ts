@@ -53,6 +53,14 @@ const STATIC_LO = 10000
 const FLOOR_GUARD = 512
 /** Bounded random probes before conceding to the `listen(0)` fallback. */
 const MAX_STATIC_TRIES = 256
+/** Fetch's bad ports (fetch.spec.whatwg.org/#port-blocking): browsers refuse them, and Node's fetch
+ *  and WebSocket refuse them before opening any connection. */
+const FETCH_BAD_PORTS = new Set([
+	0, 1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115,
+	117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601,
+	636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697,
+	10080,
+])
 
 /**
  * Read the bottom of the OS dynamic/ephemeral port range. Ports at or above
@@ -131,22 +139,27 @@ function reserveEphemeral(): Promise<PortReservation> {
 
 /**
  * Reserve one loopback port from the static window below the ephemeral floor,
- * randomized to keep parallel local runs apart and bind-tested against
- * already-held siblings so the pack stays distinct. Falls back to an
- * OS-assigned ephemeral port when the static path can't apply.
+ * never a Fetch bad port, randomized to keep parallel local runs apart and
+ * bind-tested against already-held siblings so the pack stays distinct. Falls
+ * back to an OS-assigned ephemeral port when the static path can't apply.
  */
 export async function reservePort(): Promise<PortReservation> {
-	const floor = await ephemeralFloor()
-	const hi = Math.max(STATIC_LO + 256, floor - FLOOR_GUARD)
-	const span = hi - STATIC_LO
+	const { lo, hi } = staticWindow(await ephemeralFloor())
+	const span = hi - lo
 	if (span >= 256) {
 		for (let i = 0; i < MAX_STATIC_TRIES; i++) {
-			const candidate = STATIC_LO + Math.floor(Math.random() * span)
+			const candidate = lo + Math.floor(Math.random() * span)
+			if (FETCH_BAD_PORTS.has(candidate)) continue
 			const reservation = await tryBind(candidate)
 			if (reservation) return reservation
 		}
 	}
 	return reserveEphemeral()
+}
+
+/** The static window `[lo, hi)` the draw uses under a given ephemeral floor. */
+export function staticWindow(floor: number): { lo: number; hi: number } {
+	return { lo: STATIC_LO, hi: Math.max(STATIC_LO + 256, floor - FLOOR_GUARD) }
 }
 
 export interface PortPack {

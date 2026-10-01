@@ -1,7 +1,7 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
 import { openPlayground } from "../fixtures/playground"
-import { waitForPopup, approveDiscover, approveVerify } from "../fixtures/popups"
+import { waitForPopup, approveConnect, approveVerify } from "../fixtures/popups"
 import { switchToLocalNetwork } from "../fixtures/helpers"
 import { openPopup, waitForHash } from "../fixtures/extension"
 import type { AztecTestConfig } from "../fixtures/aztec"
@@ -39,8 +39,7 @@ for (const alwaysTrust of [false, true]) {
 			const dappPage = await openPlayground(registeredExtensionPerTest)
 			const discoverP1 = waitForPopup(registeredExtensionPerTest, "discover", { timeout: 30_000 })
 			await clickByTestId(dappPage, "pg-btn-connect")
-			await approveDiscover(await discoverP1)
-			const verifyPage1 = await waitForPopup(registeredExtensionPerTest, "verify", { timeout: 30_000 })
+			const verifyPage1 = await approveConnect(registeredExtensionPerTest, await discoverP1)
 			await approveVerify(verifyPage1, { alwaysTrust })
 			await dappPage.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 20_000 })
 

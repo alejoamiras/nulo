@@ -1,6 +1,6 @@
 import type { EventHandler } from "@nulo/wallet-core/utils"
 import { type ComputedRef, computed, ref } from "vue"
-import { pinnedTokensKey } from "@/popup/constants/storage-keys"
+import { pinnedTokensKey } from "@/utils/profile-ui-keys"
 import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 import { HOME_TOKEN_ROWS } from "@/utils/token-order"
 import type { TokenDeleted } from "@/wallet/services/token/spec"
@@ -104,7 +104,7 @@ type WriteCtx = {
 	scope: PinScope
 	live: () => boolean
 	known: () => Promise<ReadonlySet<string> | undefined>
-	write: (next: PinMap) => Promise<void>
+	write: (next: PinMap, unless: () => boolean) => Promise<boolean>
 }
 
 async function pinOp(ctx: WriteCtx, contract: string): Promise<PinResult> {
@@ -120,8 +120,8 @@ async function pinOp(ctx: WriteCtx, contract: string): Promise<PinResult> {
 	const list = liveList(stored, known)
 	if (list.length >= PINNED_TOKENS_MAX) return "full"
 	list.push(c)
-	await ctx.write(withChainBudget(setChain(next, chainKey, list), chainKey))
-	return "pinned"
+	const written = await ctx.write(withChainBudget(setChain(next, chainKey, list), chainKey), () => !ctx.live())
+	return written ? "pinned" : "stale"
 }
 
 async function unpinOp(ctx: WriteCtx, contract: string): Promise<void> {
@@ -136,7 +136,7 @@ async function unpinOp(ctx: WriteCtx, contract: string): Promise<void> {
 	const list = liveList(stored, known).filter((x) => x !== c)
 	// Nothing removed and nothing pruned: skip the write so no onChanged round-trip fires.
 	if (list.length === stored.length) return
-	await ctx.write(setChain(next, chainKey, list))
+	await ctx.write(setChain(next, chainKey, list), () => !ctx.live())
 }
 
 export interface UsePinnedTokensDeps {
@@ -174,9 +174,11 @@ export function usePinnedTokens(deps: UsePinnedTokensDeps) {
 		return scope !== undefined && now !== undefined && now.profileId === scope.profileId && now.chainId === scope.chainId
 	}
 
-	const writeMap = async (profileId: string, next: PinMap) => {
-		await storageLocalSet({ [pinnedTokensKey(profileId)]: next })
-		if (!disposed && loadedProfile.value === profileId) map.value = next
+	/** `unless` is read once the migration barrier clears, just before the write; `false` = skipped. */
+	const writeMap = async (profileId: string, next: PinMap, unless?: () => boolean) => {
+		const written = await storageLocalSet({ [pinnedTokensKey(profileId)]: next }, { unless })
+		if (written && !disposed && loadedProfile.value === profileId) map.value = next
+		return written
 	}
 
 	const pinnedContracts: ComputedRef<ReadonlySet<string>> = computed(() => {
@@ -206,7 +208,7 @@ export function usePinnedTokens(deps: UsePinnedTokensDeps) {
 		scope,
 		live: () => !disposed && scopeStillIs(scope),
 		known: async () => deps.knownContracts(),
-		write: (next) => writeMap(scope.profileId, next),
+		write: (next, unless) => writeMap(scope.profileId, next, unless),
 	})
 
 	const pin = (contract: string): Promise<PinResult> => {

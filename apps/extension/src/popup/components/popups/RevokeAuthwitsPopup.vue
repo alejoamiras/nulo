@@ -1,3 +1,4 @@
+<!-- Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0. -->
 <script setup>
 /** Components */
 import FeeSettingsCard from "@/popup/components/modules/send/FeeSettingsCard.vue"
@@ -7,9 +8,10 @@ import { AuthRegistryServiceClient, MAX_REVOKES_PER_TX } from "@/wallet/services
 import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejection"
 
 /** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 import { useAuthRegistryStatus } from "@/composables/useAuthRegistryStatus"
-import { usePopupEntity } from "@/composables/usePopupEntity"
+import { refuseRepeatEnter, usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -67,13 +69,9 @@ const isAllowedToExecute = computed(() => {
 })
 
 async function handleRevokeAuthwits() {
-	// Full-lifetime submit latch, handler-owned: every route (keydown, click, any future caller)
-	// self-checks here; the button's :disabled is defense-in-depth, not the guard.
+	// Full-lifetime submit latch, handler-owned: every route (click, any future caller) self-checks
+	// here; the button's :disabled is defense-in-depth, not the guard.
 	if (isLoading.value) return
-	// `isAllowedToExecute` is a computed ref — must dereference `.value`.
-	// Pre-fix this guard was a no-op (refs are always truthy as objects);
-	// Enter could fire the handler before feeSettings was set on all chunks.
-	// Codex audit-codex-rootcause-8 #4.
 	if (!isAllowedToExecute.value) return
 
 	isLoading.value = true
@@ -90,13 +88,10 @@ async function handleRevokeAuthwits() {
 		// failure summary toasts. The terminal card communicates the state.
 		emit("onClose")
 	} else if (errors.length) {
-		openToast(
-			{ label: `Failed to revoke ${errors.length === chunksCount.value ? "" : "some "}authwit(s)`, icon: "warning" },
-			TOAST_DURATION.LONG,
-		)
+		openToast({ kind: "error", label: `Failed to revoke ${errors.length === chunksCount.value ? "" : "some "}authwit(s)` })
 		error.value = errors.join(", ")
 	} else {
-		openToast({ label: "Authwit(s) successfully revoked" })
+		openToast({ kind: "success", label: "Authwit(s) successfully revoked" })
 		emit("onClose")
 	}
 }
@@ -127,30 +122,21 @@ function showChunkContent(chunk) {
 	popupStore.open("data_viewer")
 }
 
-// No input to focus here: a global Enter confirms. The handler owns the latch and the fee check; the
-// error gate mirrors the button's :disabled, which the handler does not check itself.
-usePopupEntity(
-	() => props.show,
-	{
-		submit: () => {
-			if (!isErrorOccurred.value) handleRevokeAuthwits()
-		},
-		onShow: async () => {
-			await registry.fetch()
+usePopupEntity(() => props.show, {
+	onShow: async () => {
+		await registry.fetch()
 
-			authwits.value = cacheStore.preselectedAuthwits
-			chunkAuthwits()
-		},
-		onHide: () => {
-			authwits.value = []
-			chunkedAuthwits.value = []
-			registry.reset()
-
-			authwitsService.disconnect()
-		},
+		authwits.value = cacheStore.preselectedAuthwits
+		chunkAuthwits()
 	},
-	{ submitWaitsForShow: true, submitKey: (e) => e.key === "Enter" },
-)
+	onHide: () => {
+		authwits.value = []
+		chunkedAuthwits.value = []
+		registry.reset()
+
+		authwitsService.disconnect()
+	},
+})
 </script>
 
 <template>
@@ -167,7 +153,7 @@ usePopupEntity(
 					<template #title>No need to revoke authwits</template>
 					<template #description>
 						Since Authwits Registry is currently disabled for this account, all issued authwits are already blocked and cannot be executed. 
-						You don’t need to spend gas or send a transaction to revoke them — but you can still do it if you want.
+						You don’t need to spend gas or send a transaction to revoke them, but you can still do it if you want.
 					</template>
 				</Banner>
 				<Banner v-else-if="chunksCount > 1" direction="vertical">
@@ -175,7 +161,7 @@ usePopupEntity(
 					<template #description>
 						{{ `Due to Aztec protocol limits, only ${MAX_REVOKES_PER_TX} authwits can be revoked in a single transaction. 
 						Your authwits have been split into the minimum number of required transactions. 
-						Alternatively, you may disable Authwits Registry instead — this will block execution 
+						Alternatively, you may disable Authwits Registry instead. This will block execution 
 						of all current authwits until the registry is enabled again. 
 						You can still proceed with revocation if you prefer.` }}
 					</template>
@@ -203,7 +189,13 @@ usePopupEntity(
 								<Text v-if="ch.count > 1" size="12" color="tertiary"> {{ `(${ch.count})` }} </Text>
 							</Flex>
 							<Tooltip position="end">
-								<Icon @click="showChunkContent(ch)" name="expand" size="16" color="tertiary" :class="$style.fullscreen_icon" />
+								<RowAction
+									label="View authwits content"
+									data-testid="revoke-authwits-view-content"
+									@click="showChunkContent(ch)"
+								>
+									<Icon name="expand" size="16" color="tertiary" />
+								</RowAction>
 
 								<template #content>
 									<Text size="12" color="secondary">View authwits content</Text>
@@ -250,10 +242,12 @@ usePopupEntity(
 
 				</template>
 
-				<Flex align="center" direction="column" gap="12">
+				<Flex v-snack-footer align="center" direction="column" gap="12">
+					<!-- A held or composing Enter that first reaches this button idle must not revoke. -->
 					<Button
 						data-testid="revoke-authwits-submit"
 						@click="handleRevokeAuthwits"
+						@keydown.enter="refuseRepeatEnter"
 						variant="primary"
 						size="medium"
 						wide
@@ -293,13 +287,6 @@ usePopupEntity(
 
 	.header {
 		padding: 12px;
-	}
-
-	.fullscreen_icon {
-		cursor: pointer;
-		&:hover {
-			fill: var(--txt-primary);
-		}
 	}
 }
 

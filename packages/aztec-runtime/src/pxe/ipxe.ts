@@ -8,12 +8,12 @@
  * against it without circular-depending on extension.
  */
 
-import type { Fr } from "@aztec/foundation/curves/bn254"
-import type { NotesFilter, PackedPrivateEvent, SimulateTxOpts, ExecuteUtilityOpts, ProfileTxOpts } from "@aztec/pxe/client/bundle"
-import type { ContractArtifact, EventSelector, FunctionCall } from "@aztec/stdlib/abi"
-import type { AztecAddress } from "@aztec/stdlib/aztec-address"
-import type { CompleteAddress, ContractInstanceWithAddress, PartialAddress } from "@aztec/stdlib/contract"
-import type { NoteDao } from "@aztec/stdlib/note"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { NotesFilter, PackedPrivateEvent, SimulateTxOpts, ExecuteUtilityOpts, ProfileTxOpts } from "@aztec-labs/pxe/client/bundle"
+import type { ContractArtifact, EventSelector, FunctionCall } from "@aztec-labs/stdlib/abi"
+import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import type { CompleteAddress, ContractInstanceWithAddress, PartialAddress } from "@aztec-labs/stdlib/contract"
+import type { NoteDao } from "@aztec-labs/stdlib/note"
 import type {
 	BlockHeader,
 	TxExecutionRequest,
@@ -21,8 +21,8 @@ import type {
 	TxProvingResult,
 	TxSimulationResult,
 	UtilityExecutionResult,
-} from "@aztec/stdlib/tx"
-import type { PrivateEventFilter } from "@aztec/aztec.js/wallet"
+} from "@aztec-labs/stdlib/tx"
+import type { PrivateEventFilter } from "@aztec-labs/aztec.js/wallet"
 
 export interface IPXE {
 	getContractInstance(

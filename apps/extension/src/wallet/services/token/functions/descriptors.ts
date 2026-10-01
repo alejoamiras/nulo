@@ -1,5 +1,6 @@
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { type FunctionAbi, FunctionType, type StructType } from "@aztec/stdlib/abi"
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { type AbiType, type FunctionAbi, FunctionType, getFunctionReturnType, type StructType } from "@aztec-labs/stdlib/abi"
 import type { TokenFnDescriptor, TokenFnKind } from "./types"
 
 /**
@@ -29,6 +30,15 @@ const FIELD_COMPRESSED_STRING_PATH = "compressed_string::field_compressed_string
 const matchesStructPath = (actual: string | undefined, canonical: string): boolean =>
 	actual === canonical || (actual?.endsWith(`::${canonical}`) ?? false)
 
+// A multi-entry `returnTypes` (noir never emits one; a dApp-registered artifact can) makes
+// `getFunctionReturnType` throw, so both readers answer "no match" for it instead.
+const returnsOne = (fn: FunctionAbi, matches: (type: AbiType) => boolean): boolean => {
+	if ((fn.returnTypes?.length ?? 0) > 1) return false
+	const type = getFunctionReturnType(fn)
+	return type !== undefined && matches(type)
+}
+const returnsNothing = (fn: FunctionAbi): boolean => fn.returnType === undefined && (fn.returnTypes?.length ?? 0) === 0
+
 // Shared ABI sub-objects — byte-identical to the ones inlined in the old modules.
 const OWNER_ADDRESS_PARAM = {
 	name: "owner",
@@ -56,7 +66,7 @@ export const balanceOfPublicDescriptor: TokenFnDescriptor = {
 		isOnlySelf: false,
 		isStatic: true,
 		parameters: [OWNER_ADDRESS_PARAM],
-		returnTypes: [{ kind: "integer", sign: "unsigned", width: 128 }],
+		returnType: { kind: "integer", sign: "unsigned", width: 128 },
 		errorTypes: {},
 	}),
 	candidatePredicate: (fn): boolean =>
@@ -66,8 +76,7 @@ export const balanceOfPublicDescriptor: TokenFnDescriptor = {
 		fn.functionType === FunctionType.PUBLIC &&
 		fn.parameters.length === 1 &&
 		matchesStructPath((fn.parameters[0].type as StructType)?.path, AZTEC_ADDRESS_PATH) &&
-		fn.returnTypes.length === 1 &&
-		fn.returnTypes[0].kind === "integer",
+		returnsOne(fn, (type) => type.kind === "integer"),
 	score: (fn): number => {
 		if (fn.name === "balance_of_public") return 100
 		let p = 0
@@ -95,7 +104,7 @@ export const balanceOfPrivateDescriptor: TokenFnDescriptor = {
 		isOnlySelf: false,
 		isStatic: false,
 		parameters: [OWNER_ADDRESS_PARAM],
-		returnTypes: [{ kind: "integer", sign: "unsigned", width: 128 }],
+		returnType: { kind: "integer", sign: "unsigned", width: 128 },
 		errorTypes: {},
 	}),
 	candidatePredicate: (fn): boolean =>
@@ -105,8 +114,7 @@ export const balanceOfPrivateDescriptor: TokenFnDescriptor = {
 		fn.functionType === FunctionType.UTILITY &&
 		fn.parameters.length === 1 &&
 		matchesStructPath((fn.parameters[0].type as StructType)?.path, AZTEC_ADDRESS_PATH) &&
-		fn.returnTypes.length === 1 &&
-		fn.returnTypes[0].kind === "integer",
+		returnsOne(fn, (type) => type.kind === "integer"),
 	score: (fn): number => {
 		if (fn.name === "balance_of_private") return 100
 		let p = 0
@@ -133,8 +141,8 @@ function metadataDescriptor(config: {
 	canonical: string
 	privateName: string
 	publicName: string
-	returnType: FunctionAbi["returnTypes"][number]
-	returnMatches: (actual: FunctionAbi["returnTypes"][number]) => boolean
+	returnType: AbiType
+	returnMatches: (actual: AbiType) => boolean
 	unpackResult: (result: Fr[]) => unknown
 }): TokenFnDescriptor {
 	const isPrivate = (impl: number) => impl === 1
@@ -153,7 +161,7 @@ function metadataDescriptor(config: {
 			isOnlySelf: false,
 			isStatic: true,
 			parameters: [],
-			returnTypes: [config.returnType],
+			returnType: config.returnType,
 			errorTypes: {},
 		}),
 		candidatePredicate: (fn, impl): boolean =>
@@ -162,8 +170,7 @@ function metadataDescriptor(config: {
 			fn.isStatic &&
 			fn.functionType === (isPrivate(impl) ? FunctionType.PRIVATE : FunctionType.PUBLIC) &&
 			fn.parameters.length === 0 &&
-			fn.returnTypes.length === 1 &&
-			config.returnMatches(fn.returnTypes[0]),
+			returnsOne(fn, config.returnMatches),
 		score: (fn): number => {
 			if (fn.name === config.canonical) return 102
 			if (fn.name === config.privateName) return 101
@@ -181,7 +188,7 @@ function metadataDescriptor(config: {
 	}
 }
 
-const matchesFieldCompressedString = (actual: FunctionAbi["returnTypes"][number]): boolean =>
+const matchesFieldCompressedString = (actual: AbiType): boolean =>
 	matchesStructPath((actual as StructType)?.path, FIELD_COMPRESSED_STRING_PATH)
 
 /** getName — from get-name.ts. */
@@ -246,7 +253,6 @@ const transfer4Abi = (name: string, functionType: FunctionType): FunctionAbi => 
 	isOnlySelf: false,
 	isStatic: false,
 	parameters: [addressParam("from"), addressParam("to"), amountParam, nonceParam],
-	returnTypes: [],
 	errorTypes: {},
 })
 const transfer2Abi = (name: string): FunctionAbi => ({
@@ -256,7 +262,6 @@ const transfer2Abi = (name: string): FunctionAbi => ({
 	isOnlySelf: false,
 	isStatic: false,
 	parameters: [addressParam("to"), amountParam],
-	returnTypes: [],
 	errorTypes: {},
 })
 const transfer4Predicate = (fn: FunctionAbi, functionType: FunctionType): boolean =>
@@ -273,7 +278,7 @@ const transfer4Predicate = (fn: FunctionAbi, functionType: FunctionType): boolea
 	fn.parameters[2].type.kind === "integer" &&
 	(fn.parameters[3].name === "authwit_nonce" || fn.parameters[3].name === "_nonce") &&
 	fn.parameters[3].type.kind === "field" &&
-	fn.returnTypes.length === 0
+	returnsNothing(fn)
 const transfer2Predicate = (fn: FunctionAbi): boolean =>
 	!fn.isInitializer &&
 	!fn.isOnlySelf &&
@@ -284,7 +289,7 @@ const transfer2Predicate = (fn: FunctionAbi): boolean =>
 	matchesStructPath((fn.parameters[0].type as StructType)?.path, AZTEC_ADDRESS_PATH) &&
 	fn.parameters[1].name === "amount" &&
 	fn.parameters[1].type.kind === "integer" &&
-	fn.returnTypes.length === 0
+	returnsNothing(fn)
 
 interface TransferVariant {
 	impl: number

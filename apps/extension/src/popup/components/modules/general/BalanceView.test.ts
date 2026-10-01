@@ -12,23 +12,24 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 let deletedHandler: ((tb: unknown) => void) | undefined
 let addedHandler: ((tb: unknown) => void) | undefined
+let updatedHandler: ((tb: unknown) => void) | undefined
+let configHandler: ((prop: { key: string; value: unknown }) => void) | undefined
 let connectedHandler: (() => void) | undefined
-const noopEvent = { add: vi.fn(), remove: vi.fn() }
 
 const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
-// tok-1 is price-mapped (mainnet cUSD); tok-2 is deliberately unmapped.
+// tok-1 is price-mapped (the testnet cUSD row); tok-2 is deliberately unmapped.
 const SEED = [
 	{
 		id: "b1",
 		account: "0xacct",
-		token: { id: "tok-1", symbol: "AAA", decimals: 6, chainId: CHAIN_IDS.MAINNET, contract: CUSD },
+		token: { id: "tok-1", symbol: "AAA", decimals: 6, chainId: CHAIN_IDS.TESTNET, contract: CUSD },
 		publicBalance: (250n * 10n ** 6n).toString(),
 		privateBalance: (1_000n * 10n ** 6n).toString(),
 	},
 	{
 		id: "b2",
 		account: "0xacct",
-		token: { id: "tok-2", symbol: "BBB", decimals: 18, chainId: CHAIN_IDS.MAINNET, contract: "0xunmapped" },
+		token: { id: "tok-2", symbol: "BBB", decimals: 18, chainId: CHAIN_IDS.TESTNET, contract: "0xunmapped" },
 		publicBalance: (5n * 10n ** 18n).toString(),
 		privateBalance: "0",
 	},
@@ -54,7 +55,12 @@ vi.mock("@/wallet/services/token-balance/client", () => ({
 				}),
 				remove: vi.fn(),
 			},
-			onTokenBalanceUpdated: noopEvent,
+			onTokenBalanceUpdated: {
+				add: vi.fn((fn: (tb: unknown) => void) => {
+					updatedHandler = fn
+				}),
+				remove: vi.fn(),
+			},
 			onTokenBalanceDeleted: {
 				add: vi.fn((fn: (tb: unknown) => void) => {
 					deletedHandler = fn
@@ -73,7 +79,12 @@ vi.mock("@/wallet/services/config/client", () => ({
 	ConfigServiceClient: vi.fn(function () {
 		return {
 			disconnect: vi.fn(),
-			onUpdate: { add: vi.fn(), remove: vi.fn() },
+			onUpdate: {
+				add: vi.fn((fn: (prop: { key: string; value: unknown }) => void) => {
+					configHandler = fn
+				}),
+				remove: vi.fn(),
+			},
 			getValue: vi.fn().mockImplementation(async () => mockShowFiat),
 		}
 	}),
@@ -81,13 +92,14 @@ vi.mock("@/wallet/services/config/client", () => ({
 
 // Controllable price feed: tests set `mockQuotes`.
 let mockQuotes: Record<string, unknown> = {}
+let answerQuotes: () => Promise<Record<string, unknown>> = async () => mockQuotes
 vi.mock("@/wallet/services/price/client", () => ({
 	PriceServiceClient: vi.fn(function () {
 		return {
 			disconnect: vi.fn(),
 			onQuotesUpdated: { add: vi.fn(), remove: vi.fn() },
 			onConnected: { add: vi.fn(), remove: vi.fn() },
-			refreshIfStale: vi.fn().mockImplementation(async () => mockQuotes),
+			refreshIfStale: vi.fn().mockImplementation(() => answerQuotes()),
 		}
 	}),
 }))
@@ -97,6 +109,23 @@ vi.mock("vue-router", async (importOriginal) => {
 	return { ...mod, useRouter: () => ({ push: vi.fn(), back: vi.fn() }) }
 })
 
+// jsdom has no layout: a stand-in font measures the hero's forms. `room` is the hero's line and
+// `fontWidth` scales every glyph (a wider fallback font before the real one loads).
+let room = 10_000
+let fontWidth = 1
+/** Full-size widths: "1" is narrow, as in the hero's font; separators 12 px; the symbol at half size. */
+const glyph = (c: string) => (c === "1" ? 20 : c === "," || c === "." ? 12 : 30)
+function standInWidth(text: string): number {
+	const [amount = "", symbol] = text.split(" ")
+	const sum = (s: string) => [...s].reduce((w, c) => w + glyph(c), 0)
+	return fontWidth * (symbol === undefined ? sum(amount) : sum(amount) + 12 + sum(symbol) / 2)
+}
+vi.mock("@/utils/hero-ruler", () => ({
+	heroRoom: () => room,
+	rulerWidth: (el: Element, scale: number) => standInWidth(el.textContent ?? "") * scale,
+}))
+
+import { nextTick } from "vue"
 import { CHAIN_IDS } from "@/utils/chain-ids"
 import { useAppStore } from "@/stores/app.store"
 import BalanceView from "./BalanceView.vue"
@@ -109,7 +138,7 @@ async function mountView(props: Record<string, unknown> = {}) {
 	const pinia = createTestingPinia({ stubActions: false })
 	const appStore = useAppStore(pinia)
 	appStore.profile = { id: "p1" } as never
-	appStore.network = { id: "n1", chainId: CHAIN_IDS.MAINNET } as never
+	appStore.network = { id: "n1", chainId: CHAIN_IDS.TESTNET } as never
 	appStore.account = { address: "0xacct" } as never
 
 	const wrapper = mount(BalanceView, {
@@ -117,7 +146,14 @@ async function mountView(props: Record<string, unknown> = {}) {
 		shallow: true,
 		global: {
 			plugins: [pinia],
-			stubs: { Icon: { template: '<i data-testid="stub-icon" :data-name="name" />', props: ["name", "size"] } },
+			stubs: {
+				Icon: { template: '<i data-testid="stub-icon" :data-name="name" />', props: ["name", "size"] },
+				Tooltip: {
+					template:
+						'<div data-testid="stub-tooltip" :data-align="textAlign" :data-delay="delay"><slot /><div data-testid="stub-tooltip-content"><slot name="content" /></div></div>',
+					props: ["textAlign", "delay"],
+				},
+			},
 		},
 	})
 	await flushPromises()
@@ -167,14 +203,34 @@ afterEach(() => {
 	vi.clearAllMocks()
 	deletedHandler = undefined
 	addedHandler = undefined
+	updatedHandler = undefined
+	configHandler = undefined
 	connectedHandler = undefined
 	mockQuotes = {}
+	answerQuotes = async () => mockQuotes
 	mockShowFiat = true
 	seedRows = SEED
 	fetchRows = async () => seedRows
+	room = 10_000
+	fontWidth = 1
+	vi.unstubAllGlobals()
+	Reflect.deleteProperty(document, "fonts")
 })
 
+const USD_1 = () => ({ "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } })
+/** The hero's figure and the scale its type is drawn at. */
+const figure = (w: { find: (s: string) => { text: () => string; element: Element } }) => w.find('[data-testid="balance-amount"] > span')
+const heroScale = (w: Parameters<typeof figure>[0]) => (figure(w).element as HTMLElement).style.getPropertyValue("--hero-scale")
+
 describe("BalanceView — Home aggregate", () => {
+	test("Home has no balance split and so no icon labels", async () => {
+		seedRows = SEED
+		mockQuotes = FRESH()
+		const { wrapper } = await mountView()
+		expect(wrapper.find('[data-testid="private-balance-value"]').exists()).toBe(false)
+		expect(wrapper.find('[data-testid="stub-tooltip"]').exists()).toBe(false)
+	})
+
 	test("renders the real aggregate over priced tokens with the partial caption", async () => {
 		mockQuotes = FRESH()
 		const { wrapper } = await mountView()
@@ -201,7 +257,7 @@ describe("BalanceView — Home aggregate", () => {
 			{
 				id: "b9",
 				account: "0xacct",
-				token: { id: "tok-9", symbol: "ZZZ", decimals: 18, chainId: CHAIN_IDS.MAINNET, contract: "0xunmapped9" },
+				token: { id: "tok-9", symbol: "ZZZ", decimals: 18, chainId: CHAIN_IDS.TESTNET, contract: "0xunmapped9" },
 				publicBalance: "0",
 				privateBalance: "0",
 			},
@@ -221,7 +277,7 @@ describe("BalanceView — Home aggregate", () => {
 
 	test("a same-address row from ANOTHER chain is not counted", async () => {
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
-		seedRows = [SEED[0], { ...SEED[0], id: "b-foreign", token: { ...SEED[0].token, id: "tok-f", chainId: CHAIN_IDS.TESTNET } }]
+		seedRows = [SEED[0], { ...SEED[0], id: "b-foreign", token: { ...SEED[0].token, id: "tok-f", chainId: CHAIN_IDS.SANDBOX } }]
 		const { wrapper } = await mountView()
 
 		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("$1,250.00")
@@ -327,7 +383,7 @@ describe("BalanceView — Home hero while the total is still moving", () => {
 	const amount = (w: Awaited<ReturnType<typeof mountView>>["wrapper"]) => w.find('[data-testid="balance-amount"]')
 	const isSkeleton = (w: Awaited<ReturnType<typeof mountView>>["wrapper"]) => w.find('[data-testid="balance-hero-loading"]').exists()
 	const seedEntry = (status: string) => ({
-		chainId: CHAIN_IDS.MAINNET,
+		chainId: CHAIN_IDS.TESTNET,
 		contract: "0xseed",
 		symbol: "cUSDC",
 		displayName: "Clean USDC",
@@ -467,6 +523,65 @@ describe("BalanceView — Home hero while the total is still moving", () => {
 		expect(amount(wrapper).text()).toContain("AAA")
 		expect(amount(wrapper).attributes("aria-busy")).toBeUndefined()
 	})
+
+	test("a price-mapped holding waits for the first price answer: a skeleton, never $0.00, then the figure", async () => {
+		let answer: (quotes: Record<string, unknown>) => void = () => {}
+		answerQuotes = () =>
+			new Promise((resolve) => {
+				answer = resolve
+			})
+		const { wrapper } = await mountView()
+		expect(amount(wrapper).text()).toBe("")
+		expect(isSkeleton(wrapper)).toBe(true)
+		expect(wrapper.find('[data-testid="balance-fiat-partial"]').exists()).toBe(false)
+
+		answer(FRESH())
+		await flushPromises()
+		expect(isSkeleton(wrapper)).toBe(false)
+		expect(amount(wrapper).text()).toContain("$1,249.82")
+	})
+
+	test("a failed first price answer ends the wait in $0.00 with 'priced assets only'", async () => {
+		let fail: (error: Error) => void = () => {}
+		answerQuotes = () =>
+			new Promise((_resolve, reject) => {
+				fail = reject
+			})
+		const { wrapper } = await mountView()
+		expect(amount(wrapper).text()).toBe("")
+
+		fail(new Error("offline"))
+		await flushPromises()
+		expect(amount(wrapper).text()).toContain("$0.00")
+		expect(wrapper.find('[data-testid="balance-fiat-partial"]').exists()).toBe(true)
+	})
+
+	test("an empty wallet and an unpriced-only wallet never wait for prices", async () => {
+		answerQuotes = () => new Promise(() => {})
+		const zeroMapped = [{ ...SEED[0], publicBalance: "0", privateBalance: "0" }]
+		for (const rows of [[], zeroMapped]) {
+			seedRows = rows as typeof SEED
+			const empty = await mountView()
+			expect(amount(empty.wrapper).text()).toContain("$0.00")
+			expect(empty.wrapper.find('[data-testid="balance-fiat-partial"]').exists()).toBe(false)
+			empty.wrapper.unmount()
+		}
+
+		seedRows = [SEED[1]] as typeof SEED
+		const unpriced = await mountView()
+		expect(amount(unpriced.wrapper).text()).toContain("$0.00")
+		expect(unpriced.wrapper.find('[data-testid="balance-fiat-partial"]').exists()).toBe(true)
+	})
+
+	test("the 12 s cap ends a price wait that never answers", async () => {
+		answerQuotes = () => new Promise(() => {})
+		const { wrapper } = await mountView()
+		await vi.advanceTimersByTimeAsync(CAP_MS - 1)
+		expect(amount(wrapper).text()).toBe("")
+		await vi.advanceTimersByTimeAsync(1)
+		expect(amount(wrapper).text()).toContain("$0.00")
+		expect(wrapper.find('[data-testid="balance-fiat-partial"]').exists()).toBe(true)
+	})
 })
 
 describe("BalanceView — token hero (tokenBalance prop)", () => {
@@ -494,6 +609,25 @@ describe("BalanceView — token hero (tokenBalance prop)", () => {
 		expect(wrapper.find('[data-testid="public-balance-value"]').text()).toBe("250")
 	})
 
+	test("the padlock and the globe carry their labels as tooltip and accessible name, not on the groups", async () => {
+		const { wrapper } = await mountView({ tokenBalance: SEED[0] })
+		const tooltips = wrapper.findAll('[data-testid="stub-tooltip"]')
+		expect(tooltips.map((t) => t.get('[data-testid="stub-tooltip-content"]').text())).toEqual([
+			"Private balance: only you can see it",
+			"Public balance: anyone can see it",
+		])
+		expect(tooltips.map((t) => [t.attributes("data-align"), t.attributes("data-delay")])).toEqual([
+			["left", "300"],
+			["left", "300"],
+		])
+		const icons = wrapper.findAll('[data-testid="stub-icon"]')
+		expect(icons.map((i) => i.attributes("aria-label"))).toEqual([
+			"Private balance: only you can see it",
+			"Public balance: anyone can see it",
+		])
+		expect(wrapper.findAll("span[aria-label]")).toHaveLength(0)
+	})
+
 	test("an UNPRICED token shows no fiat element at all", async () => {
 		mockQuotes = FRESH()
 		const { wrapper } = await mountView({ tokenBalance: SEED[1] })
@@ -506,5 +640,277 @@ describe("BalanceView — token hero (tokenBalance prop)", () => {
 		const { wrapper } = await mountView({ tokenBalance: SEED[0] })
 
 		expect(wrapper.find('[data-testid="balance-amount"]').exists()).toBe(true)
+	})
+})
+
+describe("BalanceView — the hero fits its line", () => {
+	const LONG_TOKEN = { ...SEED[0], publicBalance: "124458788900000", privateBalance: "0" }
+	const LONG_FIAT = [{ ...SEED[0], publicBalance: "0", privateBalance: "124458788900000" }]
+	beforeEach(() => {
+		room = 312
+		mockQuotes = USD_1()
+	})
+	// A spy left on the global frame would stand in for the fake timers' one in later cases.
+	afterEach(() => vi.restoreAllMocks())
+
+	test("a short amount keeps today's size; a long one shrinks until every digit fits, with no frame to wait for", async () => {
+		const frame = vi.spyOn(globalThis, "requestAnimationFrame")
+		const short = await mountView({ tokenBalance: SEED[0] })
+		expect(figure(short.wrapper).text()).toBe("1,250 AAA")
+		expect(heroScale(short.wrapper)).toBe("1")
+
+		const token = await mountView({ tokenBalance: LONG_TOKEN })
+		expect(figure(token.wrapper).text()).toBe("124,458,788.9 AAA")
+		expect(heroScale(token.wrapper)).toBe("0.81")
+
+		seedRows = LONG_FIAT as typeof SEED
+		const home = await mountView()
+		expect(figure(home.wrapper).text()).toBe("$124,458,788.90")
+		expect(heroScale(home.wrapper)).toBe("0.8")
+		expect(frame).not.toHaveBeenCalled()
+	})
+
+	test("a long 18-decimal fraction reaches the 60% floor: its fraction is cut to the length that fits", async () => {
+		const fraction = {
+			...SEED[0],
+			token: { ...SEED[0].token, decimals: 18 },
+			publicBalance: "1234567890123456789000",
+			privateBalance: "0",
+		}
+		const { wrapper } = await mountView({ tokenBalance: fraction })
+		expect(figure(wrapper).text()).toBe("1,234.56789012345 AAA")
+		expect(heroScale(wrapper)).toBe("0.61")
+	})
+
+	test("a font load or a resize fits the hero again; unmounting stops both", async () => {
+		let resized: () => void = () => {}
+		const disconnect = vi.fn()
+		vi.stubGlobal(
+			"ResizeObserver",
+			class {
+				constructor(callback: () => void) {
+					resized = callback
+				}
+				observe() {}
+				disconnect = disconnect
+			},
+		)
+		const fonts = new EventTarget()
+		const stopListening = vi.spyOn(fonts, "removeEventListener")
+		Object.defineProperty(document, "fonts", { value: fonts, configurable: true })
+		fontWidth = 1.1
+
+		const { wrapper } = await mountView({ tokenBalance: LONG_TOKEN })
+		expect(heroScale(wrapper)).toBe("0.74")
+		fontWidth = 1
+		fonts.dispatchEvent(new Event("loadingdone"))
+		await nextTick()
+		expect(heroScale(wrapper)).toBe("0.81")
+		room = 400
+		resized()
+		await nextTick()
+		expect(heroScale(wrapper)).toBe("1")
+
+		wrapper.unmount()
+		expect(disconnect).toHaveBeenCalledTimes(1)
+		expect(stopListening).toHaveBeenCalledWith("loadingdone", expect.any(Function))
+	})
+})
+
+describe("BalanceView — an arrival on Home", () => {
+	type Wrapper = Awaited<ReturnType<typeof mountView>>["wrapper"]
+	const LARGE = 98_765_432_109_876n * 10n ** 6n
+	const row = (privateRaw: bigint) => ({ ...SEED[0], privateBalance: privateRaw.toString(), publicBalance: "0" })
+	const status = (w: Wrapper) => w.find('[data-testid="balance-arrival-status"]')
+	const chip = (w: Wrapper) => w.find('[data-testid="balance-arrival-chip"]')
+	const hero = (w: Wrapper) => w.find('[data-testid="balance-amount"]').text()
+	let reducedMotion = false
+	/** The hero's text for `rows` with no arrival: the aggregate's own string. */
+	async function ownString(rows: unknown[]) {
+		seedRows = rows as typeof SEED
+		const { wrapper } = await mountView()
+		const text = hero(wrapper)
+		wrapper.unmount()
+		return text
+	}
+	/** Home with the pre-rise value on screen for a minute. */
+	async function settledHome(privateRaw = LARGE) {
+		seedRows = [row(privateRaw)] as typeof SEED
+		const view = await mountView()
+		await vi.advanceTimersByTimeAsync(60_000)
+		return view
+	}
+
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "requestAnimationFrame", "cancelAnimationFrame"] })
+		mockQuotes = USD_1()
+		reducedMotion = false
+		window.matchMedia = vi.fn(() => ({ matches: reducedMotion })) as unknown as typeof window.matchMedia
+	})
+	afterEach(() => {
+		vi.useRealTimers()
+		document.documentElement.classList.remove("noanimations")
+		Reflect.deleteProperty(window, "matchMedia")
+	})
+
+	test("the status node exists and is empty before any arrival; each arrival's chip lands inside that same node", async () => {
+		const { wrapper } = await mountView()
+		const node = status(wrapper).element
+		expect(status(wrapper).text()).toBe("")
+		expect(chip(wrapper).exists()).toBe(false)
+
+		await wrapper.setProps({ arrival: { id: "r1", label: "+5 AAA" } })
+		expect(status(wrapper).element).toBe(node)
+		expect(status(wrapper).find('[data-testid="balance-arrival-chip"]').text()).toBe("+5 AAA")
+		const first = chip(wrapper).element
+
+		await wrapper.setProps({ arrival: { id: "r2", label: "+7 AAA" } })
+		expect(status(wrapper).element).toBe(node)
+		expect(wrapper.findAll('[data-testid="balance-arrival-chip"]')).toHaveLength(1)
+		expect(chip(wrapper).element).not.toBe(first)
+		expect(chip(wrapper).text()).toBe("+7 AAA")
+	})
+
+	test("an arrival with no label (invalid decimals) shows no chip; nor does the token hero or a hidden fiat hero", async () => {
+		const unformattable = await mountView({ arrival: { id: "r1", label: null } })
+		expect(chip(unformattable.wrapper).exists()).toBe(false)
+
+		const tokenPage = await mountView({ tokenBalance: SEED[0], arrival: { id: "r1", label: "+5 AAA" } })
+		expect(chip(tokenPage.wrapper).exists()).toBe(false)
+
+		mockShowFiat = false
+		const fiatOff = await mountView({ arrival: { id: "r1", label: "+5 AAA" } })
+		expect(chip(fiatOff.wrapper).exists()).toBe(false)
+		expect(status(fiatOff.wrapper).exists()).toBe(true)
+	})
+
+	test("a rise 3 s after the arrival counts from the value shown a minute before, and ends on the aggregate's own string", async () => {
+		const risen = LARGE + 1_234_567n * 10n ** 6n
+		const [before, after] = [await ownString([row(LARGE)]), await ownString([row(risen)])]
+		const { wrapper } = await settledHome()
+		expect(hero(wrapper)).toBe(before)
+
+		await wrapper.setProps({ arrival: { id: "r1", label: "+1,234,567 AAA" } })
+		await vi.advanceTimersByTimeAsync(3_000)
+		updatedHandler?.(row(risen))
+		await flushPromises()
+		expect(hero(wrapper)).toBe(before)
+
+		await vi.advanceTimersByTimeAsync(300)
+		expect([before, after]).not.toContain(hero(wrapper))
+		await vi.advanceTimersByTimeAsync(1_000)
+		expect(hero(wrapper)).toBe(after)
+	})
+
+	test("a count never grows the type: its smallest fit holds through the frames and on the figure it lands on", async () => {
+		room = 312
+		// In the stand-in font "$100,000,000.00" needs 80%; "$111,111,111.11", all narrow ones, fits at full size.
+		const { wrapper } = await settledHome(100_000_000n * 10n ** 6n)
+		expect(heroScale(wrapper)).toBe("0.8")
+		await wrapper.setProps({ arrival: { id: "r1", label: "+11,111,111.11 AAA" } })
+		updatedHandler?.(row(111_111_111_110_000n))
+		await flushPromises()
+		const [texts, scales] = [new Set<string>(), new Set<string>()]
+		for (let t = 0; t < 1_000; t += 50) {
+			await vi.advanceTimersByTimeAsync(50)
+			texts.add(hero(wrapper))
+			scales.add(heroScale(wrapper))
+		}
+		expect(texts.size).toBeGreaterThan(2)
+		expect(hero(wrapper)).toBe("$111,111,111.11")
+		expect([...scales]).toEqual(["0.8"])
+
+		// A fall lands at once: a figure the hero was not counting to fits afresh.
+		updatedHandler?.(row(111_111_111_100_000n))
+		await flushPromises()
+		expect(hero(wrapper)).toBe("$111,111,111.10")
+		expect(heroScale(wrapper)).toBe("1")
+	})
+
+	test("a rise 11 s after the arrival, or a fall, lands at once", async () => {
+		// Each mount replaces the captured handlers, so the expected strings are read first.
+		const [up, down] = [await ownString([row(LARGE + 10n ** 6n)]), await ownString([row(LARGE - 10n ** 6n)])]
+		const { wrapper } = await settledHome()
+		await wrapper.setProps({ arrival: { id: "r1", label: "+1 AAA" } })
+		await vi.advanceTimersByTimeAsync(11_000)
+		updatedHandler?.(row(LARGE + 10n ** 6n))
+		await flushPromises()
+		expect(hero(wrapper)).toBe(up)
+
+		await wrapper.setProps({ arrival: { id: "r2", label: "+1 AAA" } })
+		updatedHandler?.(row(LARGE - 10n ** 6n))
+		await flushPromises()
+		expect(hero(wrapper)).toBe(down)
+	})
+
+	test("a scope switch cancels a running count; the new scope's figures, and its rise, owe the old arrival nothing", async () => {
+		const [switched, risen] = [await ownString([row(LARGE * 2n)]), await ownString([row(LARGE * 3n)])]
+		const { wrapper, appStore } = await settledHome()
+		await wrapper.setProps({ arrival: { id: "r1", label: "+1 AAA" } })
+		updatedHandler?.(row(LARGE + 10n ** 12n))
+		await flushPromises()
+		await vi.advanceTimersByTimeAsync(100)
+
+		const other = (raw: bigint) => ({ ...row(raw), account: "0xother" })
+		fetchRows = async () => [other(LARGE * 2n)] as typeof SEED
+		appStore.account = { address: "0xother" } as never
+		await flushPromises()
+		expect(hero(wrapper)).toBe(switched)
+
+		updatedHandler?.(other(LARGE * 3n))
+		await flushPromises()
+		expect(hero(wrapper)).toBe(risen)
+	})
+
+	test("with fiat off nothing counts: turning it back on shows the aggregate's own string at once", async () => {
+		const [risen, shown] = [await ownString([row(LARGE + 10n ** 12n)]), await ownString([row(LARGE + 2n * 10n ** 12n)])]
+		const { wrapper } = await settledHome()
+		await wrapper.setProps({ arrival: { id: "r1", label: "+1 AAA" } })
+		updatedHandler?.(row(LARGE + 10n ** 12n))
+		await flushPromises()
+		configHandler?.({ key: "showFiatValues", value: false })
+		await flushPromises()
+		configHandler?.({ key: "showFiatValues", value: true })
+		await flushPromises()
+		expect(hero(wrapper)).toBe(risen)
+
+		configHandler?.({ key: "showFiatValues", value: false })
+		await flushPromises()
+		await wrapper.setProps({ arrival: { id: "r2", label: "+1 AAA" } })
+		updatedHandler?.(row(LARGE + 2n * 10n ** 12n))
+		await flushPromises()
+		configHandler?.({ key: "showFiatValues", value: true })
+		await flushPromises()
+		expect(hero(wrapper)).toBe(shown)
+	})
+
+	test.each([
+		["reduced motion", () => (reducedMotion = true)],
+		["Disable animations", () => document.documentElement.classList.add("noanimations")],
+	])("under %s the hero shows the final value with no frame, and the chip runs the calm animation", async (_, calm) => {
+		calm()
+		const { wrapper } = await settledHome()
+		const frame = vi.spyOn(globalThis, "requestAnimationFrame")
+		await wrapper.setProps({ arrival: { id: "r1", label: "+1 AAA" } })
+		updatedHandler?.(row(LARGE + 10n ** 12n))
+		await flushPromises()
+		expect(hero(wrapper)).toBe(await ownString([row(LARGE + 10n ** 12n)]))
+		expect(frame).not.toHaveBeenCalled()
+		expect(
+			chip(wrapper)
+				.classes()
+				.some((c) => c.includes("arrival_chip_calm")),
+		).toBe(true)
+	})
+
+	test("unmounting mid-count cancels the frame", async () => {
+		const { wrapper } = await settledHome()
+		await wrapper.setProps({ arrival: { id: "r1", label: "+1 AAA" } })
+		updatedHandler?.(row(LARGE + 10n ** 12n))
+		await flushPromises()
+		const cancel = vi.spyOn(globalThis, "cancelAnimationFrame")
+		wrapper.unmount()
+		expect(cancel).toHaveBeenCalledTimes(1)
+		expect(vi.getTimerCount()).toBe(0)
 	})
 })

@@ -10,7 +10,7 @@ import { appendFileSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import type { Page, Target } from "puppeteer"
 import { waitForTarget } from "./browser"
-import { clickByTestId, clickSelector, patchPagePolling, type ExtensionContext } from "./extension"
+import { clickByTestId, clickSelector, patchPagePolling, waitForHash, type ExtensionContext } from "./extension"
 import { selectFeeMethod, type FeeMethodSubtitle } from "./helpers"
 
 export type PopupKind = "discover" | "verify" | "capabilities" | "execute" | "json"
@@ -25,9 +25,8 @@ export async function waitForPopup(
 	kind: PopupKind,
 	opts: { requestId?: string; timeout?: number } = {},
 ): Promise<Page> {
-	// CI CPU pressure pushes popup-mount latency up against the 15s cliff
-	// (see implementations-plan/network-followups/plan.md §C). 30s gives 2×
-	// margin without changing the steady-state — fast machines resolve in ms.
+	// CI CPU pressure pushes popup-mount latency up against the 15s cliff. 30s gives
+	// 2× margin without changing the steady state, since fast machines resolve in ms.
 	const timeout = opts.timeout ?? 30_000
 	// Snapshot existing matching target URLs so we only resolve a NEW popup,
 	// not a stale one left by a prior interaction. URL contains a unique
@@ -103,7 +102,7 @@ export async function waitForPopup(
 	return page
 }
 
-async function waitForMainFrame(page: Page, timeout = 5_000): Promise<void> {
+export async function waitForMainFrame(page: Page, timeout = 5_000): Promise<void> {
 	const start = Date.now()
 	while (Date.now() - start < timeout) {
 		try {
@@ -130,6 +129,44 @@ export async function waitForPopupClosed(page: Page, timeout = 5_000): Promise<v
 
 export async function approveDiscover(page: Page): Promise<void> {
 	await clickByTestId(page, "discover-allow-btn")
+}
+
+type ConnectWindowRead = { id: number | undefined; popups: number }
+
+/** Read inside the page: BiDi has no window handles, so Puppeteer cannot name a window on Firefox. */
+function readConnectWindow(page: Page): Promise<ConnectWindowRead> {
+	return page.evaluate(async () => ({
+		id: (await chrome.windows.getCurrent()).id,
+		popups: (await chrome.windows.getAll({ windowTypes: ["popup"] })).filter((w) => w.type === "popup").length,
+	}))
+}
+
+/**
+ * Allow a new connection and wait for its emoji check in the same window, with no popup window
+ * opened or closed on the way. Resolves with that page, now the check, for `approveVerify`.
+ * `allow` is the click, `approveDiscover` unless the caller drives the real pointer.
+ */
+export async function approveConnect(
+	ctx: ExtensionContext,
+	discoverPage: Page,
+	allow: () => Promise<void> = () => approveDiscover(discoverPage),
+): Promise<Page> {
+	const before = await readConnectWindow(discoverPage)
+	await allow()
+	await discoverPage
+		.waitForFunction(
+			() => location.hash.startsWith("#/windows/verify") && document.querySelector('[data-testid="verify-emoji-grid"]') !== null,
+			{ timeout: 30_000, polling: 200 },
+		)
+		.catch((err) => {
+			const where = discoverPage.isClosed() ? "the connect window closed" : "the connect window never showed the check"
+			throw new Error(`approveConnect: ${where} (verify windows open: ${countVerifyWindows(ctx)})`, { cause: err })
+		})
+	const after = await readConnectWindow(discoverPage)
+	if (after.id !== before.id || after.popups !== before.popups) {
+		throw new Error(`approveConnect: the check moved windows: ${JSON.stringify({ before, after })}`)
+	}
+	return discoverPage
 }
 
 export async function denyDiscover(page: Page): Promise<void> {
@@ -161,8 +198,7 @@ export async function approveVerify(page: Page, opts: { alwaysTrust?: boolean } 
 	// before close lets the next reconnect race a stale storage value.
 	//
 	// If the popup never closes within 10s, throw — silently proceeding would
-	// mask the very failure mode this wait exists to prevent. (Codex audit
-	// session 019e2b9b caught the earlier silent-resolve version.)
+	// mask the very failure mode this wait exists to prevent.
 	if (!page.isClosed()) {
 		await new Promise<void>((resolve, reject) => {
 			const timer = setTimeout(() => {
@@ -179,15 +215,17 @@ export async function approveVerify(page: Page, opts: { alwaysTrust?: boolean } 
 /**
  * Approve a /windows/capabilities popup.
  *
- * - `toggleOff`: capability ids (e.g. ["data"]) to flip OFF before approving
- *   (default-on for new capabilities). Used by the partial-grant test.
+ * - `switches`: the state each new row's switch must be in before approving, by row key
+ *   (`data-cap-row`: "authorizations", "address-book", "private-events", "unknown"). A row not
+ *   named keeps its default.
  * - `accounts`: account ids to select for the accounts capability. Selects
  *   each row by data-account-id.
- * - `aliases`: per-account alias overrides (writes via the alias input).
+ * - `aliases`: per-account alias overrides. Each presses the row's "Rename for this app" unless
+ *   its field is already open, then writes the field.
  */
 export async function approveCapabilities(
 	page: Page,
-	opts: { toggleOff?: string[]; accounts?: string[]; aliases?: Record<string, string> } = {},
+	opts: { switches?: Record<string, boolean>; accounts?: string[]; aliases?: Record<string, string> } = {},
 ): Promise<void> {
 	// The popup's `init()` is async — wait for at least one cap-item OR
 	// cap-account-item to render before manipulating. Either signals the
@@ -198,17 +236,7 @@ export async function approveCapabilities(
 			document.querySelector('[data-testid="cap-account-item"]') !== null,
 		{ timeout: 30_000, polling: 200 },
 	)
-	for (const capId of opts.toggleOff ?? []) {
-		await page.waitForSelector(`[data-testid="cap-item"][data-cap-id="${capId}"] [data-testid="cap-toggle"]`, {
-			visible: true,
-			timeout: 5_000,
-		})
-		await page.evaluate((id: string) => {
-			const item = document.querySelector(`[data-testid="cap-item"][data-cap-id="${id}"]`)
-			const toggle = item?.querySelector<HTMLElement>('[data-testid="cap-toggle"]')
-			toggle?.click()
-		}, capId)
-	}
+	for (const [rowKey, on] of Object.entries(opts.switches ?? {})) await setCapabilitySwitch(page, rowKey, on)
 	for (const accountId of opts.accounts ?? []) {
 		await page.waitForSelector(`[data-testid="cap-account-item"][data-account-id="${accountId}"]`, {
 			visible: true,
@@ -224,19 +252,97 @@ export async function approveCapabilities(
 		}, accountId)
 	}
 	for (const [accountId, alias] of Object.entries(opts.aliases ?? {})) {
+		const row = `[data-testid="cap-account-item"][data-account-id="${accountId}"]`
+		const field = `${row} [data-testid="cap-account-alias-input"]`
+		if (!(await page.$(field))) await clickSelector(page, `${row} [data-testid="cap-account-rename-btn"]`, 5_000)
+		await page.waitForSelector(field, { visible: true, timeout: 5_000 })
 		await page.evaluate(
-			({ id, alias }: { id: string; alias: string }) => {
-				const row = document.querySelector(`[data-testid="cap-account-item"][data-account-id="${id}"]`)
-				const input = row?.querySelector<HTMLInputElement>('[data-testid="cap-account-alias-input"]')
-				if (!input) return
+			({ sel, alias }: { sel: string; alias: string }) => {
+				const input = document.querySelector<HTMLInputElement>(sel)
+				if (!input) throw new Error(`${sel} left before its alias was written`)
 				const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set
 				setter?.call(input, alias)
 				input.dispatchEvent(new Event("input", { bubbles: true }))
 			},
-			{ id: accountId, alias },
+			{ sel: field, alias },
 		)
 	}
 	await clickByTestId(page, "cap-approve-btn")
+}
+
+/** A new row's switch; the "Already granted" copy of a row has none. */
+const capSwitchSelector = (rowKey: string) =>
+	`[data-testid="cap-item"][data-cap-row="${rowKey}"]:not([data-cap-granted]) [data-testid="cap-toggle"]`
+
+/** Flip a new row's switch to `on` if it is not already, then wait for the window to show it. */
+export async function setCapabilitySwitch(page: Page, rowKey: string, on: boolean): Promise<void> {
+	const selector = capSwitchSelector(rowKey)
+	await page.waitForSelector(selector, { visible: true, timeout: 5_000 })
+	await page.evaluate(
+		({ sel, want }: { sel: string; want: boolean }) => {
+			const el = document.querySelector<HTMLElement>(sel)
+			if (el && (el.getAttribute("aria-checked") === "true") !== want) el.click()
+		},
+		{ sel: selector, want: on },
+	)
+	await page.waitForFunction(
+		(sel: string, want: boolean) => document.querySelector(sel)?.getAttribute("aria-checked") === String(want),
+		{ timeout: 5_000, polling: 100 },
+		selector,
+		on,
+	)
+}
+
+/** A new row's switch state, or `undefined` when the row shows no switch. */
+export async function readCapabilitySwitch(page: Page, rowKey: string): Promise<boolean | undefined> {
+	await waitCapabilitiesReady(page)
+	return page.evaluate((sel: string) => {
+		const checked = document.querySelector(sel)?.getAttribute("aria-checked")
+		return checked === undefined || checked === null ? undefined : checked === "true"
+	}, capSwitchSelector(rowKey))
+}
+
+const APP_SWITCH = '[data-testid="connected-app-authorizations-toggle"]'
+
+/** Open Settings → Connected apps → the app served from `host`. A miss names the hosts listed. */
+async function openConnectedApp(page: Page, host: string): Promise<void> {
+	await page.evaluate(() => {
+		window.location.hash = "#/popup/settings/connected-apps"
+	})
+	await waitForHash(page, "#/popup/settings/connected-apps")
+	await clickSelector(page, `[data-testid="connected-app-row"][data-app-host="${host}"]`, 15_000).catch(async (err) => {
+		const hosts = await page.$$eval('[data-testid="connected-app-row"]', (rows) => rows.map((r) => r.getAttribute("data-app-host")))
+		throw new Error(`no connected-app row for ${host}; rows: ${JSON.stringify(hosts)}`, { cause: err })
+	})
+	await page.waitForSelector(APP_SWITCH, { visible: true, timeout: 15_000 })
+}
+
+const switchIs = (page: Page, on: boolean) =>
+	page.waitForFunction(
+		(sel: string, want: boolean) => document.querySelector(sel)?.getAttribute("aria-checked") === String(want),
+		{ timeout: 10_000, polling: 100 },
+		APP_SWITCH,
+		on,
+	)
+
+/**
+ * Set a connected app's authorizations switch in Settings, then reopen the app's page, which reads
+ * the session again, so the state proved is the stored one and not the switch's pending value.
+ * `page` must have finished its start-up navigation (`waitForHash(page, "#/popup/general")` after
+ * `openPopup`), or that navigation can land after this one and take the page back home.
+ */
+export async function setConnectedAppAuthorizations(page: Page, host: string, on: boolean): Promise<void> {
+	await openConnectedApp(page, host)
+	await page.evaluate(
+		({ sel, want }: { sel: string; want: boolean }) => {
+			const el = document.querySelector<HTMLElement>(sel)
+			if (el && (el.getAttribute("aria-checked") === "true") !== want) el.click()
+		},
+		{ sel: APP_SWITCH, want: on },
+	)
+	await switchIs(page, on)
+	await openConnectedApp(page, host)
+	await switchIs(page, on)
 }
 
 export async function rejectCapabilities(page: Page): Promise<void> {
@@ -256,7 +362,7 @@ export async function rejectCapabilities(page: Page): Promise<void> {
  * fee-selection settle happens after rows render, and on a cold shard that gap
  * alone historically blew the generic 10s click wait (flake-ledger entries 4/5).
  * Budget rationale: the DEFAULT stays 10s — the suite's prior latency tolerance,
- * now on the correct signal (post-impl audit: don't widen every caller without
+ * now on the correct signal (don't widen every caller without
  * per-caller evidence). The two historically-cold callers pass 120s explicitly —
  * the budget the sibling Send flow uses for the same FeeSettingsCard gate. The
  * telemetry below accumulates the evidence for any future per-caller change.
@@ -407,16 +513,22 @@ export async function waitCapabilitiesReady(page: Page, timeout = 30_000): Promi
 	)
 }
 
-/** Read the visible capability rows: returns `{ id, granted }[]`. Waits for at
- *  least one cap-item to render — the popup's init() is async. */
-export async function getCapItems(page: Page): Promise<Array<{ id: string; granted: boolean; rerequested: boolean }>> {
+export type CapItem = { id: string; row: string; granted: boolean; flagged: boolean; rerequested: boolean }
+
+/** Read the rendered permission rows in window order: `id` is the capability type (`data-cap-id`,
+ *  absent on the unknown row) and `row` the row key (`data-cap-row`), since one type can draw several
+ *  rows. The "Already allowed" fold mounts its rows only while open. Waits for at least one cap-item
+ *  to render — the popup's init() is async. */
+export async function getCapItems(page: Page): Promise<CapItem[]> {
 	// Wait for popup readiness (cap-item OR cap-account-item) instead of
 	// only cap-item — the bundle under test might be accounts-only.
 	await waitCapabilitiesReady(page).catch(() => undefined)
 	return page.evaluate(() =>
 		[...document.querySelectorAll<HTMLElement>('[data-testid="cap-item"]')].map((el) => ({
 			id: el.getAttribute("data-cap-id") ?? "",
+			row: el.getAttribute("data-cap-row") ?? "",
 			granted: el.getAttribute("data-cap-granted") === "true",
+			flagged: el.getAttribute("data-cap-flagged") === "true",
 			rerequested: !!el.querySelector('[data-testid="cap-rerequested-badge"]'),
 		})),
 	)

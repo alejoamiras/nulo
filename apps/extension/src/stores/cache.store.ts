@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 import { defineStore } from "pinia"
 
 export const useCacheStore = defineStore("cache", () => {
@@ -17,7 +18,6 @@ export const useCacheStore = defineStore("cache", () => {
 
 	const activeTokenIdx = ref()
 	const preselectedBalanceType = ref("private")
-	const preselectedContactToSend = ref(null)
 	const preselectedTokenAddressToAdd = ref()
 	const preselectedAuthwits = ref([])
 
@@ -48,7 +48,6 @@ export const useCacheStore = defineStore("cache", () => {
 		proposedNetworks,
 		selectedNetwork,
 		preselectedBalanceType,
-		preselectedContactToSend,
 		preselectedTokenAddressToAdd,
 		preselectedAuthwits,
 		feePaymentMethods,

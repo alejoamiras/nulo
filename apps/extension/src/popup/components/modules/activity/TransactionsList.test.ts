@@ -1,0 +1,110 @@
+/**
+ * The Archives list hands each row kind its detail route; the cards own the link.
+ */
+import { mount } from "@vue/test-utils"
+import { describe, expect, test, vi } from "vitest"
+import TransactionsList from "./TransactionsList.vue"
+
+vi.mock("@/wallet/services/price/client", () => ({
+	PriceServiceClient: vi.fn(function () {
+		return {
+			disconnect: vi.fn(),
+			onQuotesUpdated: { add: vi.fn(), remove: vi.fn() },
+			onConnected: { add: vi.fn(), remove: vi.fn() },
+			refreshIfStale: vi.fn().mockResolvedValue({}),
+		}
+	}),
+}))
+
+const cardStub = (name: string) => ({
+	name,
+	props: ["to", "arriving"],
+	template: `<div data-stub="${name}" :data-to="to" :data-arriving="arriving ? 'true' : undefined" />`,
+})
+
+const ROWS = [
+	{ type: "tx", key: "tx:0xh1", sortKey: 3000, tx: { hash: "0xh1" } },
+	{
+		type: "journal",
+		key: "journal:op-1",
+		sortKey: 2000,
+		op: { id: "op-1", kind: "transfer", terminalAt: 1, createdAt: 1, progress: { stage: "cancelled" } },
+	},
+	{ type: "incoming", key: "inc:r1", sortKey: 1000, inc: { id: "r1", kind: "note", amountRaw: "1", txHash: "0xh" } },
+]
+
+const mountList = (props: Record<string, unknown>) =>
+	mount(TransactionsList, {
+		props,
+		global: {
+			stubs: {
+				Flex: { template: "<div><slot /></div>" },
+				TransactionCard: cardStub("TransactionCard"),
+				TransactionTerminalCard: cardStub("TransactionTerminalCard"),
+				TransactionIncomingCard: cardStub("TransactionIncomingCard"),
+			},
+		},
+	})
+
+describe("modules/activity/TransactionsList", () => {
+	test("each incoming row asks isArriving for its own receipt; with none, no row plays", () => {
+		const second = { type: "incoming", key: "inc:r2", sortKey: 900, inc: { id: "r2", kind: "note", amountRaw: "1", txHash: "0xh" } }
+		const isArriving = vi.fn((inc: { id: string }) => inc.id === "r2")
+		const w = mountList({ rows: [...ROWS, second], isArriving })
+		const played = w.findAll('[data-stub="TransactionIncomingCard"]').map((c) => c.attributes("data-arriving"))
+		expect(played).toEqual([undefined, "true"])
+		expect(isArriving.mock.calls.map(([inc]) => inc.id)).toEqual(["r1", "r2"])
+		expect(mountList({ rows: ROWS }).find('[data-stub="TransactionIncomingCard"]').attributes("data-arriving")).toBeUndefined()
+	})
+
+	test("each row kind links to its detail route", () => {
+		const w = mountList({ rows: ROWS })
+		expect(w.find('[data-stub="TransactionCard"]').attributes("data-to")).toBe("/popup/tx/0xh1")
+		expect(w.find('[data-stub="TransactionTerminalCard"]').attributes("data-to")).toBe("/popup/journal/op-1")
+		expect(w.find('[data-stub="TransactionIncomingCard"]').attributes("data-to")).toBe("/popup/received/r1")
+	})
+
+	test("a settled row, a transfer row and a received row take their token from `tokens`", () => {
+		const token = { id: 7, contract: "0xc", symbol: "TST", decimals: 6 }
+		const op = {
+			id: "op-2",
+			kind: "transfer",
+			tokenId: 7,
+			amountRaw: "1500000",
+			terminalAt: 1,
+			createdAt: 1,
+			progress: { stage: "cancelled" },
+		}
+		const inc = { id: "r3", kind: "note", tokenId: 7, contract: "0xc", amountRaw: "2000000", txHash: "0xh" }
+		const w = mount(TransactionsList, {
+			props: {
+				rows: [
+					{ type: "tx", key: "tx:0xh1", sortKey: 3000, tx: { hash: "0xh1" } },
+					{ type: "journal", key: "journal:op-2", sortKey: 2000, op },
+					{ type: "incoming", key: "inc:r3", sortKey: 1000, inc },
+				],
+				tokens: [token],
+			},
+			global: {
+				stubs: {
+					Flex: { template: "<div><slot /></div>" },
+					TransactionCard: {
+						props: ["tokens"],
+						template: '<div data-stub="settled" :data-symbols="tokens.map((t) => t.symbol)" />',
+					},
+					TransactionTerminalCard: {
+						props: ["title", "amount"],
+						template: '<div data-stub="terminal" :data-title="title" :data-amount="amount" />',
+					},
+					TransactionIncomingCard: {
+						props: ["tokenSymbol", "tokenDecimals"],
+						template: '<div data-stub="incoming" :data-symbol="tokenSymbol" :data-decimals="tokenDecimals" />',
+					},
+				},
+			},
+		})
+		expect(w.get('[data-stub="settled"]').attributes("data-symbols")).toBe("TST")
+		expect(w.get('[data-stub="terminal"]').attributes()).toMatchObject({ "data-title": "TST", "data-amount": "1.5" })
+		expect(w.get('[data-stub="incoming"]').attributes()).toMatchObject({ "data-symbol": "TST", "data-decimals": "6" })
+	})
+})

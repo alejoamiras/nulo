@@ -16,7 +16,7 @@ import { join } from "node:path"
 
 const ROOT = join(import.meta.dir, "..", "..")
 // apps/ vs packages/ split (FLAT layout): deployable leaves live under apps/, libs under packages/.
-const APPS = new Set(["extension", "tools", "landing", "playground"])
+const APPS = new Set(["extension", "landing", "playground"])
 const dirOf = (pkg: string): string => (APPS.has(pkg) ? "apps" : "packages")
 
 /** Direct `@nulo/*` workspace deps of a package (runtime + dev — what it's built/tested from). */
@@ -71,8 +71,6 @@ const FILTER_WORKFLOWS = [
   "pr-extension-network-e2e.yml",
   "pr-extension-smoke-e2e-firefox.yml",
   "pr-extension-network-e2e-firefox.yml",
-  "bridge-contracts.yml",
-  "pr-tools-e2e.yml",
   "actionlint.yml",
 ]
 
@@ -87,8 +85,6 @@ const AGGREGATOR_CHECKS: Record<string, string> = {
   "pr-extension-network-e2e.yml": "extension-network-e2e-status",
   "pr-extension-smoke-e2e-firefox.yml": "extension-smoke-e2e-firefox-status",
   "pr-extension-network-e2e-firefox.yml": "extension-network-e2e-firefox-status",
-  "bridge-contracts.yml": "bridge-contracts-status",
-  "pr-tools-e2e.yml": "tools-e2e-status",
 }
 
 describe("CI aggregator check names", () => {
@@ -150,7 +146,6 @@ describe("CI behavior-gating guard", () => {
     // Beyond src + manifest: the licence texts and the expected-minimum list are build inputs too.
     for (const input of inputs) {
       expect(quick["extension"], `extension build: ${input}`).toContain(input)
-      expect(quick["firefox-touching"], `the zip-content assertion runs per target: ${input}`).toContain(input)
     }
     // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
     const wf = Bun.YAML.parse(readFileSync(join(ROOT, ".github/workflows/_build-extension.yml"), "utf8")) as any
@@ -161,9 +156,11 @@ describe("CI behavior-gating guard", () => {
     expect(assertion, "an artifact without notices is never uploaded").toBeLessThan(firstUpload)
   })
 
-  test("tools build covers the tools graph", () => {
-    assertGraphCovered(quick["tools"], "tools", "tools")
-    expect(quick["tools"], "tools must gate its build workflow").toContain(".github/workflows/_build-tools.yml")
+  test("an extension build builds both targets, so the preview comment links both", () => {
+    // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
+    const wf = Bun.YAML.parse(readFileSync(join(ROOT, ".github/workflows/pr-quick.yml"), "utf8")) as any
+    expect(wf.jobs["build-chrome"].if).toBe("needs.changes.outputs.needs-extension-build == 'true'")
+    expect(wf.jobs["build-firefox"].if).toBe(wf.jobs["build-chrome"].if)
   })
 
   test("landing build covers the landing graph and the documents it renders, and is wired into the aggregator", () => {
@@ -175,50 +172,6 @@ describe("CI behavior-gating guard", () => {
     expect(wf.jobs.changes.outputs["needs-landing-build"]).toBeDefined()
     expect(wf.jobs.status.needs, "a red landing build must red quality-status").toContain("build-landing")
     expect(JSON.stringify(wf.jobs.status.steps)).toContain("needs.build-landing.result")
-  })
-
-  test("bridge-contracts covers the contracts, the harness package, its graph, and the adopted manifests", () => {
-    const contracts = filtersOf("bridge-contracts.yml")["contracts"]
-    expect(contracts, "the Solidity + Noir sources").toContain("contracts/bridge/**")
-    assertGraphCovered(contracts, "bridge-core", "bridge-contracts")
-    for (const manifest of ["apps/tools/public/testnet-bridge.json", "apps/tools/public/mainnet-bridge.json"]) {
-      expect(contracts, "a manifest bump is the frontend adopting a generation — the round trips must re-run").toContain(manifest)
-    }
-    for (const p of ["package.json", "bun.lock", "bunfig.toml", "patches/**", ".github/actions/setup-aztec/**", ".github/actions/setup-bun/**"]) {
-      expect(contracts, `bridge-contracts must gate ${p}`).toContain(p)
-    }
-  })
-
-  test("tools-e2e covers the tools graph, the bridge contracts, the harness package, and its own pipeline", () => {
-    const filter = filtersOf("pr-tools-e2e.yml")["tools-e2e"]
-    assertGraphCovered(filter, "tools", "tools-e2e")
-    expect(filter, "the sandbox deploys the contracts the UI bridges through").toContain("contracts/bridge/**")
-    expect(filter, "bridge-core's scripts ARE the sandbox harness").toContain("packages/bridge-core/**")
-    for (const p of [
-      "package.json",
-      "bun.lock",
-      "bunfig.toml",
-      "patches/**",
-      ".github/workflows/pr-tools-e2e.yml",
-      ".github/workflows/_tools-e2e.yml",
-      ".github/actions/setup-aztec/**",
-      ".github/actions/setup-bun/**",
-      ".github/actions/setup-playwright/**",
-    ]) {
-      expect(filter, `tools-e2e must gate ${p}`).toContain(p)
-    }
-  })
-
-  test("the tools build job is wired from the changes output through to quality-status", () => {
-    // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
-    const wf = Bun.YAML.parse(readFileSync(join(ROOT, ".github/workflows/pr-quick.yml"), "utf8")) as any
-    const outputs = wf.jobs.changes.outputs ?? {}
-    expect(outputs.tools).toBe("${{ steps.override.outputs.full || steps.filter.outputs.tools }}")
-    expect(outputs["needs-tools-build"]).toBe("${{ steps.compute.outputs.needs-tools-build }}")
-    expect(wf.jobs["build-tools"]?.if).toBe("needs.changes.outputs.needs-tools-build == 'true'")
-    expect(wf.jobs.status.needs, "quality-status must wait on build-tools").toContain("build-tools")
-    const aggregate = wf.jobs.status.steps.map((s: { run?: string }) => s.run ?? "").join("\n")
-    expect(aggregate, "quality-status must fail on a build-tools failure").toContain("needs.build-tools.result")
   })
 
   test("cross-cutting inputs (patches + root build inputs) gate the e2e suites", () => {
@@ -524,5 +477,53 @@ describe("canary lanes", () => {
       'if [ "$PROVE_SUCCESS" -eq 0 ] && [[ "$SHARD_LABEL" == canary* ]]; then',
     )
     expect(existsSync(join(ROOT, "scripts/ci-cd/assert-canary-results.ts"))).toBe(true)
+  })
+})
+
+// Bun never re-checks cached files against bun.lock, and its install runs trusted packages'
+// lifecycle scripts: a poisoned cache must reach neither shipped bytes nor a job holding a write token.
+describe("Bun's install cache", () => {
+  // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
+  const parse = (file: string): any => Bun.YAML.parse(readFileSync(join(ROOT, file), "utf8"))
+  const SETUP_BUN = "./.github/actions/setup-bun"
+  type Step = { uses?: string; with?: Record<string, unknown>; if?: unknown }
+  type Job = { uses?: string; permissions?: unknown; steps?: Step[] }
+  const holdsWrite = (permissions: unknown): boolean =>
+    permissions === "write-all" ||
+    (typeof permissions === "object" && permissions !== null && Object.values(permissions).includes("write"))
+  /** A job's own steps, or every step of the local reusable workflow it calls. */
+  const stepsOf = (job: Job): Step[] =>
+    job.uses?.startsWith("./.github/workflows/")
+      ? (Object.values(parse(job.uses.slice(2)).jobs) as Job[]).flatMap((called) => called.steps ?? [])
+      : (job.steps ?? [])
+
+  test("the composite restores it only when asked", () => {
+    const action = parse(".github/actions/setup-bun/action.yml")
+    expect(action.inputs.cache.default).toBe("true")
+    const caches = (action.runs.steps as Step[]).filter((step) => step.uses?.startsWith("actions/cache@"))
+    expect(caches.map((step) => step.if)).toEqual(["inputs.cache == 'true'"])
+  })
+
+  test("the extension build takes it on pull requests only", () => {
+    const steps = stepsOf({ uses: "./.github/workflows/_build-extension.yml" }).filter((step) => step.uses === SETUP_BUN)
+    expect(steps.length).toBeGreaterThan(0)
+    for (const step of steps) expect(step.with?.cache).toBe("${{ github.event_name == 'pull_request' }}")
+  })
+
+  test("no job holding a write permission takes it", () => {
+    const files = readdirSync(join(ROOT, ".github/workflows")).filter((file) => file.endsWith(".yml"))
+    let checked = 0
+    for (const file of files) {
+      const wf = parse(`.github/workflows/${file}`)
+      for (const [name, job] of Object.entries(wf.jobs ?? {}) as [string, Job][]) {
+        // A job's own block replaces the workflow's rather than adding to it.
+        if (!holdsWrite(job.permissions ?? wf.permissions)) continue
+        for (const step of stepsOf(job).filter((step) => step.uses === SETUP_BUN)) {
+          expect(step.with?.cache, `${file} → ${name}`).toBe("false")
+          checked++
+        }
+      }
+    }
+    expect(checked, "the scan found the write-scoped jobs that run the composite").toBeGreaterThan(0)
   })
 })

@@ -37,8 +37,9 @@ import { downloadFile } from "@/utils"
 import { MAX_BACKUP_FILE_BYTES, assembleFullBackup } from "@/utils/full-backup-helpers"
 
 /** Composables */
-import { TOAST_DURATION, useToast } from "@/composables/toast.js"
+import { useToast } from "@/composables/toast.js"
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
+import { isPopupSubmitKey, refuseRepeatEnter } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 // Path A passkey ceremony — replaces the prior SW-driven popup window for
@@ -166,7 +167,7 @@ async function acquirePasskeyCredential(gen) {
 		// export is diagnosable (this catch and the exportPlain one below are otherwise
 		// indistinguishable — same toast, same navigation).
 		console.error("[export/full] passkey credential acquisition failed:", err)
-		openToast({ label: "Failed to authenticate by passkey", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Failed to authenticate by passkey" })
 		router.go(-1)
 		return "handled"
 	}
@@ -205,7 +206,7 @@ async function exportKeyMaterial(gen, credentialData) {
 			// See the acquisition catch above — stage-tagged so the two failure points are
 			// distinguishable in the console while the user-facing copy stays generic.
 			console.error("[export/full] passkey export failed:", error)
-			openToast({ label: "Failed to authenticate by passkey", icon: "warning" }, TOAST_DURATION.LONG)
+			openToast({ kind: "error", label: "Failed to authenticate by passkey" })
 			router.go(-1)
 		}
 		return "handled"
@@ -252,7 +253,7 @@ function rejectOversizedBackup(pretty) {
 	if (new TextEncoder().encode(pretty).length <= MAX_BACKUP_FILE_BYTES) return false
 	backupStatus.value = ""
 	if (isPasskeyProfile.value) isAgreed.value = false
-	openToast({ label: "Backup is too large to create", icon: "warning" }, TOAST_DURATION.LONG)
+	openToast({ kind: "error", label: "Backup is too large to create" })
 	return true
 }
 
@@ -264,7 +265,7 @@ function reportAssemblyFailure(gen, err) {
 	backupStatus.value = ""
 	if (isPasskeyProfile.value) isAgreed.value = false
 	console.error("[export/full] backup assembly failed:", err)
-	openToast({ label: "Failed to create the backup", icon: "warning" }, TOAST_DURATION.LONG)
+	openToast({ kind: "error", label: "Failed to create the backup" })
 }
 
 async function handleBackup() {
@@ -351,7 +352,7 @@ async function handleEncrypt() {
 		// Base64 is pure ASCII, so string length IS the byte count here.
 		if (sealed.length > MAX_BACKUP_FILE_BYTES) {
 			backupStatus.value = "finished"
-			openToast({ label: "Backup is too large to create", icon: "warning" }, TOAST_DURATION.LONG)
+			openToast({ kind: "error", label: "Backup is too large to create" })
 			return
 		}
 		encryptedB64 = sealed
@@ -359,7 +360,7 @@ async function handleEncrypt() {
 	} catch (error) {
 		if (gen !== generation) return
 		console.error("Failed to encrypt the backup", error)
-		openToast({ label: "Failed to encrypt the backup", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Failed to encrypt the backup" })
 		backupStatus.value = "finished"
 	} finally {
 		if (gen === generation) isBusy.value = false
@@ -378,19 +379,18 @@ async function handleDownloadBackup() {
 	try {
 		await downloadFile({ data: fileContent, filename, compressionFormat: "gzip" })
 		if (gen !== generation) return
-		openToast({ label: "Backup downloaded successfully", icon: "download" })
+		openToast({ kind: "success", label: "Backup downloaded successfully" })
 	} catch (err) {
 		if (gen !== generation) return
 		console.error("Download failed:", err.message || err)
-		openToast({ label: "Failed to download backup", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Failed to download backup" })
 	} finally {
 		if (gen === generation) isDownloading.value = false
 	}
 }
 
 const onKeydown = (e) => {
-	if (!isAgreed.value) return
-	if (e.key !== "Enter") return
+	if (!isAgreed.value || e.defaultPrevented || !isPopupSubmitKey(e)) return
 	switch (backupStatus.value) {
 		case "":
 			handleBackup()
@@ -402,16 +402,11 @@ const onKeydown = (e) => {
 			handleDownloadBackup()
 			break
 		default:
-			// "progress" / "encrypting": a run is in flight — Enter is a no-op.
-			// (The old catch-all default re-invoked handleBackup here, which was
-			// the double-assembly vector; the handler latches too, as a belt.)
+			// "progress" / "encrypting": a run is in flight, so Enter starts nothing.
 			break
 	}
 }
 
-onMounted(() => {
-	document.addEventListener("keydown", onKeydown)
-})
 onBeforeUnmount(() => {
 	// Fence first so no in-flight continuation can publish or resurrect state;
 	// then services (cleanup-order rule), then the secret scrub — the payload
@@ -428,7 +423,6 @@ onBeforeUnmount(() => {
 	encryptedB64 = null
 	password.value = null
 	repeatedPassword.value = null
-	document.removeEventListener("keydown", onKeydown)
 })
 </script>
 
@@ -438,6 +432,7 @@ onBeforeUnmount(() => {
 		heroSub="Backup"
 		collapsingLabel="Full Backup"
 		backTo="/popup/settings/security/export"
+		@keydown="onKeydown"
 	>
 		<!-- Agreement gate -->
 		<template v-if="!isAgreed">
@@ -515,7 +510,7 @@ onBeforeUnmount(() => {
 						<p :class="$style.status_subtitle">
 							{{
 								backupStatus === "encrypting"
-									? "Sealing the file with your password — only you can open it."
+									? "Sealing the file with your password. Only you can open it."
 									: "Gathering your wallet data into your backup file."
 							}}
 						</p>
@@ -546,7 +541,7 @@ onBeforeUnmount(() => {
 						<template #description>
 							<Text color="secondary" height="140">
 								This profile is in recovery mode, so its registered custom contracts and senders were
-								left out. After the restore, register them again — until then their private notes
+								left out. After the restore, register them again. Until then their private notes
 								stay undiscovered, since a network sync cannot rebuild that material.
 							</Text>
 						</template>
@@ -629,6 +624,7 @@ onBeforeUnmount(() => {
 			<Button
 				v-else-if="isAgreed && !isPasskeyProfile && !backupStatus"
 				@click="handleBackup"
+				@keydown.enter="refuseRepeatEnter"
 				:disabled="!password || isWrongPassword || isBusy"
 				variant="cta"
 				data-testid="unlock-submit-btn"
@@ -644,6 +640,7 @@ onBeforeUnmount(() => {
 				<Button
 					v-if="backupStatus === 'finished' || backupStatus === 'encrypting'"
 					@click="handleEncrypt()"
+					@keydown.enter="refuseRepeatEnter"
 					:disabled="backupStatus === 'encrypting' || isDownloading"
 					variant="cta"
 					data-testid="protect-password-btn"
@@ -652,6 +649,7 @@ onBeforeUnmount(() => {
 				</Button>
 				<Button
 					@click="handleDownloadBackup"
+					@keydown.enter="refuseRepeatEnter"
 					:disabled="!backupStatus || backupStatus === 'progress' || backupStatus === 'encrypting' || isDownloading"
 					:variant="backupStatus !== 'encrypted' ? 'cta_outline' : 'cta'"
 					data-testid="download-backup-btn"

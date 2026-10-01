@@ -188,7 +188,7 @@ describe("TokensView — section refresh dot", () => {
 	test("a completed refresh can't strand the dot across an A→B→A scope round-trip (stale-snapshot regression)", async () => {
 		// The mount-time task snapshot must be MAINTAINED: fetchTokenBalances re-derives isUpdating
 		// from it on every scope change, so a finished task lingering in the snapshot would
-		// resurrect isUpdating and strand the section dot ON (post-impl audit, Medium).
+		// resurrect isUpdating and strand the section dot ON.
 		H.getTasks.mockResolvedValue([balanceTask("t1", 1)])
 		const wrapper = mount(TokensView, { shallow: true })
 		await flushPromises()
@@ -240,22 +240,22 @@ describe("TokensView — section refresh dot", () => {
 })
 
 describe("TokensView — Home order and cap", () => {
-	// Mainnet cUSD is a price-mapped contract; with a `usd-coin` quote seeded it is the one priced row.
+	// cUSD is price-mapped on the testnet; with a `usd-coin` quote seeded it is the one priced row.
 	const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
-	const MAINNET = CHAIN_IDS.MAINNET
+	const CHAIN = CHAIN_IDS.TESTNET
 
 	beforeEach(() => {
 		resetHarness()
-		H.store.current.network = { id: "net-main", chainId: MAINNET }
+		H.store.current.network = { id: "net-main", chainId: CHAIN }
 	})
 
 	test("a priced token ranks first; unpriced held tokens follow by name; an empty row is last", async () => {
 		H.quotes.current = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
 		H.getTokenBalances.mockResolvedValue([
-			namedRow(3, "ZED", { chainId: MAINNET }),
-			namedRow(1, "PRICED", { contract: CUSD, chainId: MAINNET }),
-			namedRow(4, "EMPTY", { chainId: MAINNET, publicBalance: "0" }),
-			namedRow(2, "ALPHA", { chainId: MAINNET }),
+			namedRow(3, "ZED", { chainId: CHAIN }),
+			namedRow(1, "PRICED", { contract: CUSD, chainId: CHAIN }),
+			namedRow(4, "EMPTY", { chainId: CHAIN, publicBalance: "0" }),
+			namedRow(2, "ALPHA", { chainId: CHAIN }),
 		])
 		// The count lives inside the design package's SectionLabel; let it render.
 		const wrapper = mount(TokensView, { shallow: true, global: { stubs: { SectionLabel: false } } })
@@ -265,7 +265,7 @@ describe("TokensView — Home order and cap", () => {
 	})
 
 	test("Home shows at most three rows and a View-all link with the overflow", async () => {
-		H.getTokenBalances.mockResolvedValue([1, 2, 3, 4, 5].map((i) => namedRow(i, `T${i}`, { chainId: MAINNET })))
+		H.getTokenBalances.mockResolvedValue([1, 2, 3, 4, 5].map((i) => namedRow(i, `T${i}`, { chainId: CHAIN })))
 		const wrapper = mount(TokensView, { shallow: true })
 		await flushPromises()
 
@@ -274,7 +274,7 @@ describe("TokensView — Home order and cap", () => {
 	})
 
 	test("three or fewer tokens: every row shows and there is no View-all link", async () => {
-		H.getTokenBalances.mockResolvedValue([namedRow(1, "A", { chainId: MAINNET }), namedRow(2, "B", { chainId: MAINNET })])
+		H.getTokenBalances.mockResolvedValue([namedRow(1, "A", { chainId: CHAIN }), namedRow(2, "B", { chainId: CHAIN })])
 		const wrapper = mount(TokensView, { shallow: true })
 		await flushPromises()
 
@@ -304,7 +304,7 @@ describe("TokensView — Home order and cap", () => {
 	})
 
 	test("a same-address row from ANOTHER chain is not rendered (fetch and live add)", async () => {
-		H.getTokenBalances.mockResolvedValue([namedRow(1, "A", { chainId: MAINNET }), namedRow(2, "FOREIGN", { chainId: 1 })])
+		H.getTokenBalances.mockResolvedValue([namedRow(1, "A", { chainId: CHAIN }), namedRow(2, "FOREIGN", { chainId: 1 })])
 		const wrapper = mount(TokensView, { shallow: true })
 		await flushPromises()
 		expect(cardSymbols(wrapper)).toEqual(["A"])
@@ -315,7 +315,7 @@ describe("TokensView — Home order and cap", () => {
 	})
 
 	test("a scope change clears the previous rows before the new fetch resolves; a rejected fetch leaves none", async () => {
-		H.getTokenBalances.mockResolvedValue([namedRow(1, "OLD", { chainId: MAINNET })])
+		H.getTokenBalances.mockResolvedValue([namedRow(1, "OLD", { chainId: CHAIN })])
 		const wrapper = mount(TokensView, { shallow: true })
 		await flushPromises()
 		expect(cardSymbols(wrapper)).toEqual(["OLD"])
@@ -325,26 +325,26 @@ describe("TokensView — Home order and cap", () => {
 		H.getTasks.mockReturnValue(tasksPending.promise)
 		const pending = deferred<unknown[]>()
 		H.getTokenBalances.mockReturnValue(pending.promise)
-		H.store.current.network = { id: "net-other", chainId: MAINNET + 1 }
+		H.store.current.network = { id: "net-other", chainId: CHAIN + 1 }
 		await flushPromises()
 		expect(cardSymbols(wrapper)).toEqual([])
 
 		tasksPending.resolve([])
 		await flushPromises()
 		expect(cardSymbols(wrapper)).toEqual([])
-		pending.resolve([namedRow(2, "NEW", { chainId: MAINNET + 1 })])
+		pending.resolve([namedRow(2, "NEW", { chainId: CHAIN + 1 })])
 		await flushPromises()
 		expect(cardSymbols(wrapper)).toEqual(["NEW"])
 
 		// A task snapshot that rejects does not block the balances.
 		H.getTasks.mockRejectedValueOnce(new Error("port closed"))
-		H.getTokenBalances.mockResolvedValue([namedRow(3, "AFTER", { chainId: MAINNET + 2 })])
-		H.store.current.network = { id: "net-third", chainId: MAINNET + 2 }
+		H.getTokenBalances.mockResolvedValue([namedRow(3, "AFTER", { chainId: CHAIN + 2 })])
+		H.store.current.network = { id: "net-third", chainId: CHAIN + 2 }
 		await flushPromises()
 		expect(cardSymbols(wrapper)).toEqual(["AFTER"])
 
 		H.getTokenBalances.mockRejectedValue(new Error("port closed"))
-		H.store.current.network = { id: "net-main", chainId: MAINNET }
+		H.store.current.network = { id: "net-main", chainId: CHAIN }
 		await flushPromises()
 		expect(cardSymbols(wrapper)).toEqual([])
 		// The rejection armed the timed retry; unmounting cancels it before it can reach another test.
@@ -352,14 +352,14 @@ describe("TokensView — Home order and cap", () => {
 	})
 
 	test("an unmount during the scope watcher's task snapshot stops the balance fetch that would reconnect", async () => {
-		H.getTokenBalances.mockResolvedValue([namedRow(1, "OLD", { chainId: MAINNET })])
+		H.getTokenBalances.mockResolvedValue([namedRow(1, "OLD", { chainId: CHAIN })])
 		const wrapper = mount(TokensView, { shallow: true })
 		await flushPromises()
 		const fetchesBefore = H.getTokenBalances.mock.calls.length
 
 		const tasksPending = deferred<unknown[]>()
 		H.getTasks.mockReturnValue(tasksPending.promise)
-		H.store.current.network = { id: "net-other", chainId: MAINNET + 1 }
+		H.store.current.network = { id: "net-other", chainId: CHAIN + 1 }
 		await flushPromises()
 		wrapper.unmount()
 		tasksPending.resolve([])
@@ -380,7 +380,7 @@ describe("TokensView — Home order and cap", () => {
 	})
 
 	test("a profile-only switch (same address, same network) is a new scope: the other profile's rows go at once", async () => {
-		H.getTokenBalances.mockResolvedValue([namedRow(1, "MINE", { chainId: MAINNET })])
+		H.getTokenBalances.mockResolvedValue([namedRow(1, "MINE", { chainId: CHAIN })])
 		const wrapper = mount(TokensView, { shallow: true })
 		await flushPromises()
 		expect(cardSymbols(wrapper)).toEqual(["MINE"])
@@ -397,14 +397,16 @@ describe("TokensView — Home order and cap", () => {
 
 	test("hostile rows reach the REAL card without throwing: a dash for the malformed ones, the good row intact", async () => {
 		H.getTokenBalances.mockResolvedValue([
-			namedRow(1, "GOOD", { chainId: MAINNET }),
-			namedRow(2, "FRACTION", { chainId: MAINNET, publicBalance: "1.5" }),
+			namedRow(1, "GOOD", { chainId: CHAIN }),
+			namedRow(2, "FRACTION", { chainId: CHAIN, publicBalance: "1.5" }),
 			{
-				...namedRow(3, "DECIMALS", { chainId: MAINNET }),
-				token: { ...namedRow(3, "DECIMALS").token, chainId: MAINNET, decimals: 500 },
+				...namedRow(3, "DECIMALS", { chainId: CHAIN }),
+				token: { ...namedRow(3, "DECIMALS").token, chainId: CHAIN, decimals: 500 },
 			},
 		])
-		const wrapper = mount(TokensView, { shallow: true, global: { stubs: { TokenCard: false } } })
+		// The card renders its row inside RouterLink's `custom` slot, which a shallow stub leaves empty.
+		const RouterLink = { template: '<slot :href="to" :navigate="() => {}" />', props: { to: [String, Object], custom: Boolean } }
+		const wrapper = mount(TokensView, { shallow: true, global: { stubs: { TokenCard: false, RouterLink } } })
 		await flushPromises()
 
 		const cards = wrapper.findAll('[data-testid="tokens-card"]')

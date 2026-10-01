@@ -28,7 +28,7 @@ that cannot be read out of this repository.
 | ~~`country/state of residence`~~ | Filled: Argentina; venue is the Ciudad Autónoma de Buenos Aires. |
 | ~~`contact email`~~ | Filled: `hello@nulo.sh`. |
 | `effective date` | Privacy 1.0: filled, 23 September 2026 (the submission day). Terms 1.0: the date the 1.0 listing goes live. |
-| `official Chrome Web Store / Firefox Add-ons listing URL` | Where store-required publisher disclosures live. |
+| ~~`official Chrome Web Store / Firefox Add-ons listing URL`~~ | Filled 2026-09-23, after both first submissions: Chrome item `jlmiaokmjoicmclelpiiocdhncddkdmc` (slug `nulo-v5`) and the AMO add-on `nulo-v5`. Neither resolves publicly until its store publishes it. Nulo V6 reuses both items, renamed; the AMO URL changes, in place, when its slug moves to `nulo-v6`. |
 | ~~`published security-reporting URL`~~ | Filled: `https://github.com/alejoamiras/nulo/security` (GitHub private vulnerability reporting, enabled 2026-09-22). |
 | ~~`provider legal name and privacy-policy link`~~ | Filled: Google LLC (Google Workspace, from the MX record and Google's contracting-entity table). |
 | ~~`applicable Cloudflare contracting entity and privacy-policy link`~~ | Filled: Cloudflare, Inc. (Self-Serve Subscription Agreement; `nulo.sh` is on the Free plan). |
@@ -55,9 +55,9 @@ These came out of the two-round review and are **not** fixed by editing the docu
 
    Blockers 1–3 shipped as one arc: `implementations-plan/legal-terms/`.
 4. ~~**Verify the Presto MIT relicense reached the bundled artifacts.**~~ — done. The lockfile
-   resolves the MIT versions (`@alejoamiras/presto@5.2.0-revision.3`, `presto-core@1.1.0`,
-   `presto-banners@1.1.0`; their tarballs differ from the AGPL ones only in the licence files and
-   field), `apps/extension/src/presto/presto-licence.test.ts` reds if a bump pulls an
+   resolves MIT versions (first `@alejoamiras/presto@5.2.0-revision.3`, `presto-core@1.1.0` and
+   `presto-banners@1.1.0`, whose tarballs differ from the AGPL ones only in the licence files and
+   field; now `presto@6.0.0-rc.1`, `presto-core@1.2.1` and `presto-banners@1.1.0`, all MIT), `apps/extension/src/presto/presto-licence.test.ts` reds if a bump pulls an
    AGPL-declared version back in, and every build emits `THIRD-PARTY-NOTICES.txt` into the
    extension root, carrying each bundled component's own copyright and permission notice
    (`packages/third-party-notices/`; Settings → About → Open-source licences opens it). The build

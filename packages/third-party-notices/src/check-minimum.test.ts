@@ -7,7 +7,7 @@ import { ALLOWED, FONT_ALLOWED, OVERRIDES, VENDORED } from "./policy.ts"
 const empty = generateNotices(
 	{ moduleIds: [], assets: [], assetText: {}, assetSha256: {}, builtAssets: [] },
 	{
-		policy: { allowed: ALLOWED, overrides: [], vendored: [], fontAllowed: FONT_ALLOWED, codeAsset: /\.wasm$/ },
+		policy: { allowed: ALLOWED, overrides: [], vendored: [], derived: [], fontAllowed: FONT_ALLOWED, codeAsset: /\.wasm$/ },
 		textsDir: ".",
 		workspaceRoot: ".",
 	},

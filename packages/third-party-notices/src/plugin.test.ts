@@ -33,7 +33,7 @@ const mainBundle = (ids: string[], workerFiles: string[]): OutputBundleLike => (
 })
 
 function plugins() {
-	const policy = { allowed: ALLOWED, overrides: [], vendored: [], fontAllowed: FONT_ALLOWED, codeAsset: /\.js$/ }
+	const policy = { allowed: ALLOWED, overrides: [], vendored: [], derived: [], fontAllowed: FONT_ALLOWED, codeAsset: /\.js$/ }
 	const { main, worker } = thirdPartyNotices({ policy, textsDir: root, workspaceRoot: root })
 	const emitted: string[] = []
 	const context = { emitFile: (file: { fileName: string; source: string }) => emitted.push(file.source) }
@@ -61,7 +61,7 @@ describe("thirdPartyNotices", () => {
 
 	test("a package stylesheet that a CSS @import inlines is attributed although no chunk lists it", async () => {
 		const { main } = thirdPartyNotices({
-			policy: { allowed: ALLOWED, overrides: [], vendored: [], fontAllowed: FONT_ALLOWED, codeAsset: /\.js$/ },
+			policy: { allowed: ALLOWED, overrides: [], vendored: [], derived: [], fontAllowed: FONT_ALLOWED, codeAsset: /\.js$/ },
 			textsDir: root,
 			workspaceRoot: root,
 		})

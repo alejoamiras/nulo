@@ -90,7 +90,7 @@ export function resolvePackageAsset(pkg: string, assetPath: string, options: Res
 
 /**
  * Direct resolution of an EXPORTED subpath (condition-less asset exports like
- * `@aztec/sqlite3mc-wasm`'s `./vendor/jswasm/*`). Prefer this over
+ * `@aztec-labs/sqlite3mc-wasm`'s `./vendor/jswasm/*`). Prefer this over
  * resolvePackageAsset when the asset itself is in the exports map.
  */
 export function resolveExportedAsset(pkg: string, subpath: string, options: ResolveOptions): string {

@@ -3,7 +3,7 @@
 Status: **P1 shipped, P2 deferred** (deep-plan protocol, Tier B). Two deferred
 findings from the v3 post-impl codex review
 (`../dapp-interaction-lock-fix-v3/audit-codex-postimpl.md`).
-Audit transcript: [`audit-codex.md`](audit-codex.md). Owner adopted the hybrid cap
+Audit transcript: [`audit-codex.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/v3-followups/audit-codex.md). Owner adopted the hybrid cap
 (⭑ below) at the approval gate.
 
 Owner's clarifying answers: P1 = cap all sendTx + reject overflow; P2 = full

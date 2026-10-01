@@ -6,6 +6,7 @@ import {
 	JobCancelledError,
 	RpcDisconnectedError,
 	RpcTimeoutError,
+	ScopeViolationError,
 	SessionEndedError,
 	TooManyPendingError,
 	UserRejectedError,
@@ -18,7 +19,7 @@ import {
 } from "@nulo/extension-messaging/errors"
 import { unwrapOperationResult } from "@nulo/wallet-bridge"
 import { classifyOperationCatch } from "@/wallet/services/execution/rpc-cancel"
-import { toWalletResponseError, UNCLASSIFIED_ERROR_MESSAGE } from "./error-envelope"
+import { SCOPE_VIOLATION_ENVELOPE, toWalletResponseError, UNCLASSIFIED_ERROR_MESSAGE } from "./error-envelope"
 
 describe("toWalletResponseError", () => {
 	test("JobCancelledError → {code:4001, walletErrorCode, jobId} (regression for existing behavior)", () => {
@@ -56,6 +57,22 @@ describe("toWalletResponseError", () => {
 		})
 	})
 
+	test("ScopeViolationError → {code:4100, walletErrorCode SCOPE_VIOLATION} with a constant message, never its own", () => {
+		const refusal = new ScopeViolationError("Scope violation: sendTx call not permitted by granted transaction scope")
+		const env = toWalletResponseError(refusal)
+		expect(env).toEqual({
+			code: 4100,
+			message: "This request is outside the permissions you gave this app.",
+			data: { walletErrorCode: "SCOPE_VIOLATION" },
+		})
+		expect(JSON.stringify(env)).not.toContain("Scope violation")
+		expect(JSON.parse(new Error(JSON.stringify(env)).message)).toEqual(env)
+		// One frozen object answers every refusal, so no sink can edit what the next dApp receives.
+		expect(env === SCOPE_VIOLATION_ENVELOPE && Object.isFrozen(env) && Object.isFrozen(SCOPE_VIOLATION_ENVELOPE.data)).toBe(true)
+		// The same words on a plain Error are not a refusal: the fall-through stays constant.
+		expect(toWalletResponseError(new Error(refusal.message))).toBe(UNCLASSIFIED_ERROR_MESSAGE)
+	})
+
 	test("SessionEndedError → {code:4900, walletErrorCode SESSION_ENDED} with the constant message; only the class maps", () => {
 		expect(toWalletResponseError(new SessionEndedError())).toEqual({
 			code: 4900,
@@ -68,7 +85,7 @@ describe("toWalletResponseError", () => {
 
 	test("envelope round-trips through new Error(JSON.stringify(env)) — dApp parse recipe works", () => {
 		// Load-bearing contract test for the wallet-bridge README recipe. The
-		// `@aztec/wallet-sdk` wrapper wraps `response.error` in
+		// `@aztec-labs/wallet-sdk` wrapper wraps `response.error` in
 		// `new Error(JSON.stringify(error))`, so dApps that want to discriminate
 		// need to `JSON.parse(err.message).code`. If this test fails, the
 		// documented recipe stops working and downstream dApps break silently.

@@ -8,36 +8,6 @@ export const getThousandSeparator = (): string => {
 	return s.substring(1, s.length - 3)
 }
 
-export const comma = (target: unknown, symbol = ",", fixed = 2): string | number => {
-	if (!target) return 0
-
-	let num: string | number = Number.parseFloat(target as string)
-
-	if ((num as number) % 1 === 0) {
-		num = (num as number).toFixed(0)
-	} else {
-		num = (num as number).toFixed(fixed)
-	}
-
-	if (num.includes(".")) {
-		while (num[num.length - 1] === "0") {
-			num = num.slice(0, num.length - 1)
-		}
-		if (num[num.length - 1] === ".") {
-			num = num.slice(0, num.length - 1)
-		}
-	}
-
-	if (num.split(".").length > 1 && fixed !== 2) {
-		return `${num
-			.split(".")[0]
-			.toString()
-			.replace(/\B(?=(\d{3})+(?!\d))/g, symbol)}.${num.split(".")[1]}`
-	}
-
-	return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, symbol)
-}
-
 export const purgeNumber = (target: string): string => {
 	if (/^(0|[1-9]\d*)(\.\d+)?$/.test(target)) return target
 	return target.replace(/[^0-9.]/g, "")
@@ -59,27 +29,76 @@ export const normalizeAmount = (target: string): string | undefined => {
 	if (Number.parseFloat(purgeNumber(target)) >= 9_999_999_999_999) return "9999999999999"
 }
 
+/** What an amount text reads as: its plain form (digits and at most one "."), or why it has none. */
+export type AmountRead = { ok: true; plain: string } | { ok: false; reason: "ambiguous" | "unreadable" }
+
+/** The grouped whole part the Send field writes at rest (`restingAmount`); keep the two in step. */
+const GROUPED = /^\d{1,3}(?:,\d{3})+(?:\.\d*)?$/
+const SPACE = /[\u0020\u00a0\u202f\u2009]/g
+const SPACE_GROUPED = /^[1-9]\d{0,2}(?:[\u0020\u00a0\u202f\u2009]\d{3})+(?:[.,]\d*)?$/
+const UNREADABLE: AmountRead = { ok: false, reason: "unreadable" }
+
 /**
- * Format a base-units value for display, with optional total-string-length
- * truncation + small-value hint. Returns `{ value, slashed }` so callers
- * can render an "expand" affordance when truncation fired (BalanceView).
+ * The one amount a text reads as, or none: a "." is the decimal point, and a comma or space is read
+ * as grouping or as the decimal only where the form allows one reading ("1,234" allows two).
+ * `rested` is the field's own resting text, whose commas are the wallet's grouping; `currency: "$"`
+ * drops one leading "$".
+ */
+export function readAmountText(text: string, { rested = null, currency }: { rested?: string | null; currency?: "$" } = {}): AmountRead {
+	let t = text.trim()
+	if (currency === "$" && t.startsWith("$")) t = t.slice(1)
+	if (!/\d/.test(t)) return UNREADABLE
+	if (text === rested && GROUPED.test(t)) return { ok: true, plain: t.replaceAll(",", "") }
+	if (/^\d*\.?\d*$/.test(t)) return { ok: true, plain: t }
+	if (/^[1-9]\d{0,2},\d{3}$/.test(t)) return { ok: false, reason: "ambiguous" }
+	if (/^[1-9]\d{0,2}(?:,\d{3})+(?:\.\d*)?$/.test(t)) return { ok: true, plain: t.replaceAll(",", "") }
+	if (/^[1-9]\d{0,2}(?:\.\d{3})+(?:,\d*)?$/.test(t)) return { ok: true, plain: t.replaceAll(".", "").replace(",", ".") }
+	if (SPACE_GROUPED.test(t)) return { ok: true, plain: t.replace(SPACE, "").replace(",", ".") }
+	if (/^\d*,\d*$/.test(t)) return { ok: true, plain: t.replace(",", ".") }
+	return UNREADABLE
+}
+
+const COMPACT_SUFFIXES = ["K", "M", "B", "T"] as const
+
+/**
+ * `fullValue` in `length` characters without losing a whole digit: the cut minus a trailing
+ * decimal separator while the whole part fits, else the whole part in its largest K/M/B/T tier with
+ * at most two truncated digits of the next group, or `>999T` past a thousand trillion.
+ */
+const compactCut = (fullValue: string, units: bigint, decimals: number, length: number, decimalSep: string): string => {
+	if ((fullValue.split(decimalSep)[0] ?? fullValue).length <= length) {
+		const cut = fullValue.slice(0, length)
+		return cut.endsWith(decimalSep) ? cut.slice(0, -decimalSep.length) : cut
+	}
+	const whole = units / 10n ** BigInt(decimals)
+	if (whole >= 1000n ** 5n) return ">999T"
+	let tier = COMPACT_SUFFIXES.length
+	while (tier > 1 && whole < 1000n ** BigInt(tier)) tier--
+	const scale = 1000n ** BigInt(tier)
+	const head = (whole / scale).toString()
+	const places = Math.max(0, Math.min(2, length - head.length - 2))
+	const frac = (whole % scale)
+		.toString()
+		.padStart(3 * tier, "0")
+		.slice(0, places)
+		.replace(/0+$/, "")
+	return `${head}${frac ? decimalSep + frac : ""}${COMPACT_SUFFIXES[tier - 1]}`
+}
+
+/**
+ * Format base units for display, truncated (never rounded up), in at most `length` characters
+ * when given; `slashed` is set when the value shown is not the full one.
  *
- * `length` is the OUTPUT-string length cap, not a decimal-places count:
- * - String shorter than `length`  → returned as-is, slashed=false.
- * - Value > 0 but smaller than `10^-(length-2)` after scaling → renders
- *   `<0.0001` (length-3 zeros + `1`), slashed=true. UX hint that the
- *   actual amount is non-zero but too small to show at this width.
- * - String exceeds `length`       → sliced to `length` chars, slashed=true.
- *   No "..." suffix — callers that need an affordance use the `slashed`
- *   flag to render their own (e.g. a "Show full" button).
- *
- * Uses `formatBaseUnits` (TRUNCATE-only rounding) under the hood — display
- * always shows ≤ actual.
+ * - Non-zero but below what `length` can show → `<0.0001`, its zeros filling the width.
+ * - Longer than `length` → cut to it, with no ellipsis; callers draw their own "Show full".
+ * - `compact`: whole digits are never cut. The cut drops a trailing decimal separator, and a whole
+ *   part longer than `length` reads K/M/B/T (`123.45M`), or `>999T` past a thousand trillion.
  */
 export const balanceFormatted = (
 	units: bigint | string | null | undefined,
 	decimals: number,
 	length?: number,
+	opts: { compact?: boolean } = {},
 ): { value: string; slashed: boolean } => {
 	if (units == null || units === "") return { value: "0", slashed: false }
 	const u = typeof units === "bigint" ? units : BigInt(units)
@@ -109,7 +128,8 @@ export const balanceFormatted = (
 	}
 
 	if (fullValue.length > length) {
-		return { value: fullValue.slice(0, length), slashed: true }
+		const value = opts.compact ? compactCut(fullValue, u, decimals, length, decimalSep) : fullValue.slice(0, length)
+		return { value, slashed: true }
 	}
 
 	return { value: fullValue, slashed: false }

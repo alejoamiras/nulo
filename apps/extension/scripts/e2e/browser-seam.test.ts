@@ -7,12 +7,8 @@ import { describe, expect, test } from "vitest"
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const E2E_ROOT = path.resolve(__dirname, "../../tests/e2e")
 
-/**
- * Files allowed to name a browser directly. `fixtures/browser/{chrome,firefox}.ts` ARE the seam;
- * `scripts/check-derivation-parity.ts` is a standalone tool that launches its own Chrome,
- * owns no `ExtensionContext` and is never run by a suite, so it has nothing to keep in step.
- */
-const EXEMPT = new Set(["fixtures/browser/chrome.ts", "fixtures/browser/firefox.ts", "scripts/check-derivation-parity.ts"])
+/** Files allowed to name a browser directly: `fixtures/browser/{chrome,firefox}.ts` ARE the seam. */
+const EXEMPT = new Set(["fixtures/browser/chrome.ts", "fixtures/browser/firefox.ts"])
 
 const SCHEME = "chrome-extension://"
 const WORKER_TYPE = "service_worker"

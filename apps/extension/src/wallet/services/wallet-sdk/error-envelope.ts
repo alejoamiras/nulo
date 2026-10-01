@@ -1,6 +1,6 @@
 /**
  * Convert an internal exception into the `WalletResponse.error` shape expected
- * by `@aztec/wallet-sdk`. Structured errors get EIP-1193 codes plus a
+ * by `@aztec-labs/wallet-sdk`. Structured errors get EIP-1193 codes plus a
  * `walletErrorCode` discriminator; everything else collapses to a plain string
  * so the existing wire contract (string error for unrecognised throws) is
  * preserved.
@@ -10,7 +10,7 @@
  * concern, not a wallet-bridge domain concern. Unit-testable via the
  * sibling `error-envelope.test.ts`.
  *
- * Wire reality: the dApp-side `@aztec/wallet-sdk` wrapper at
+ * Wire reality: the dApp-side `@aztec-labs/wallet-sdk` wrapper at
  * `extension_wallet.ts:181` wraps `response.error` in
  * `new Error(JSON.stringify(error))`. dApps that want to discriminate must
  * `JSON.parse(err.message).code` (see wallet-bridge README for the recipe).
@@ -24,6 +24,7 @@ import {
 	PxeStaleAnchorError,
 	RpcDisconnectedError,
 	RpcTimeoutError,
+	ScopeViolationError,
 	SessionEndedError,
 	TermsAcceptanceRequiredError,
 	TooManyPendingError,
@@ -31,7 +32,7 @@ import {
 	UnsupportedMethodError,
 	UserRejectedError,
 } from "@nulo/extension-messaging/errors"
-import type { WalletResponse } from "@aztec/wallet-sdk/types"
+import type { WalletResponse } from "@aztec-labs/wallet-sdk/types"
 
 export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 	if (error instanceof JobCancelledError) {
@@ -85,6 +86,11 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 			},
 		}
 	}
+	if (error instanceof ScopeViolationError) {
+		// The classification tells a dApp that its grant refused the call before execution, not that
+		// something downstream failed.
+		return SCOPE_VIOLATION_ENVELOPE
+	}
 	if (error instanceof RpcTimeoutError) {
 		// An internal RPC (e.g. offscreen prove/simulate) exceeded its timeout.
 		// -32603 = JSON-RPC "Internal error". Generic message — never the raw
@@ -133,7 +139,7 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 		// the only variable part is the method name the dApp itself sent (bounded at the throw
 		// site), so the echo tells the caller nothing it did not already know. Classified because
 		// falling through would leave a dApp unable to tell "I asked for the wrong thing" from
-		// "the wallet broke" — and the tools app already branches on exactly that distinction.
+		// "the wallet broke", the distinction a dApp's fallback to another route depends on.
 		return {
 			code: -32601,
 			message: error.message,
@@ -197,6 +203,17 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
  * Deliberately constant: it is the only shape that cannot carry internal state outward.
  */
 export const UNCLASSIFIED_ERROR_MESSAGE = "The wallet could not process the request."
+
+/** Every scope refusal's dApp text, never the refusal's own: dApps may show or match it, so it is a
+ *  public contract. */
+export const SCOPE_VIOLATION_MESSAGE = "This request is outside the permissions you gave this app."
+
+/** One object answers every scope refusal, so it is frozen: no sink can edit what the next dApp gets. */
+export const SCOPE_VIOLATION_ENVELOPE = Object.freeze({
+	code: 4100,
+	message: SCOPE_VIOLATION_MESSAGE,
+	data: Object.freeze({ walletErrorCode: ScopeViolationError.CODE }),
+})
 
 /**
  * The session was invalidated mid-flight (profile switch, revocation) and the dApp must reconnect.

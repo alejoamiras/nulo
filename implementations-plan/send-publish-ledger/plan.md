@@ -19,9 +19,9 @@ base: dev @ 06010c9b
 - **Dropped**: nothing. **I1 verified by the owner** in a real Chrome (Escape closes the sheet, the popup stays). **Follow-ups the owner asked for** (`lessons/phase-6.md`): (1) the CTA's keyboard-focus ring on the dark theme — after Escape closes the sheet, focus returns to "Review send" and `Button.vue`'s `:focus-visible` outline paints `--nulo-accent`, white on dark, over the orange button; the owner wants a restyle, a `@nulo/design` decision; (2) the Escape-without-close behaviour of registry popups.
 - **Gates at delivery**: `audit:vue` (6 996 unit + component tests, build) · `test:ci-gating` 132/132 · smoke 15/15 · network 10/10 at retry 0 · mutation pass 23/24 killed, 1 equivalent · codex: conditional approve → approve in two rounds.
 - **Seeds retired**: the `/goal` + `/loop` seeds below are spent; nothing to resume.
-- **Follow-ups, unplanned** (each is its own blueprint when the owner wants it):
-  - `send-review-focus-ring` — the CTA's keyboard-focus ring on the dark theme: after Escape closes the sheet, focus returns to "Review send" and `Button.vue`'s `:focus-visible` outline paints `--nulo-accent` (white on dark) over the orange button. Correct a11y (only a keyboard close shows it); the owner wants it restyled — a `@nulo/design` token/variant decision touching every button.
-  - `popup-escape-closes` — registry popups that do not opt into `closeOnEscape` release their focus trap on Escape but stay visible, leaving the keyboard on whatever is beneath (codex post-impl round 1). The sheet refuses consent while covered (D22), so the send is safe; whether Escape should close such popups is a product call on every popup.
+- **Follow-ups** (2026-09-23):
+  - `send-review-focus-ring` — **dropped by the owner on 2026-09-22.** It was the CTA's keyboard-focus ring on the dark theme (after Escape closes the sheet, `Button.vue`'s `:focus-visible` outline paints `--nulo-accent`, white on dark, over the orange button). It is correct a11y behaviour and stays as is.
+  - `popup-escape-closes` — **taken**: [`../popup-escape-closes/plan.md`](../popup-escape-closes/plan.md). Registry popups that did not opt into `closeOnEscape` released their focus trap on Escape but stayed visible (codex post-impl round 1); every popup now closes on Escape the way it closes on the outside tap.
 
 Tell the sender, at the button, what a send puts on the public chain — always, in one line — and
 make the one send that names them against their intent pass through an explicit review.

@@ -42,7 +42,6 @@ vi.mock("@/stores/popup.store", () => ({
 
 vi.mock("@/composables/toast", () => ({
 	useToast: () => ({ openToast: openToastMock }),
-	TOAST_DURATION: { SHORT: 1500, DEFAULT: 2000, LONG: 4000 },
 }))
 
 // ── Stubs ────────────────────────────────────────────────────────────
@@ -140,7 +139,7 @@ describe("EditContactPopup — decoupled from sender registration", () => {
 
 		expect(contactServiceMock.updateContact).toHaveBeenCalledWith("c1", "Alice", NEW_ADDRESS)
 		expect(w.emitted("onClose")).toBeTruthy()
-		expect(openToastMock).toHaveBeenCalledWith({ label: "Contact is updated" })
+		expect(openToastMock).toHaveBeenCalledWith({ kind: "success", label: "Contact is updated" })
 	})
 
 	test("saves an edited address canonicalized to lowercase", async () => {
@@ -173,7 +172,7 @@ describe("EditContactPopup — decoupled from sender registration", () => {
 		await flushPromises()
 
 		expect(w.emitted("onClose")).toBeFalsy()
-		expect(openToastMock).toHaveBeenCalledWith({ label: "Something went wrong", icon: "warning" }, expect.anything())
+		expect(openToastMock).toHaveBeenCalledWith({ kind: "error", label: "Something went wrong" })
 	})
 
 	test("(RE-ENTRANCY PIN) repeated Enter during an in-flight update fires updateContact ONCE", async () => {

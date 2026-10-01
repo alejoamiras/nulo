@@ -1,3 +1,4 @@
+<!-- Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0. -->
 <script setup>
 /** Services */
 import { AccountType } from "@/wallet/services/account/client"
@@ -35,7 +36,7 @@ const handleSelectAccount = async (acc) => {
 	// until it settles; cancelling it also clears this.
 	const switched = await appStore.commitScopeChange(() => appStore.selectAccount(acc))
 	if (!switched) {
-		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+		openToast({ kind: "error", label: "Finish or cancel your pending transaction first" })
 		return
 	}
 
@@ -84,14 +85,9 @@ const handleManageAccounts = () => {
 						<template #right>
 							<Flex align="center" gap="8">
 								<Tooltip position="end" delay="350">
-									<Icon
-										@click.stop="handleCopyAddress(acc.address)"
-										name="copy"
-										size="14"
-										color="tertiary"
-										hoverColor="primary"
-										:class="$style.icon_btn"
-									/>
+									<RowAction label="Copy account address" data-testid="account-item-copy" @click="handleCopyAddress(acc.address)">
+										<Icon name="copy" size="14" color="tertiary" />
+									</RowAction>
 
 									<template #content>Copy account address</template>
 								</Tooltip>
@@ -139,14 +135,5 @@ const handleManageAccounts = () => {
 	text-transform: uppercase;
 
 	color: var(--txt-primary);
-}
-
-.icon_btn {
-	cursor: pointer;
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		fill: var(--txt-primary);
-	}
 }
 </style>

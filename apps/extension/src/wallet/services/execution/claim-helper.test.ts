@@ -3,7 +3,7 @@
  * decides whether to claim a pre-allocated queued journal record (queued →
  * pending) or create a fresh one, and how to surface cancellations safely.
  *
- * Plan v6 §Tests #22-#28 + post-impl review fixes. Covers:
+ * Covers:
  *   - no queuedJournalId           → create new
  *   - record reaped (not found)    → create new
  *   - record stage === "queued"     → claim succeeds; controller registered
@@ -400,7 +400,7 @@ describe("claimOrCreateDappExecuteJournal", () => {
 		// queued → pending so the UI doesn't show "Queued..." for a sendTx
 		// that never opens a popup. The claim helper must recognize this
 		// state and NOT throw + NOT re-transition + still register the
-		// controller. Opus post-impl F7.
+		// controller.
 		const { deps, activeControllers, journal } = makeDeps()
 		journal.getOperation.mockResolvedValueOnce({ networkId: "net1", accountAddress: "0xabc", progress: { stage: "pending" } })
 

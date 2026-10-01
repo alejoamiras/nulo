@@ -14,10 +14,10 @@ vi.mock("./note-schemas", () => ({
 	loadProductionNoteSchemas: async () => new Map<string, unknown>(),
 }))
 
-import type { PXE } from "@aztec/pxe/client/bundle"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import { TxExecutionRequest } from "@aztec/stdlib/tx"
-import { jsonStringify } from "@aztec/foundation/json-rpc"
+import type { PXE } from "@aztec-labs/pxe/client/bundle"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
+import { TxExecutionRequest } from "@aztec-labs/stdlib/tx"
+import { jsonStringify } from "@aztec-labs/foundation/json-rpc"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { ChainRuntime, type ActiveProve, type NetworkInfo, type PxeFactory } from "./chain-runtime"
 import { createProvePhaseSink } from "./prove-phase-sink"

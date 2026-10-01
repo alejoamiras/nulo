@@ -47,7 +47,11 @@ function cancel(reason: string) {
 }
 
 function handleKeydown(e: KeyboardEvent) {
-	if (e.key === "Escape") cancel("user cancelled with Escape")
+	if (e.key !== "Escape" || settled) return
+	// Chrome closes its toolbar popup on an Escape the page leaves unhandled, and cancelling the
+	// ceremony must not close the wallet with it.
+	e.preventDefault()
+	cancel("user cancelled with Escape")
 }
 
 onMounted(async () => {
@@ -84,7 +88,7 @@ onBeforeUnmount(() => {
 				<div :class="$style.spinner" />
 				<h2 :class="$style.title">Waiting for passkey…</h2>
 				<p :class="$style.subtitle">Use your authenticator (Touch ID, Windows Hello, security key) to continue.</p>
-				<p :class="$style.hint">Don't navigate away — press Escape to cancel.</p>
+				<p :class="$style.hint">Don't navigate away. Press Escape to cancel.</p>
 			</div>
 		</div>
 	</teleport>

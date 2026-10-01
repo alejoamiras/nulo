@@ -54,7 +54,7 @@ describe("PxeServiceClient recovery-mode admission", () => {
 		const client = new PxeServiceClient(noopLogger)
 		recovery.add("p1")
 		await expect(client.getSenders(net)).rejects.toBeInstanceOf(RecoveryModeError)
-		await expect(client.getContracts(net)).rejects.toThrow("Wallet keys need recovery — export a backup and restore it")
+		await expect(client.getContracts(net)).rejects.toThrow("Wallet keys need recovery. Export a backup and restore it")
 		expect(wire).toEqual([])
 	})
 

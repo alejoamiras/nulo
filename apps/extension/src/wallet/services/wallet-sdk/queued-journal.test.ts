@@ -1,33 +1,12 @@
 /**
  * Unit tests for `tryCreateQueuedJournal` — message-arrival queued-record
  * creation with cap + pre-auth gates.
- *
- * Plan v6 §Tests #13-#16 (queued-record creation, cap behaviour) +
- * post-impl review fix for atomic-cap under burst (codex + opus F1).
  */
-import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { beforeEach, describe, expect, test, vi } from "vitest"
-import type { WalletMessage } from "@aztec/wallet-sdk/types"
-import type { ActiveSession } from "@aztec/wallet-sdk/extension/handlers"
-import { ServiceCollection } from "@/wallet/base"
-import { ConfigStore } from "@/wallet/config"
-import { LoggerStore } from "@/wallet/logger"
-import { OperationJournalService } from "@/wallet/services/operation-journal/service"
-import {
-	MAX_QUEUED_GLOBAL,
-	MAX_QUEUED_PER_SESSION,
-	failQueuedIfUnclaimed,
-	tryCreateQueuedJournal,
-	type TryCreateQueuedJournalDeps,
-} from "./queued-journal"
-
-function makeSession(sessionId = "session-A"): ActiveSession {
-	return {
-		sessionId,
-		origin: "https://example.test",
-		chainInfo: { chainId: "0x539", version: "0x1" },
-	} as unknown as ActiveSession
-}
+import type { WalletMessage } from "@aztec-labs/wallet-sdk/types"
+import { ScopeViolationError } from "@nulo/extension-messaging/errors"
+import { MAX_QUEUED_GLOBAL, MAX_QUEUED_PER_SESSION, failQueuedForError, tryCreateQueuedJournal } from "./queued-journal"
+import { makeAccountStub, makeDappSessionStub, makeDeps, makeSession } from "./queued-journal.fixtures"
 
 function makeSendTxMessage(messageId = "msg-1"): WalletMessage {
 	return {
@@ -48,84 +27,6 @@ function makeNonSendTxMessage(): WalletMessage {
 		type: "getAccounts",
 		args: [],
 	} as unknown as WalletMessage
-}
-
-function makeDeps(overrides: Partial<TryCreateQueuedJournalDeps> = {}): {
-	deps: TryCreateQueuedJournalDeps
-	journal: OperationJournalService
-	api: FakeBrowserApi
-	profile: ReturnType<typeof makeProfileStub>
-	dappSession: ReturnType<typeof makeDappSessionStub>
-	networkSvc: ReturnType<typeof makeNetworkStub>
-} {
-	const api = new FakeBrowserApi()
-	api.reset()
-	const logger = new LoggerStore(new ConfigStore())
-	const journal = new OperationJournalService(logger, api)
-	const services = new ServiceCollection()
-	services.add(journal)
-	void services.start()
-
-	const profile = makeProfileStub()
-	const dappSession = makeDappSessionStub()
-	const networkSvc = makeNetworkStub()
-	const account = makeAccountStub()
-
-	const deps: TryCreateQueuedJournalDeps = {
-		journal,
-		profile: profile as never,
-		dappSession: dappSession as never,
-		networkSvc: networkSvc as never,
-		account: account as never,
-		stampedProfileId: "profile-1",
-		logger,
-		...overrides,
-	}
-	return { deps, journal, api, profile, dappSession, networkSvc }
-}
-
-function makeProfileStub() {
-	return {
-		// biome-ignore lint/suspicious/noExplicitAny: test stub
-		getActiveProfile: vi.fn<() => Promise<any>>(async () => ({ id: "profile-1" })),
-		// The creator captures the deletion epoch alongside the profile and
-		// threads it into the journal's create fence.
-		getDeletionState: vi.fn(() => ({ capture: (_id: string) => 0 })),
-	}
-}
-
-function makeDappSessionStub(opts: { name?: string | null } = { name: "Example Dapp" }) {
-	// `null` distinguishes "explicitly omit dappMetadata" from "default name" —
-	// passing `undefined` would trigger the default parameter, so callers must
-	// pass `{ name: null }` to simulate a session created before dappMetadata
-	// was populated.
-	const metadata = opts.name === null ? undefined : { name: opts.name }
-	return {
-		// biome-ignore lint/suspicious/noExplicitAny: test stub
-		tryGetDappSessionByOriginAndChain: vi.fn<() => Promise<any>>(async () => ({
-			accounts: ["aztec:1338:0xabc"],
-			capabilityGrants: [{ capability: { type: "transaction" } }, { capability: { type: "accounts" } }],
-			dappMetadata: metadata,
-		})),
-	}
-}
-
-/** Wallet order is index-sorted, exactly as `AccountService.getAccounts` returns. */
-function makeAccountStub(addresses: string[] = ["0xabc"]) {
-	return {
-		// biome-ignore lint/suspicious/noExplicitAny: test stub
-		getAccounts: vi.fn<() => Promise<any[]>>(async () => addresses.map((address, index) => ({ address, index }))),
-	}
-}
-
-function makeNetworkStub() {
-	return {
-		// The anchored read: profileId-explicit, never the live active profile.
-		// biome-ignore lint/suspicious/noExplicitAny: test stub
-		getNetworksRaw: vi.fn<(profileId: string, chainId?: number) => Promise<any[]>>(async () => [
-			{ id: "network-row-1", chainId: 1338 },
-		]),
-	}
 }
 
 describe("tryCreateQueuedJournal", () => {
@@ -403,8 +304,10 @@ describe("tryCreateQueuedJournal — record account", () => {
 	})
 })
 
-describe("failQueuedIfUnclaimed — CAS against a concurrent claim (N-07)", () => {
-	test("a record claimed (queued→pending) is NOT failed — the lock-held re-read stands down", async () => {
+describe("failQueuedForError — CAS against a concurrent claim (N-07)", () => {
+	const refusal = new ScopeViolationError("Scope violation: sendTx call not permitted by granted transaction scope")
+
+	test("a record claimed (queued→pending) is NOT failed — the lock-held re-read stands down (regression control)", async () => {
 		const { deps, journal } = makeDeps()
 		const id = await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
 		expect(id).toBeDefined()
@@ -415,23 +318,29 @@ describe("failQueuedIfUnclaimed — CAS against a concurrent claim (N-07)", () =
 		await journal.transitionOperation(id as string, { stage: "pending" })
 		const staleSnapshot = { id, progress: { stage: "queued" } }
 		vi.spyOn(journal, "getOperation").mockResolvedValueOnce(staleSnapshot as never)
-		await failQueuedIfUnclaimed(journal, id as string, "boom", deps.logger)
+		await failQueuedForError(journal, id as string, refusal, deps.logger)
 		vi.restoreAllMocks()
 		expect((await journal.getOperation(id as string))?.progress.stage).toBe("pending")
 	})
 
-	test("a still-queued record IS failed with the popup_bound kind (positive control)", async () => {
+	test.each([
+		["a scope refusal", "scope_refused", refusal],
+		["any other failure", "popup_bound", new Error("session gone")],
+	])("a still-queued record failed by %s gets the %s kind and the error's message", async (_name, kind, error) => {
 		const { deps, journal } = makeDeps()
 		const id = await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
-		await failQueuedIfUnclaimed(journal, id as string, "session gone", deps.logger)
+		await failQueuedForError(journal, id as string, error, deps.logger)
 		const rec = await journal.getOperation(id as string)
-		expect(rec?.progress.stage).toBe("failed")
-		expect(rec?.error?.kind).toBe("popup_bound")
+		expect({ stage: rec?.progress.stage, kind: rec?.error?.kind, message: rec?.error?.message }).toEqual({
+			stage: "failed",
+			kind,
+			message: error.message,
+		})
 	})
 
-	test("a missing record is a silent no-op (byte-equivalent to the legacy behavior)", async () => {
+	test("a missing record is a silent no-op (regression control)", async () => {
 		const { deps, journal } = makeDeps()
-		await failQueuedIfUnclaimed(journal, "no-such-id", "gone", deps.logger)
+		await failQueuedForError(journal, "no-such-id", refusal, deps.logger)
 		expect(await journal.countOperations({ stage: "failed" })).toBe(0)
 	})
 })

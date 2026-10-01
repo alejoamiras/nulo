@@ -1,0 +1,81 @@
+<section class="wrap item" id="i1" data-item="i1" aria-labelledby="i1-title">
+	<div class="item-head">
+		<span class="item-num">01</span>
+		<h2 class="item-title" id="i1-title">"Account" reads like a label, not a name</h2>
+		<div class="item-surface"><span class="chip">Popup header</span><span class="chip">Account switcher</span><span class="chip">dApp account picker</span></div>
+	</div>
+	<blockquote class="quote"><cite>Your note</cite>The default account should be named "Account 1" — the problem of it being "Account" is that when reading it, it looks like we are talking about SOME account. But if we put "Account 1" it's clearly a name.</blockquote>
+	<div class="facts">
+		<div>
+			<h3>What the code does</h3>
+			<ul>
+				<li><code>DEFAULT_ACCOUNT_NAME = "Account"</code> in <code>apps/extension/src/wallet/services/account/spec.ts:6</code> seeds the first account on every network.</li>
+				<li>The header uppercases the name right above the address (<code>Header.vue</code>), so it renders as <b>ACCOUNT / 0x1dd7...d930</b> — exactly the shape of a field label. The avatar initials become <b>AC</b>.</li>
+				<li>Numbering is already inconsistent: the New Account popup suggests the lowest free <code>Account N</code> starting at 1 (<code>NewAccountPopup.vue:101-105</code>), so your second account is called "Account 1".</li>
+			</ul>
+		</div>
+		<div>
+			<h3>What others do</h3>
+			<ul>
+				<li>MetaMask: "You'll see that as your <i>Account 1</i> (default account)" — <a href="https://support.metamask.io/configure/accounts/how-to-add-accounts-in-your-wallet/">support doc</a>. Accounts are hidden, never deleted, so numbers don't get reused.</li>
+				<li>None of the wallets surveyed asks you to name the first account; all rename in place later.</li>
+			</ul>
+		</div>
+	</div>
+
+	<div class="opts">
+		<div class="opt current">
+			<div class="opt-head"><span class="opt-key">Current</span><span class="opt-name">"Account", then "Account 1"</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop" theme="dark">
+					<div class="n-hdr">
+						<div class="n-acct"><div class="n-avatar">AC</div><div class="n-acct-col"><span class="n-acct-name">Account</span><span class="n-acct-addr">0x1dd7...d930</span></div></div>
+						<div class="n-hdr-right"><div class="n-net"><span class="n-net-label">Testnet</span><span class="n-dot"></span></div><div class="n-iconbtn"><span class="ms">lock</span></div></div>
+					</div>
+					<div class="n-sheet">
+						<div class="n-sheet-title">Accounts</div>
+						<div class="n-srow"><div class="n-avatar">AC</div><div class="n-srow-t"><span class="n-srow-name">Account</span><span class="n-srow-addr">0x1dd7…d930</span></div><span class="ms">chevron_right</span></div>
+						<div class="n-srow"><div class="n-avatar">A1</div><div class="n-srow-t"><span class="n-srow-name">Account 1</span><span class="n-srow-addr">0x8c02…41fa</span></div><span class="ms">chevron_right</span></div>
+					</div>
+				</div></div>
+				<div class="cap">Header + account list after adding a second account (list simplified)</div>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="A">
+			<div class="opt-head"><span class="opt-key">A</span><span class="opt-name">"Account 1", "Account 2", …</span><span class="opt-rec">Recommended</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop" theme="dark">
+					<div class="n-hdr">
+						<div class="n-acct"><div class="n-avatar">A1</div><div class="n-acct-col"><span class="n-acct-name">Account 1</span><span class="n-acct-addr">0x1dd7...d930</span></div></div>
+						<div class="n-hdr-right"><div class="n-net"><span class="n-net-label">Testnet</span><span class="n-dot"></span></div><div class="n-iconbtn"><span class="ms">lock</span></div></div>
+					</div>
+					<div class="n-sheet">
+						<div class="n-sheet-title">Accounts</div>
+						<div class="n-srow"><div class="n-avatar">A1</div><div class="n-srow-t"><span class="n-srow-name">Account 1</span><span class="n-srow-addr">0x1dd7…d930</span></div><span class="ms">chevron_right</span></div>
+						<div class="n-srow"><div class="n-avatar">A2</div><div class="n-srow-t"><span class="n-srow-name">Account 2</span><span class="n-srow-addr">0x8c02…41fa</span></div><span class="ms">chevron_right</span></div>
+					</div>
+				</div></div>
+				<div class="cap">Same screens with the new default</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>The constant becomes <code>"Account 1"</code>. The New Account popup's numbering already continues from there.</li>
+					<li>Avatar initials read <b>A1</b>, <b>A2</b> — distinguishable at a glance.</li>
+					<li>Pre-production, so no migration: existing dev installs keep "Account" until reinstalled.</li>
+				</ul></div>
+				<div><h4>Clicks</h4><p>None change.</p></div>
+				<p class="cost">Effort: one constant + test expectations.</p>
+			</div>
+		</div>
+	</div>
+
+	<div class="recbox">
+		<div>
+			<h3>My pick: A</h3>
+			<p>One option is enough here. I considered your alternative — no default name, address as identity until named — and dropped it: the name is load-bearing in about ten places (header, identity strip on every dApp window, the dApp account picker and its aliases, tx detail, contacts), each of which would need an address fallback.</p>
+			<p class="conf">Confidence: high.</p>
+		</div>
+		<div class="pick" data-pick="i1" data-options="A|Other"></div>
+	</div>
+</section>

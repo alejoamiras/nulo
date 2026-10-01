@@ -9,10 +9,10 @@
  * Tx validation is never skipped here: the node's setup allow-list is part of what is proven.
  * Results are projected through `summarizeSimulation` for the simulate; sends return the hash.
  */
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { Fr } from "@aztec/aztec.js/fields"
-import { decodeFromAbi } from "@aztec/stdlib/abi"
-import { getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { Fr } from "@aztec-labs/aztec.js/fields"
+import { decodeFromAbi } from "@aztec-labs/stdlib/abi"
+import { getContractInstanceFromInstantiationParams } from "@aztec-labs/aztec.js/contracts"
 import { getWallet } from "../lib/wallet"
 import { logCall } from "../lib/log"
 import { summarizeSimulation } from "../lib/simulation-summary"
@@ -159,7 +159,7 @@ async function readUtility(call: any, scope: AztecAddress): Promise<string> {
 	// biome-ignore lint/suspicious/noExplicitAny: ExecuteUtilityOptions cast at boundary
 	const opts = { scopes: [scope], authWitnesses: [], capsules: [], extraHashedArgs: [] } as any
 	const out = await wallet.executeUtility(call, opts)
-	return String(decodeFromAbi(call.returnTypes, out.result))
+	return String(decodeFromAbi(call.returnType, out.result))
 }
 
 function on(root: HTMLElement, testid: string, method: string, fn: () => Promise<unknown>): void {

@@ -13,9 +13,9 @@
  * DUMB BY CONTRACT: canned returns + a registered-address set. No Aztec
  * semantics, no proving/simulation (the `ShallowPxe` port can't express them).
  */
-import type { ContractArtifact } from "@aztec/stdlib/abi"
-import type { AztecAddress } from "@aztec/stdlib/aztec-address"
-import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
+import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
+import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import type { ContractInstanceWithAddress } from "@aztec-labs/stdlib/contract"
 import type { IPXE } from "@/wallet/services/pxe/client"
 import type { ShallowPxe, ShallowPxeClient } from "./shallow-port"
 
@@ -44,7 +44,7 @@ export interface ShallowPxeFake {
 	 * tree-shaking whenever the factory is bundled — so the `dist/chrome` grep
 	 * in `_build-extension.yml` reliably catches a fake that leaked into prod.
 	 * (An unused exported const could be tree-shaken away while the factory
-	 * ships — codex post-impl audit High.)
+	 * ships.)
 	 */
 	marker: typeof SHALLOW_PXE_FAKE_BUNDLE_MARKER
 }

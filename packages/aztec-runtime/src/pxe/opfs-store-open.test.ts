@@ -7,12 +7,12 @@ import { afterEach, describe, expect, test, vi } from "vitest"
 
 const { mockOpen } = vi.hoisted(() => ({ mockOpen: vi.fn() }))
 
-vi.mock("@aztec/kv-store/sqlite-opfs", () => {
+vi.mock("@aztec-labs/kv-store/sqlite-opfs", () => {
 	class SqliteEncryptionError extends Error {}
 	return { AztecSQLiteOPFSStore: { open: mockOpen }, SqliteEncryptionError }
 })
 
-import { SqliteEncryptionError as RealSqliteEncryptionError } from "@aztec/kv-store/sqlite-opfs"
+import { SqliteEncryptionError as RealSqliteEncryptionError } from "@aztec-labs/kv-store/sqlite-opfs"
 import type { ChainCoordinates } from "./chain-coordinates"
 import { ChainStoreWedgedError, openChainStore, WrongStoreKeyError } from "./opfs-store"
 

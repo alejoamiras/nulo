@@ -1,6 +1,18 @@
 import { describe, expect, test, vi } from "vitest"
 import { FpcType } from "@/wallet/services/fpc/client"
-import { buildFeeMethods, buildSettings, FEE_JUICE_BRIDGE_URL, formatGasBalance, settingsForMethod } from "./fee-helpers"
+import {
+	buildFeeMethods,
+	buildSettings,
+	defaultSponsor,
+	FEE_JUICE_BRIDGE_URL,
+	type FeeMethodOption,
+	feeDisplay,
+	feeLine,
+	formatGasBalance,
+	menuOrder,
+	resolveSavedSelection,
+	settingsForMethod,
+} from "./fee-helpers"
 
 describe("fee-helpers/formatGasBalance", () => {
 	test("returns '0' for zero raw value", () => {
@@ -184,12 +196,12 @@ describe("fee-helpers/buildFeeMethods", () => {
 		expect(priv?.disabledReason).toBe("not available")
 	})
 
-	test("private_fpc with registered FPC but null private balance is disabled with 'no balance'", () => {
+	test("private_fpc with registered FPC but null private balance is disabled with the honest reason", () => {
 		const fpcs = [{ id: "p1", type: FpcType.PrivateFpc, name: "Private", isProtocol: true }]
 		const m = buildFeeMethods(fpcs, { publicFeeJuice: "1000", privateFeeJuice: null })
 		const priv = m.find((x) => x.type === "private_fpc")
 		expect(priv?.disabled).toBe(true)
-		expect(priv?.disabledReason).toBe("no balance")
+		expect(priv?.disabledReason).toBe("couldn't check balance")
 		expect(priv?.subtitle).toBe("private")
 	})
 
@@ -207,23 +219,101 @@ describe("fee-helpers/buildFeeMethods", () => {
 		const priv = m.find((x) => x.type === "private_fpc")
 		expect(priv?.disabled).toBeUndefined()
 	})
+})
 
-	test("allowSponsored:false omits the Sponsored FPC row (Alpha/mainnet)", () => {
-		const fpcs = [{ id: "s1", type: FpcType.DefaultSponsoredFpc, name: "Sponsor" }]
-		const m = buildFeeMethods(fpcs, undefined, { allowSponsored: false })
-		expect(m.map((x) => x.type)).toEqual(["fj", "private_fpc"])
-		expect(m.find((x) => x.fpc?.id === "s1")).toBeUndefined()
+describe("fee-helpers/buildFeeMethods — what each row can spend", () => {
+	const PRIVATE = { id: "p1", type: FpcType.PrivateFpc, name: "Private Fee Juice", isProtocol: true }
+	const NULO_SPONSOR = { id: "s1", type: FpcType.DefaultSponsoredFpc, name: "Sponsored", isProtocol: true }
+	const HAND_ADDED = { id: "s2", type: FpcType.DefaultSponsoredFpc, name: "Dev sponsor", isProtocol: false }
+	/** Hundredths of a Fee Juice, in base units. */
+	const FJ = (hundredths: string) => `${hundredths}${"0".repeat(16)}`
+	const column = (m: FeeMethodOption) => (m.disabled && m.disabledReason ? m.disabledReason : m.spend)
+
+	test.each([
+		["not known yet", [PRIVATE], undefined, ["— FJ", "— FJ"]],
+		["private unreadable", [PRIVATE], { publicFeeJuice: FJ("120"), privateFeeJuice: null }, ["1.2 FJ", "couldn't check balance"]],
+		["public unreadable", [PRIVATE], { publicFeeJuice: null, privateFeeJuice: FJ("42") }, ["couldn't check balance", "0.42 FJ"]],
+		["zero", [PRIVATE], { publicFeeJuice: "0", privateFeeJuice: "0" }, ["no balance", "no balance"]],
+		["positive", [PRIVATE], { publicFeeJuice: FJ("120"), privateFeeJuice: FJ("42") }, ["1.2 FJ", "0.42 FJ"]],
+		["no PrivateFPC, not known yet", [], undefined, ["— FJ", "not available"]],
+		["no PrivateFPC", [], { publicFeeJuice: FJ("120"), privateFeeJuice: null }, ["1.2 FJ", "not available"]],
+	] as const)("%s", (_, fpcs, balances, expected) => {
+		const methods = buildFeeMethods([...fpcs, NULO_SPONSOR, HAND_ADDED], balances)
+		expect(methods.map(column)).toEqual([...expected, "free", "—"])
 	})
 
-	test("allowSponsored defaults true (Sponsored FPC retained)", () => {
-		const fpcs = [{ id: "s1", type: FpcType.DefaultSponsoredFpc, name: "Sponsor" }]
-		expect(buildFeeMethods(fpcs).find((x) => x.fpc?.id === "s1")?.subtitle).toBe("sponsored")
+	test("titles: Public Fee Juice, then the FPCs' names, else Private Fee Juice and Sponsored", () => {
+		const unnamed = { id: "s3", type: FpcType.DefaultSponsoredFpc, isProtocol: true }
+		expect(buildFeeMethods([PRIVATE, NULO_SPONSOR, HAND_ADDED]).map((m) => m.title)).toEqual([
+			"Public Fee Juice",
+			"Private Fee Juice",
+			"Sponsored",
+			"Dev sponsor",
+		])
+		expect(buildFeeMethods([{ ...PRIVATE, name: undefined }, unnamed]).map((m) => m.title)).toEqual([
+			"Public Fee Juice",
+			"Private Fee Juice",
+			"Sponsored",
+		])
+	})
+
+	test("the menu lists Nulo's sponsor before hand-added ones; only the menu is reordered", () => {
+		const second = { ...HAND_ADDED, id: "s4", name: "Other sponsor" }
+		const methods = buildFeeMethods([PRIVATE, HAND_ADDED, NULO_SPONSOR, second])
+		expect(menuOrder(methods).map((m) => m.title)).toEqual([
+			"Public Fee Juice",
+			"Private Fee Juice",
+			"Sponsored",
+			"Dev sponsor",
+			"Other sponsor",
+		])
+		expect(methods.map((m) => m.title)).toEqual(["Public Fee Juice", "Private Fee Juice", "Dev sponsor", "Sponsored", "Other sponsor"])
+	})
+
+	test("the default sponsor is Nulo's wherever it is listed, and never one added by hand", () => {
+		const second = { ...HAND_ADDED, id: "s4", name: "Other sponsor" }
+		expect(defaultSponsor(buildFeeMethods([HAND_ADDED, NULO_SPONSOR, second]))?.fpc?.id).toBe("s1")
+		expect(defaultSponsor(buildFeeMethods([HAND_ADDED, second]))).toBeUndefined()
+		expect(defaultSponsor(buildFeeMethods([PRIVATE]))).toBeUndefined()
+	})
+})
+
+describe("fee-helpers — sponsors a verdict found short", () => {
+	const NULO_SPONSOR = { id: "s1", type: FpcType.DefaultSponsoredFpc, name: "Sponsored", isProtocol: true }
+	const HAND_ADDED = { id: "s2", type: FpcType.DefaultSponsoredFpc, name: "Dev sponsor", isProtocol: false }
+	const FUNDED = { publicFeeJuice: "9", privateFeeJuice: "9" }
+	const build = (options?: Parameters<typeof buildFeeMethods>[2]) => buildFeeMethods([NULO_SPONSOR, HAND_ADDED], FUNDED, options)
+	const sponsor = (methods: FeeMethodOption[], id: string) => methods.find((m) => m.fpc?.id === id)
+
+	test("a short row is disabled with its reason, a set-aside row is marked, and every other row is as built", () => {
+		const plain = build()
+		const marked = build({ shortSponsorIds: new Set(["s1"]), setAsideSponsorIds: new Set(["s1"]) })
+		expect(sponsor(marked, "s1")).toEqual({ ...sponsor(plain, "s1"), disabled: true, disabledReason: "can't pay now", setAside: true })
+		expect(marked.filter((m) => m.fpc?.id !== "s1")).toEqual(plain.filter((m) => m.fpc?.id !== "s1"))
+
+		const setAside = build({ setAsideSponsorIds: new Set(["s2"]) })
+		expect(sponsor(setAside, "s2")).toEqual({ ...sponsor(plain, "s2"), setAside: true })
+		expect(setAside.filter((m) => m.fpc?.id !== "s2")).toEqual(plain.filter((m) => m.fpc?.id !== "s2"))
+	})
+
+	test.each([
+		["short", { shortSponsorIds: new Set(["s1", "s2"]), setAsideSponsorIds: new Set(["s1", "s2"]) }],
+		["set aside", { setAsideSponsorIds: new Set(["s1", "s2"]) }],
+	])("%s: never the default sponsor, and a saved pick of it resolves to nothing", (_case, verdicts) => {
+		expect(defaultSponsor(build())?.fpc?.id).toBe("s1")
+		expect(resolveSavedSelection({ type: "fpc", fpc: { id: "s2" } }, build())?.fpc?.id).toBe("s2")
+
+		const methods = build(verdicts)
+		expect(defaultSponsor(methods)).toBeUndefined()
+		expect(resolveSavedSelection({ type: "fpc", fpc: { id: "s1" } }, methods)).toBeUndefined()
+		expect(resolveSavedSelection({ type: "fpc", fpc: { id: "s2" } }, methods)).toBeUndefined()
+		expect(resolveSavedSelection({ type: "fj" }, methods)?.type).toBe("fj")
 	})
 })
 
 describe("fee-helpers/FEE_JUICE_BRIDGE_URL", () => {
-	test("defaults to the tools fee-juice bridge", () => {
-		expect(FEE_JUICE_BRIDGE_URL).toBe("https://tools.nulo.sh")
+	test("defaults to unleashed's testnet app", () => {
+		expect(FEE_JUICE_BRIDGE_URL).toBe("https://unleashed-testnet.alejo-amiras.workers.dev")
 	})
 })
 
@@ -269,5 +359,24 @@ describe("fee-helpers/buildFeeMethods — only the protocol PrivateFPC is offere
 		expect(privateOption?.fpc).toBeNull()
 		expect(privateOption?.disabled).toBe(true)
 		expect(privateOption?.disabledReason).toBe("not available")
+	})
+})
+
+describe("fee-helpers/feeDisplay + feeLine", () => {
+	// 1.05e14 base units = 0.000105 FJ; wire estimates carry maxFee as a decimal string.
+	const estimate = { maxFee: "105000000000000", maxFeeFormatted: "0.000105" }
+
+	test("priced: the card's amount and dollars, and the sheet's line in the same words", () => {
+		const display = feeDisplay(estimate, 0.004)
+		expect(display).toEqual({ amount: "0.000105", usd: "<$0.001" })
+		expect(feeLine(display)).toBe("~0.000105 FJ (<$0.001)")
+		expect(feeLine(feeDisplay({ maxFee: 10n ** 18n, maxFeeFormatted: "1" }, 2.5))).toBe("~1 FJ ($2.500)")
+	})
+
+	test("unpriced or no estimate: no dollars, and nothing at all without an estimate", () => {
+		expect(feeLine(feeDisplay(estimate, undefined))).toBe("~0.000105 FJ")
+		expect(feeLine(feeDisplay(estimate, 0))).toBe("~0.000105 FJ")
+		expect(feeDisplay(null, 0.004)).toBeNull()
+		expect(feeLine(null)).toBeUndefined()
 	})
 })

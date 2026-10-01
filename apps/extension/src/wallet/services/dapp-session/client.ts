@@ -30,6 +30,7 @@ definePassthroughsExhaustive<Methods>()(DappSessionServiceClient.prototype, [
 	"deleteDappSession",
 	"setVerificationHash",
 	"setTrustedVerification",
+	"setAuthorizationsWithoutAsking",
 	"setAccountAliases",
 	"setCapabilityGrants",
 	"getCapabilityGrants",

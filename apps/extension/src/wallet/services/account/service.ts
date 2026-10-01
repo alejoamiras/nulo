@@ -1,4 +1,4 @@
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { deriveAccountSeed, deriveSigningKeyFromSeed } from "@nulo/wallet-crypto"
@@ -20,10 +20,10 @@ import {
 	NuloAccount,
 	parseAccountExport,
 	serializeAccountExport,
-	V5_REGIME,
+	V6_REGIME,
 	type IAccountContract,
 } from "@nulo/aztec-runtime/account"
-import { GrumpkinScalar } from "@aztec/foundation/curves/grumpkin"
+import { GrumpkinScalar } from "@aztec-labs/foundation/curves/grumpkin"
 import { type ImportedKeysDek, sealImportedSigningKeyV2, unsealImportedSigningKeyV2, zeroize } from "@nulo/wallet-crypto"
 import { AccountAddressInconsistencyError } from "@nulo/extension-messaging/errors"
 import { ImportedKeysRepository } from "./imported-keys-repository"
@@ -467,7 +467,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		// Session-gated DEK for sealing the key at rest (the credential-rooted isolation boundary
 		// — never the master). A degraded session cannot ACCEPT new imported material: fail loud.
 		const dek = await this.profileService.getProfileDek(profileId)
-		if (!dek) throw new Error("Imported keys unavailable — unlock again")
+		if (!dek) throw new Error("Imported keys unavailable. Unlock again")
 		try {
 			const { signingKey, address: recomputed } = await this.decodeAccountExport(fileBody, password)
 			// The user CONFIRMED this exact address in the UI (the checksum authenticates nothing —
@@ -548,7 +548,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			accountIndex,
 			storedAddress,
 			derivedAddress,
-			regimeId: V5_REGIME.id,
+			regimeId: V6_REGIME.id,
 			walletVersion: typeof __VERSION__ === "undefined" ? "unknown" : __VERSION__,
 			detectedAt: Date.now(),
 		}
@@ -780,7 +780,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 					const parsed = ImportedAccountKeySchema.parse(row)
 					if (parsed.address.trim().length === 0) throw new Error("empty imported-key address")
 					const ctx = contexts.get(parsed.profileId)
-					if (!ctx) throw new Error("no rewrap context for imported key — dropped to the orphan taxonomy")
+					if (!ctx) throw new Error("no rewrap context for imported key, so it was not restored")
 					let skBytes: Uint8Array<ArrayBuffer> | undefined
 					try {
 						skBytes = await unsealImportedSigningKeyV2(

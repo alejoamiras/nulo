@@ -5,7 +5,7 @@
  * release is published yet.
  *
  * Runs as `prebuild` automatically when `bun run build` executes. Also runs
- * in Cloudflare Pages' build environment on every push.
+ * in Cloudflare's build environment on every push.
  */
 
 import { writeFileSync } from "node:fs"

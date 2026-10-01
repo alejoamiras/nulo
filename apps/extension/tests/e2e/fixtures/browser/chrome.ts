@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 import type { Browser, CDPSession, Page, Target } from "puppeteer"
 import puppeteer from "puppeteer"
 import { cdpInterceptRpc } from "./chrome-rpc-intercept"
@@ -24,7 +25,7 @@ async function pxeHostState(page: Page): Promise<PxeHostState> {
 	return { count, visibility }
 }
 
-async function launch({ extensionPath, userDataDir, headless }: LaunchOptions): Promise<LaunchedBrowser> {
+async function launch({ extensionPath, userDataDir, headless, fixedWindowSize = true }: LaunchOptions): Promise<LaunchedBrowser> {
 	// Headless `true` supports MV3 extensions — offscreen documents, the service worker,
 	// `chrome.storage` and `chrome.runtime.Port` all work.
 	const browser = await puppeteer.launch({
@@ -35,7 +36,8 @@ async function launch({ extensionPath, userDataDir, headless }: LaunchOptions): 
 			`--load-extension=${extensionPath}`,
 			"--no-sandbox",
 			"--disable-setuid-sandbox",
-			"--window-size=400,600",
+			// Headless Chrome's size flag overrides the dimensions `windows.create` asks for.
+			...(fixedWindowSize ? ["--window-size=400,600"] : []),
 			// Prevent Chrome from throttling background/offscreen tabs. Headless
 			// Chrome doesn't have a "focused" page, so without these flags the
 			// renderer backgrounds the tab and rAF gets throttled to ~1Hz —
@@ -173,6 +175,24 @@ async function stopBackground(browser: Browser, extensionId: string): Promise<vo
 	}
 }
 
+/** Over CDP, which the extension's CSP does not govern. The session is gone before this resolves:
+ *  one left attached would park the worker's host through a later stop (see `stopBackground`). */
+async function evaluateInBackground<T>(browser: Browser, extensionId: string, body: string): Promise<T> {
+	const worker = browser.targets().find(isServiceWorkerOf(extensionId))
+	if (!worker) throw new Error("evaluateInBackground: no service worker runs for the extension")
+	const session = await worker.createCDPSession()
+	try {
+		const { result, exceptionDetails } = await session.send("Runtime.evaluate", {
+			expression: `(function () { ${body} })()`,
+			returnByValue: true,
+		})
+		if (exceptionDetails) throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text)
+		return result.value as T
+	} finally {
+		await session.detach().catch(() => {})
+	}
+}
+
 /** The MV3 service worker is the first extension context Chrome starts, and its URL carries the id. */
 async function discoverExtensionId(browser: Browser): Promise<string> {
 	const worker = await browser.waitForTarget(
@@ -200,9 +220,17 @@ export const chromeDriver: BrowserDriver = {
 	waitForOpenedUrl: async (browser, url, timeout) => {
 		await browser.waitForTarget((target) => target.type() === "page" && target.url() === url, { timeout })
 	},
+	waitForNewTab: async (browser, open, timeout) => {
+		const before = new Set(browser.targets())
+		await open()
+		const target = await browser.waitForTarget((t) => t.type() === "page" && !before.has(t), { timeout })
+		return { close: async () => (await target.asPage()).close() }
+	},
 	interceptRpc: (browser, extensionId, fromOrigin, mode) => cdpInterceptRpc(browser, `${SCHEME}${extensionId}/`, fromOrigin, mode),
 	// Chrome treats evaluated script as a user gesture and has no focused-window precondition.
 	prepareClick: async () => {},
+	// Chrome runs a key's default action on the page the key is sent to, focused or not.
+	prepareKeys: async () => {},
 	pickFile: async (page, open, filePath) => {
 		const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 10_000 }), open()])
 		await chooser.accept([filePath])
@@ -212,10 +240,11 @@ export const chromeDriver: BrowserDriver = {
 	pxeHostState,
 	stopBackground,
 	backgroundAlive,
+	evaluateInBackground,
 	openScratchPage: async (browser, extensionId) => {
 		const page = await browser.newPage()
 		try {
-			await page.goto(`${SCHEME}${extensionId}/src/popup/index.html`, { waitUntil: "domcontentloaded" })
+			await page.goto(`${SCHEME}${extensionId}/src/setup/index.html#/install`, { waitUntil: "domcontentloaded" })
 			return page
 		} catch (err) {
 			// The caller retries a detached frame with a fresh page and never sees this one.

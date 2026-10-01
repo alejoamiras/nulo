@@ -17,6 +17,7 @@ E2E tests append `?test=1` to the URL and run the Vite dev server with `VITE_DIS
 ## Testid contract
 
 - `pg-status` (with `data-status="idle|discovering|verifying|connected|error|disconnected"`)
+- `pg-verification-hash` (hidden): the current connect attempt's `PendingConnection.verificationHash`, set before `confirm()`, so a test can compare the wallet's emoji grid with the dApp's own hash
 - `pg-account-list` containing `pg-account-item[data-account-id][data-account-name]`
 - `pg-btn-{action}` for every button (e.g. `pg-btn-connect`, `pg-btn-sendTx-default`)
 - `pg-input-{name}` for every input (e.g. `pg-input-recipient`, `pg-input-amount`)
@@ -56,8 +57,8 @@ Bundles are a playground-only convenience: the wallet itself models capabilities
 
 ## Stack
 
-- `@aztec/wallet-sdk` — discovery + secure-channel client.
-- `@aztec/aztec.js` — types (`FunctionCall`, `Fr`, `AztecAddress`, `ExecutionPayload`).
+- `@aztec-labs/wallet-sdk` — discovery + secure-channel client.
+- `@aztec-labs/aztec.js` — types (`FunctionCall`, `Fr`, `AztecAddress`, `ExecutionPayload`).
 - `@alejoamiras/aztec-standards` — Token contract artifact for `sendTx` tests.
 - Vite — dev server / build.
 - No UI framework — plain DOM updates keyed off `pg-result` seq.

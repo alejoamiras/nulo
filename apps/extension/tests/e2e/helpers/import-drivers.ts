@@ -14,15 +14,19 @@ import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { type Page, TimeoutError } from "puppeteer"
 import { expect } from "vitest"
+import { defaultProfileName } from "@/utils/profile-name"
 import {
 	clickByTestId,
 	type ExtensionContext,
+	expectNameFieldPrefill,
+	expectNoNameField,
 	openOnboarding,
 	openPopup,
 	waitForHash,
 	withTimeoutMessage,
 	pickFileByTestId,
 } from "../fixtures/extension"
+import { expectNewProfileNamed, readProfileNames } from "../fixtures/helpers"
 import { readSwLogTrail } from "../fixtures/journal"
 import {
 	appendImportRecord,
@@ -112,6 +116,8 @@ export type ImportMethod = "seed" | "full-backup"
 
 /** The only parts of the import flow that differ between shells. */
 export interface ImportShell {
+	/** Page-root testid carrying `data-name-field` — popup: `import-page`; onboarding: `onboarding-import-page`. */
+	pageTestId: string
 	/** Profile-name input testid — popup: `import-name-input`; onboarding: `onboarding-name-input`. */
 	nameInputTestId: string
 	/** Submit-button testid for a method — popup: per-method `import-<m>-submit-btn`; onboarding: single `onboarding-submit-import`. */
@@ -121,12 +127,14 @@ export interface ImportShell {
 }
 
 export const POPUP_IMPORT_SHELL: ImportShell = {
+	pageTestId: "import-page",
 	nameInputTestId: "import-name-input",
 	submitTestId: (m) => `import-${m}-submit-btn`,
 	successHash: "#/popup/general",
 }
 
 export const ONBOARDING_IMPORT_SHELL: ImportShell = {
+	pageTestId: "onboarding-import-page",
 	nameInputTestId: "onboarding-name-input",
 	submitTestId: () => "onboarding-submit-import",
 	successHash: "#/onboarding/learn",
@@ -180,18 +188,38 @@ export async function gotoOnboardingImport(ctx: ExtensionContext): Promise<Page>
 	return page
 }
 
-export async function importSeed(page: Page, seed: string, password: string, shell: ImportShell): Promise<void> {
-	await page.waitForSelector('[data-testid="import-option-seed"]', { visible: true, timeout: 10_000 })
+/** Import a recovery phrase and check the name the profile gets, both judged from the profiles
+ *  stored beforehand: a first profile shows no name field and is named "Main"; a later one opens
+ *  prefilled with the default and keeps it unless `profileName` replaces it. A `profileName` on a
+ *  first profile fails instead of being skipped. */
+export async function importSeed(
+	page: Page,
+	seed: string,
+	password: string,
+	shell: ImportShell,
+	{ profileName }: { profileName?: string } = {},
+): Promise<void> {
+	await page.waitForSelector('[data-testid="import-option-seed"]', { visible: true, timeout: 30_000 })
+	const before = await readProfileNames(page)
+	const fallback = defaultProfileName(before)
+	if (before.length === 0) {
+		if (profileName !== undefined)
+			throw new Error(`importSeed: profileName "${profileName}" given, but a first profile has no name field`)
+		await expectNoNameField(page, shell.pageTestId, shell.nameInputTestId)
+	} else {
+		await expectNameFieldPrefill(page, shell.pageTestId, shell.nameInputTestId, fallback)
+	}
 	await clickByTestId(page, "import-option-seed")
 	await page.waitForSelector('[data-testid="import-seed-input"] input', { visible: true, timeout: 10_000 })
 	await setInputs(page, {
-		[`[data-testid="${shell.nameInputTestId}"] input`]: "Imported Profile",
+		...(profileName === undefined ? {} : { [`[data-testid="${shell.nameInputTestId}"] input`]: profileName }),
 		'[data-testid="import-seed-input"] input': seed,
 		'[data-testid="import-password-input"] input': password,
 		'[data-testid="import-password-confirm-input"] input': password,
 	})
 	await submitWhenEnabled(page, shell.submitTestId("seed"))
 	await waitForHash(page, shell.successHash, 30_000)
+	await expectNewProfileNamed(page, before, profileName ?? fallback)
 }
 
 /** Drive the popup/onboarding full-backup flow up to (and including) submit,
@@ -353,10 +381,10 @@ export async function makeRecoveryTriple(): Promise<{ words: string[]; masterBas
  *  account rows: the integrity coordinator re-derives every account before activating an imported
  *  profile and withholds the session on mismatch — a fabricated address IS a foreign backup. */
 export async function deriveNuloAccountAddress(masterBase64: string, l1ChainId: number, index = 0): Promise<string> {
-	const { Fr } = await import("@aztec/aztec.js/fields")
+	const { Fr } = await import("@aztec-labs/aztec.js/fields")
 	const { deriveAccountSeed } = await import("@nulo/wallet-crypto")
 	const { NuloAccount } = await import("@nulo/aztec-runtime/account")
-	const { createLogger } = await import("@aztec/foundation/log")
+	const { createLogger } = await import("@aztec-labs/foundation/log")
 	const master = Fr.fromBuffer(Buffer.from(masterBase64, "base64"))
 	const seed = await deriveAccountSeed(master, l1ChainId, 0, index) // AccountType.Nulo_v1 = 0
 	const account = await NuloAccount.new(seed, createLogger("import-drivers"))
@@ -399,7 +427,7 @@ export function buildSyntheticBackup({
 	const body = {
 		"wallet-version": "test",
 		"aztec-version": "test",
-		"compat-epoch": 4,
+		"compat-epoch": 5,
 		"backup-schema-version": 1,
 		"master-key": masterBase64,
 		// Epoch-4 password blobs REQUIRE entropy (restore verifies words(entropy) derives master).

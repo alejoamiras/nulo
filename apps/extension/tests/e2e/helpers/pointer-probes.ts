@@ -1,5 +1,6 @@
 /**
- * Real-browser facts a page test cannot reach: what the pointer would hit, where the keyboard is.
+ * Real-browser facts a page test cannot reach: what the pointer would hit, where the keyboard is,
+ * whether the page handled a key.
  * Every probe reads the live document; none clicks (that is `pointerClick` in `legal-drivers.ts`).
  */
 import type { Page } from "puppeteer"
@@ -41,6 +42,17 @@ export async function waitForFocus(page: Page, testid: string, timeout = 5_000):
 		})
 }
 
+/** Whether focus is inside the popup that holds the named control (its wrapper under `#popup`). A Tab
+ *  walk checked with this proves the keyboard never left; one that merely misses an outside control
+ *  can pass after focus has escaped. */
+export async function focusInPopupOf(page: Page, testid: string): Promise<boolean> {
+	return page.evaluate((s) => {
+		const el = document.querySelector(s)
+		const wrapper = el && [...document.querySelectorAll("#popup > *")].find((w) => w.contains(el))
+		return Boolean(wrapper && document.activeElement && wrapper.contains(document.activeElement))
+	}, sel(testid))
+}
+
 /** Presses Tab `times` times and reports where focus landed after each press. */
 export async function tabAround(page: Page, times: number): Promise<string[]> {
 	const visited: string[] = []
@@ -49,4 +61,31 @@ export async function tabAround(page: Page, times: number): Promise<string[]> {
 		visited.push(await activeTestId(page))
 	}
 	return visited
+}
+
+type EscapeRead = { __escapeHandled?: boolean }
+
+/** Presses Escape and returns whether the page marked it handled, which decides whether Chrome's
+ *  toolbar popup closes; this suite's tab never shows it. The reader is a `window` capture listener
+ *  that reads `defaultPrevented` in a `setTimeout(0)` after the dispatch, so a listener that stops
+ *  propagation cannot starve it and it still sees every listener's mark. */
+export async function pressEscape(page: Page): Promise<boolean> {
+	await page.evaluate(() => {
+		const w = window as unknown as EscapeRead
+		w.__escapeHandled = undefined
+		const read = (e: KeyboardEvent) => {
+			if (e.key !== "Escape") return
+			window.removeEventListener("keydown", read, true)
+			setTimeout(() => {
+				w.__escapeHandled = e.defaultPrevented
+			}, 0)
+		}
+		window.addEventListener("keydown", read, true)
+	})
+	await page.keyboard.press("Escape")
+	await page.waitForFunction(() => (window as unknown as EscapeRead).__escapeHandled !== undefined, {
+		timeout: 5_000,
+		polling: 50,
+	})
+	return page.evaluate(() => (window as unknown as EscapeRead).__escapeHandled === true)
 }

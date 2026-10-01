@@ -492,4 +492,10 @@ export class ExecutionLane {
 			this.deps.logError("Failed to update journal operation", err)
 		}
 	}
+
+	/** {@link markJournal} for a write the caller depends on: a refused write or a missing id rejects. */
+	public async commitJournal(journalId: string | undefined, progress: JobProgress): Promise<void> {
+		if (!journalId) throw new Error("journal write refused: the operation has no record")
+		await this.deps.operationJournal.transitionOperation(journalId, progress)
+	}
 }

@@ -18,7 +18,7 @@ const handlerCalls: string[] = []
 const live = new Set<string>()
 let approveReturns = true
 
-vi.mock("@aztec/wallet-sdk/extension/handlers", () => ({
+vi.mock("@aztec-labs/wallet-sdk/extension/handlers", () => ({
 	BackgroundConnectionHandler: class {
 		constructor(_meta: unknown, _transport: unknown, callbacks: Callbacks) {
 			captured = callbacks

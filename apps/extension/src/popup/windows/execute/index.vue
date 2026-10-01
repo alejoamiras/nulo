@@ -14,7 +14,6 @@ import SignerIdentityStrip from "./SignerIdentityStrip.vue"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 
 /** Local utilities */
-import { humanizeOperationKind } from "./humanize"
 import { uniqueSignerAccounts, uniqueSignerNetworks } from "./signers"
 import { resolveOperationScope, scopeBannerCopy, scopeBannerState } from "./scope-mismatch"
 import { createScopeFollow } from "./scope-follow"
@@ -53,7 +52,7 @@ import { useDappInteractionPayload } from "@/composables/useDappInteractionPaylo
 import { useDappHostname } from "@/composables/useDappHostname"
 import { useDappApprovalWindow } from "@/composables/useDappApprovalWindow"
 import { useFeeEstimationMap } from "@/composables/useFeeEstimationMap"
-import { useToast, TOAST_DURATION } from "@/composables/toast"
+import { useToast } from "@/composables/toast"
 
 const { openToast } = useToast()
 
@@ -152,7 +151,7 @@ const {
 	debounceMs: 500,
 	onError: (key, err) => {
 		console.error(`[Execute] Fee estimation failed for op ${key}:`, err)
-		openToast({ label: "Couldn't estimate fee — retry.", icon: "warning", color: "red" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Couldn't estimate fee. Try again." })
 	},
 })
 
@@ -175,7 +174,7 @@ const {
 	debounceMs: 0,
 	onError: (key, err) => {
 		console.error(`[Execute] Authorization preview failed for op ${key}:`, err)
-		openToast({ label: "Couldn't preview authorizations — retry.", icon: "warning", color: "red" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Couldn't preview authorizations. Try again." })
 	},
 })
 

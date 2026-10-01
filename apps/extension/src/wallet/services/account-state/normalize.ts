@@ -9,6 +9,7 @@
  */
 
 import type { Restored } from "@/wallet/base"
+import { isPxeProvidedContract } from "./pxe-provided"
 import type { BackupAccountState, BackupContract, BackupSender } from "./spec"
 
 export const ACCOUNT_STATE_CAPS = {
@@ -28,17 +29,16 @@ export const ACCOUNT_STATE_CAPS = {
 	//   - The export-time warning derives from it as 80% of this value, so a larger cap silently
 	//     raises the threshold past the payload we actually ship and disables the early signal.
 	// 40MiB keeps today's 33.8M above the warning line while leaving ~8M of headroom.
-	// Deduplicating or omitting re-registerable canonical contracts is the real fix, but it
-	// requires knowing which ones the wallet can always rebuild locally (handshake/auth registry
-	// tracking) — deliberately not attempted here.
+	// The import skips the contracts every PXE boot registers, but the export still writes them,
+	// so they still count against this cap.
 	maxSliceCodeUnits: 40 * 1024 * 1024,
 	maxErrorMessageLength: 200,
 } as const
 
 /** Constant skip/violation copy — never derived from slice content. */
-export const ACCOUNT_STATE_SKIP_UNREACHABLE = "Skipped — couldn't reach the network"
-export const ACCOUNT_STATE_SKIP_WRONG_NETWORK = "Skipped — this endpoint serves a different network"
-export const ACCOUNT_STATE_SKIP_DEADLINE = "Skipped — ran out of time reaching the network"
+export const ACCOUNT_STATE_SKIP_UNREACHABLE = "Skipped: couldn't reach the network"
+export const ACCOUNT_STATE_SKIP_WRONG_NETWORK = "Skipped: this endpoint serves a different network"
+export const ACCOUNT_STATE_SKIP_DEADLINE = "Skipped: ran out of time reaching the network"
 
 export interface NormalizedAccountStateItem {
 	networkId: string
@@ -201,10 +201,12 @@ function applyNetworkCaps(
 	return items
 }
 
-/** Networks (deduped, capped) that carry at least one registrable entry —
- *  the ONLY networks worth a connectivity preflight. */
+/** Networks (deduped, capped) that carry at least one entry only the import can register: a
+ *  sender, or a contract no PXE boot registers by itself. The ONLY networks worth a probe. */
 export function registrableNetworkIds(normalized: NormalizedAccountState): string[] {
-	return normalized.items.filter((i) => i.senders.length > 0 || i.contracts.length > 0).map((i) => i.networkId)
+	return normalized.items
+		.filter((i) => i.senders.length > 0 || i.contracts.some((c) => !isPxeProvidedContract(c.address)))
+		.map((i) => i.networkId)
 }
 
 /** Whether an error's shape indicates the network (not the payload) failed —

@@ -1,14 +1,21 @@
-import { type IntentInnerHash, type CallIntent, computeAuthWitMessageHash } from "@aztec/aztec.js/authorization"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { type ContractArtifact, ContractArtifactSchema, FunctionSelector, FunctionCall } from "@aztec/stdlib/abi"
-import type { AuthWitness } from "@aztec/stdlib/auth-witness"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
+import { type IntentInnerHash, type CallIntent, computeAuthWitMessageHash } from "@aztec-labs/aztec.js/authorization"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import {
+	type ContractArtifact,
+	ContractArtifactSchema,
+	FunctionSelector,
+	FunctionCall,
+	getFunctionReturnType,
+} from "@aztec-labs/stdlib/abi"
+import type { AuthWitness } from "@aztec-labs/stdlib/auth-witness"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import {
 	computeContractAddressFromInstance,
 	ContractInstanceWithAddressSchema,
 	getContractClassFromArtifact,
 	computePartialAddress,
-} from "@aztec/stdlib/contract"
+} from "@aztec-labs/stdlib/contract"
 import z from "zod"
 import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
 import type { Network } from "@/wallet/services/network/spec"
@@ -341,6 +348,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			isFenceLive: (fence) => this.profileService.isFenceLive(fence),
 			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
 			getNode: (chainId) => this.networkService.getNode(chainId),
+			readPublicStorageOnce: (network, contract, slot, timeoutMs) =>
+				this.networkService.readPublicStorageOnce(network, contract, slot, timeoutMs),
 			getPXE: (network) => this.pxeService.getPXE(networkInfoFrom(network)),
 			getAccountContract: (profileId, chainId, address) => this.accountService.getAccountContract(profileId, chainId, address),
 			getPendingForAccount: (account) => this.transactionService.getPendingForAccount(account),
@@ -394,6 +403,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			isFenceLive: (fence) => this.profileService.isFenceLive(fence),
 			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
 			getNode: (chainId) => this.networkService.getNode(chainId),
+			readPublicStorageOnce: (network, contract, slot, timeoutMs) =>
+				this.networkService.readPublicStorageOnce(network, contract, slot, timeoutMs),
 			getPXE: (network) => this.pxeService.getPXE(networkInfoFrom(network)),
 			getAccountContract: (profileId, chainId, address) => this.accountService.getAccountContract(profileId, chainId, address),
 			getPendingForAccount: (account) => this.transactionService.getPendingForAccount(account),
@@ -407,6 +418,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				beginJournal: (networkId, accountAddress, origin, calls, fence) =>
 					this.lane.beginJournal(networkId, accountAddress, origin, calls, fence),
 				markJournal: (journalId, progress, error) => this.lane.markJournal(journalId, progress, error),
+				commitJournal: (journalId, progress) => this.lane.commitJournal(journalId, progress),
 			},
 			buildAndEstimateValidated: (op, feeSettings, fence, parentTask, signal) =>
 				this.buildAndEstimateTxRequest(op, feeSettings, fence, parentTask, signal),
@@ -1053,7 +1065,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 					call.hideMsgSender,
 					authwitFn.isStatic,
 					await z.array(Fr.schema).parseAsync(call.args),
-					authwitFn.returnTypes,
+					getFunctionReturnType(authwitFn),
 				),
 			}
 			return computeAuthWitMessageHash(intentAction, metadata)

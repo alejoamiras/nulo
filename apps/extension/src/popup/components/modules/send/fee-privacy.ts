@@ -1,5 +1,5 @@
 import type { TransferSide } from "@/components/composite/send/publish-facts"
-import { buildFeeMethods, type FeeMethodOption, type GasBalances, type RegisteredFpc } from "./fee-helpers"
+import { buildFeeMethods, defaultSponsor, type FeeMethodOption, type GasBalances, type RegisteredFpc } from "./fee-helpers"
 
 export type { TransferSide }
 
@@ -7,8 +7,14 @@ export type { TransferSide }
  *  loading preview; a pick is resolved by `fpc.id` against fresh rows, never by name. */
 export type SavedRecord = { type: "fj" | "private_fpc" | "fpc"; fpc?: { id: string; name?: string } | null }
 
-/** The committed snapshot the card holds. `undefined` balances = the gas read failed. */
-export type FeeKnowledge = { fpcs: RegisteredFpc[]; balances: GasBalances | undefined; allowSponsored: boolean }
+/** The committed snapshot the card holds. `undefined` balances = the gas read failed. The id sets are
+ *  the card's sponsor verdicts, as `buildFeeMethods` takes them. */
+export type FeeKnowledge = {
+	fpcs: RegisteredFpc[]
+	balances: GasBalances | undefined
+	shortSponsorIds?: ReadonlySet<string>
+	setAsideSponsorIds?: ReadonlySet<string>
+}
 
 export type SendSelection =
 	/** No committed snapshot for the live identity yet. `preview` is display-only and never yields settings. */
@@ -31,7 +37,7 @@ export function isEligible(method: FeeMethodOption, know: FeeKnowledge): boolean
 		case "private_fpc":
 			return Boolean(method.fpc) && canPay(know.balances?.privateFeeJuice)
 		case "fpc":
-			return Boolean(method.fpc)
+			return Boolean(method.fpc) && !method.disabled && !method.setAside
 		default:
 			return false
 	}
@@ -47,7 +53,7 @@ function payersOf(methods: FeeMethodOption[]): Payers {
 	return {
 		fj: methods.find((m) => m.type === "fj"),
 		privateFj: methods.find((m) => m.type === "private_fpc"),
-		sponsor: methods.find((m) => m.type === "fpc"),
+		sponsor: defaultSponsor(methods),
 	}
 }
 
@@ -95,19 +101,18 @@ export function rowForPick(pick: SavedRecord | undefined, methods: FeeMethodOpti
 
 /** What the trigger shows before the first snapshot. FPC rows do not exist until the FPC list has
  *  loaded, so a sponsor pick is drawn from its saved label — display only, it carries no `fpc` to pay with. */
-export function previewForPick(
-	pick: SavedRecord | undefined,
-	methods: FeeMethodOption[],
-	allowSponsored: boolean,
-): FeeMethodOption | undefined {
+export function previewForPick(pick: SavedRecord | undefined, methods: FeeMethodOption[]): FeeMethodOption | undefined {
 	const row = rowForPick(pick, methods)
-	if (row || pick?.type !== "fpc" || !pick.fpc?.id || !allowSponsored) return row
-	return { type: "fpc", title: pick.fpc.name || "Sponsored FPC", subtitle: "sponsored" }
+	if (row || pick?.type !== "fpc" || !pick.fpc?.id) return row
+	return { type: "fpc", title: pick.fpc.name || "Sponsored", subtitle: "sponsored" }
 }
 
 /** A saved pick wins when its row still exists and is eligible; otherwise the default walk. */
 export function resolveSendSelection(origin: TransferSide, know: FeeKnowledge, pick: SavedRecord | undefined): SendSelection {
-	const methods = buildFeeMethods(know.fpcs, know.balances, { allowSponsored: know.allowSponsored })
+	const methods = buildFeeMethods(know.fpcs, know.balances, {
+		shortSponsorIds: know.shortSponsorIds,
+		setAsideSponsorIds: know.setAsideSponsorIds,
+	})
 	const picked = eligibleOrUndefined(rowForPick(pick, methods), know)
 	if (picked) return selected(picked)
 	const payers = payersOf(methods)

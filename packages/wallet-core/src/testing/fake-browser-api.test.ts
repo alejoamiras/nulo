@@ -129,5 +129,17 @@ describe("FakeBrowserApi", () => {
 			windows.lastFocused = { left: 0, top: 0, width: 1920, height: 1080 }
 			await expect(api.windows.getLastFocused()).resolves.toEqual({ left: 0, top: 0, width: 1920, height: 1080 })
 		})
+
+		test("records navigate calls; navigate on a closed id rejects", async () => {
+			const windows = api.windows as unknown as { navigates: unknown[] }
+			const win = await api.windows.create({ url: "https://example" })
+
+			await api.windows.navigate(win.id as number, "https://example/next")
+			expect(windows.navigates).toEqual([{ windowId: win.id, url: "https://example/next" }])
+
+			await api.windows.remove(win.id as number)
+			await expect(api.windows.navigate(win.id as number, "https://example/next")).rejects.toThrow(/No window/)
+			expect(windows.navigates).toHaveLength(1)
+		})
 	})
 })

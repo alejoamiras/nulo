@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { describe, expect, test } from "vitest"
-import { NULO_KDF_DIGEST, NULO_KDF_SPEC, REGIMES, V5_REGIME } from "./address-freeze"
+import { NULO_KDF_DIGEST, NULO_KDF_SPEC, REGIMES, V6_REGIME } from "./address-freeze"
 import { FROZEN_ACCOUNT_CLASS_ID, FROZEN_ARTIFACT_SHA256 } from "./frozen-artifact"
 import { FROZEN_DESCRIPTOR_DIGEST, NULO_DESCRIPTOR_VERSION } from "./instantiation-descriptor"
 
@@ -12,7 +12,7 @@ import { FROZEN_DESCRIPTOR_DIGEST, NULO_DESCRIPTOR_VERSION } from "./instantiati
  * new regime + a new extension major instead. (The nulo-v5 baseline was redefined in place inside
  * the pre-launch carve-out WINDOW — KDF v1→v2 (`implementations-plan/key-model-v2/`) and the
  * passkey-branch spec extension (`implementations-plan/key-model-v2-hardening/`) — owner-ratified
- * both times; the window closes permanently at V5's first shipped build.)
+ * both times; that window closed at V5's first store build. nulo-v6's closes at its own.)
  */
 const EXPECTED_KDF_DIGEST = "29eca1a04b7acde8bb95905a2ac630b29f1edcf04d584274e90fd9f81736166d"
 
@@ -32,6 +32,23 @@ const EXPECTED_REGIMES: Record<string, Record<string, unknown>> = {
 			"digest 3883065f0d6603d1be25db42348ec25b7a9dc29746d85b925b09efbd2a460605, kdf " +
 			`nulo-account-kdf-v2 digest ${EXPECTED_KDF_DIGEST}) fixes every ` +
 			"Nulo V5 account address; changing any of these inputs rotates all derived addresses " +
+			"and ships ONLY as a new extension major with a new appended regime entry.",
+	},
+	"nulo-v6": {
+		id: "nulo-v6",
+		artifactSha256: "4b4933a146a80872b184f47af22cd8ba3faa00f810d7a26217490c9d13507f94",
+		classId: "0x010cc0891c8748de2009734bf117485efbaf3aad0be125f151b4e6744f8f1842",
+		descriptorVersion: 1,
+		descriptorDigest: "3883065f0d6603d1be25db42348ec25b7a9dc29746d85b925b09efbd2a460605",
+		kdf: "nulo-account-kdf-v2",
+		kdfDigest: EXPECTED_KDF_DIGEST,
+		ack:
+			"I acknowledge that regime nulo-v6 (artifact sha256 " +
+			"4b4933a146a80872b184f47af22cd8ba3faa00f810d7a26217490c9d13507f94, class id " +
+			"0x010cc0891c8748de2009734bf117485efbaf3aad0be125f151b4e6744f8f1842, descriptor v1 " +
+			"digest 3883065f0d6603d1be25db42348ec25b7a9dc29746d85b925b09efbd2a460605, kdf " +
+			`nulo-account-kdf-v2 digest ${EXPECTED_KDF_DIGEST}) fixes every ` +
+			"Nulo V6 account address; changing any of these inputs rotates all derived addresses " +
 			"and ships ONLY as a new extension major with a new appended regime entry.",
 	},
 }
@@ -83,15 +100,15 @@ describe("address-freeze regime record", () => {
 		}
 	})
 
-	test("the nulo-v5 entry is consistent with the live freeze modules", () => {
-		const v5 = REGIMES["nulo-v5"]
-		expect(v5.artifactSha256).toBe(FROZEN_ARTIFACT_SHA256)
-		expect(v5.classId).toBe(FROZEN_ACCOUNT_CLASS_ID)
-		expect(v5.descriptorVersion).toBe(NULO_DESCRIPTOR_VERSION)
-		expect(v5.descriptorDigest).toBe(FROZEN_DESCRIPTOR_DIGEST)
+	test("the nulo-v6 entry is consistent with the live freeze modules", () => {
+		const v6 = REGIMES["nulo-v6"]
+		expect(v6.artifactSha256).toBe(FROZEN_ARTIFACT_SHA256)
+		expect(v6.classId).toBe(FROZEN_ACCOUNT_CLASS_ID)
+		expect(v6.descriptorVersion).toBe(NULO_DESCRIPTOR_VERSION)
+		expect(v6.descriptorDigest).toBe(FROZEN_DESCRIPTOR_DIGEST)
 	})
 
-	test("this extension major binds to exactly the nulo-v5 regime", () => {
-		expect(V5_REGIME).toBe(REGIMES["nulo-v5"])
+	test("this extension major binds to exactly the nulo-v6 regime", () => {
+		expect(V6_REGIME).toBe(REGIMES["nulo-v6"])
 	})
 })

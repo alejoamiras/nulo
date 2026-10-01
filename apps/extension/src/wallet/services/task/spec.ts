@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 import type { OperationKind } from "@/wallet/services/execution/spec"
 import type { TxOrigin, TransferType } from "@/wallet/services/transaction/spec"
 

@@ -1,6 +1,4 @@
 /**
- * Shared request→operation materializer tests (Phase 2 follow-up, Layer 4).
- *
  * Pins:
  *  - One canonical mapping per request kind. Future divergence between
  *    silent-path and popup-path is caught by these tests, not by users.

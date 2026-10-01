@@ -15,12 +15,26 @@
  * test warrants. `chrome.*` is stubbed by tests/vitest.setup.ts.
  */
 
-import type { ILogger } from "@/wallet/logger"
-import type { WindowManager } from "@/wallet/services/window-manager/window-manager"
+import { LoggerStore, type ILogger } from "@/wallet/logger"
+import { ServiceCollection } from "@/wallet/base"
+import { ConfigStore } from "@/wallet/config"
+import { AccountService } from "@/wallet/services/account/service"
+import { ContactService } from "@/wallet/services/contact/service"
+import { AccessLevel, DappSessionService } from "@/wallet/services/dapp-session/service"
+import { ExecutionService } from "@/wallet/services/execution/service"
+import { FpcService, FpcType } from "@/wallet/services/fpc/service"
+import { NetworkService } from "@/wallet/services/network/service"
+import { OperationJournalService } from "@/wallet/services/operation-journal/service"
+import { ProfileService } from "@/wallet/services/profile/service"
+import { TokenService } from "@/wallet/services/token/service"
+import { WindowManager } from "@/wallet/services/window-manager/window-manager"
 import { describe, expect, test, vi } from "vitest"
 import { JobCancelledError, TermsAcceptanceRequiredError, UserRejectedError } from "@nulo/extension-messaging/errors"
+import { FakeBrowserApi, MockClock } from "@nulo/wallet-core/testing"
+import { EventHandler } from "@nulo/wallet-core/utils"
+import { CHAIN_IDS } from "@/utils/chain-ids"
 import { DappInteractionService } from "./service"
-import type { DappInteraction, ExecutionHooks } from "./spec"
+import type { CapabilityPayload, DappInteraction, DiscoveryResult, ExecutionHooks, OperationRequest } from "./spec"
 
 const noopLogger: ILogger = { log: () => {} }
 
@@ -486,6 +500,18 @@ describe("DappInteractionService.focusInteractionWindow (Queued card → bring t
 	})
 })
 
+describe("DappInteractionService window placement", () => {
+	test.each(["execute", "capabilities", "discover"])("the %s window opens at the browser window's top-right", async (kind) => {
+		const openAndAwait = vi.fn((_opts: unknown) => ({ handleId: "h1", promise: Promise.resolve({}) }))
+		const svc = new DappInteractionService(noopLogger, { openAndAwait } as unknown as WindowManager)
+		const interaction = (svc as unknown as { interaction: (type: string, payload: unknown) => Promise<unknown> }).interaction
+
+		await interaction.call(svc, kind, emptyPayload)
+
+		expect(openAndAwait).toHaveBeenCalledWith(expect.objectContaining({ kind, width: 400, height: 800, placement: "top-right" }))
+	})
+})
+
 describe("DappInteractionService when the Terms acceptance lapses after the request was admitted", () => {
 	const refuse = async () => {
 		throw new TermsAcceptanceRequiredError()
@@ -537,5 +563,269 @@ describe("DappInteractionService when the Terms acceptance lapses after the requ
 
 		await expect(internals.silentInteraction(payload, { queuedJournalId: "journal-2" })).rejects.toThrow("node unreachable")
 		expect(transitionIfStage).not.toHaveBeenCalled()
+	})
+})
+
+describe("DappInteractionService — a confirmation window never falls back to signing", () => {
+	const ADDRESS = `0x${"0a".repeat(32)}`
+	const ACCOUNT = `aztec:1:${ADDRESS}`
+	const SESSION = {
+		id: "s1",
+		profileId: "p1",
+		chainId: "1",
+		dappMetadata: { name: "dapp.example", url: "https://dapp.example" },
+		permissions: [{ methods: [] }],
+		accounts: [ACCOUNT],
+		confirmationLevel: AccessLevel.Transactions,
+		expiry: Number.MAX_SAFE_INTEGER,
+	}
+	const authwit = {
+		kind: "aztec_createAuthWit",
+		account: ACCOUNT,
+		messageHashOrIntent: { consumer: `0x${"07".repeat(32)}`, innerHash: `0x${"01".repeat(32)}` },
+	} as unknown as OperationRequest
+	const stub = (name: string, methods: Record<string, unknown>) => ({ name, dependencies: [], async start() {}, ...methods }) as never
+	type Outcome = { settled: boolean; ok?: unknown; err?: unknown }
+
+	/** The real interaction path: `execute` opens a window through a real WindowManager on a fake
+	 *  browser, and the only way to a signature is an approval the service accepts. */
+	async function windowHarness() {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const clock = new MockClock()
+		const logger = new LoggerStore(new ConfigStore())
+		const dapp = new DappInteractionService(logger, new WindowManager(api.windows, clock, logger))
+		const executeOperations = vi.fn(async () => [{ status: "ok", result: "0xsigned" }])
+		const collection = new ServiceCollection()
+		collection.add(
+			stub(ProfileService.name, {
+				getActiveProfile: async () => ({ id: "p1" }),
+				refreshSession: async () => {},
+				captureExecutionFence: async () => ({ profileId: "p1", epoch: 0, session: 1 }),
+			}),
+		)
+		collection.add(stub(NetworkService.name, { getNetworks: async () => [{ id: "net-1", chainId: 1 }] }))
+		collection.add(stub(AccountService.name, { getAccount: async () => ({ address: ADDRESS }) }))
+		collection.add(stub(DappSessionService.name, { tryGetDappSession: async () => SESSION }))
+		collection.add(stub(ExecutionService.name, { executeOperations }))
+		collection.add(stub(OperationJournalService.name, { onOperationUpdated: new EventHandler() }))
+		collection.add(stub(FpcService.name, {}))
+		collection.add(dapp)
+		await collection.start()
+		const creates = vi.spyOn(api.windows, "create")
+		const storage = (dapp as unknown as { storage: Map<string, DappInteraction> }).storage
+
+		const open = async () => {
+			const outcome: Outcome = { settled: false }
+			dapp.execute({ sessionId: SESSION.id, operations: [authwit] }).then(
+				(ok) => Object.assign(outcome, { settled: true, ok }),
+				(err) => Object.assign(outcome, { settled: true, err }),
+			)
+			await expect.poll(() => creates.mock.results.length).toBeGreaterThan(0)
+			const created = (await creates.mock.results.at(-1)?.value) as { id: number }
+			const windowId = created.id
+			const id = [...storage.keys()].at(-1) as string
+			creates.mockClear()
+			return { outcome, windowId, id }
+		}
+		const closeByUser = (windowId: number) => (api.windows as unknown as { closeByUser: (id: number) => void }).closeByUser(windowId)
+		return { dapp, clock, executeOperations, storage, open, closeByUser }
+	}
+
+	test("a window closed before approval rejects the call and nothing signs", async () => {
+		const h = await windowHarness()
+		const window = await h.open()
+		h.closeByUser(window.windowId)
+		await expect.poll(() => window.outcome.settled).toBe(true)
+		expect(window.outcome.err).toBeDefined()
+		expect(h.executeOperations).not.toHaveBeenCalled()
+		expect(h.storage.size).toBe(0)
+	})
+
+	test("a window left unanswered times out, rejects the call and nothing signs", async () => {
+		const h = await windowHarness()
+		const window = await h.open()
+		h.clock.advance(10 * 60 * 1000)
+		await expect.poll(() => window.outcome.settled).toBe(true)
+		expect(window.outcome.err).toBeDefined()
+		expect(h.executeOperations).not.toHaveBeenCalled()
+		expect(h.storage.size).toBe(0)
+	})
+
+	test("an approval arriving after the window closed is refused and nothing signs", async () => {
+		const h = await windowHarness()
+		const window = await h.open()
+		h.closeByUser(window.windowId)
+		await expect.poll(() => window.outcome.settled).toBe(true)
+		await expect(h.dapp.approveInteraction(window.id, [{}])).rejects.toThrow("Invalid id")
+		await flush()
+		expect(h.executeOperations).not.toHaveBeenCalled()
+	})
+
+	test("two windows for one row: approving one signs only it, the other stays pending until its own close", async () => {
+		const h = await windowHarness()
+		const first = await h.open()
+		const second = await h.open()
+		await h.dapp.approveInteraction(first.id, [{}])
+		await expect.poll(() => first.outcome.settled).toBe(true)
+		expect(first.outcome.ok).toEqual([{ status: "ok", result: "0xsigned" }])
+		expect(h.executeOperations).toHaveBeenCalledTimes(1)
+		await flush()
+		expect(second.outcome.settled).toBe(false)
+		expect(h.storage.has(second.id)).toBe(true)
+
+		h.closeByUser(second.windowId)
+		await expect.poll(() => second.outcome.settled).toBe(true)
+		expect(second.outcome.err).toBeDefined()
+		expect(h.executeOperations).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("DappInteractionService — the capability window's known contracts", () => {
+	const SPONSORED = `0x${"0b".repeat(32)}`
+	const PRIVATE = `0x${"0c".repeat(32)}`
+	const TOKEN = `0x${"0d".repeat(32)}`
+	const SESSION = {
+		id: "s1",
+		profileId: "p1",
+		chainId: String(CHAIN_IDS.TESTNET),
+		dappMetadata: { name: "dapp.example", url: "https://dapp.example" },
+		permissions: [],
+		accounts: [],
+		confirmationLevel: AccessLevel.Transactions,
+		expiry: Number.MAX_SAFE_INTEGER,
+	}
+	const stub = (name: string, methods: Record<string, unknown>) => ({ name, dependencies: [], async start() {}, ...methods }) as never
+
+	test("names only what the wallet vouches for, whatever the stores and the request carry", async () => {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const logger = new LoggerStore(new ConfigStore())
+		const dapp = new DappInteractionService(logger, new WindowManager(api.windows, new MockClock(), logger))
+		const collection = new ServiceCollection()
+		collection.add(stub(ProfileService.name, { getActiveProfile: async () => ({ id: "p1" }) }))
+		collection.add(stub(NetworkService.name, {}))
+		collection.add(stub(AccountService.name, {}))
+		collection.add(stub(DappSessionService.name, { getDappSession: async () => SESSION, tryGetDappSession: async () => SESSION }))
+		collection.add(stub(ExecutionService.name, {}))
+		collection.add(stub(OperationJournalService.name, { onOperationUpdated: new EventHandler() }))
+		collection.add(
+			stub(FpcService.name, {
+				getOrComputeProtocolAddresses: async () => ({ sponsored: SPONSORED, private: PRIVATE }),
+				getFpcs: async () => [
+					{
+						id: "f1",
+						profileId: "p1",
+						chainId: CHAIN_IDS.TESTNET,
+						type: FpcType.DefaultSponsoredFpc,
+						address: SPONSORED,
+						name: "Auth registry",
+					},
+				],
+			}),
+		)
+		collection.add(
+			stub(TokenService.name, { getTokens: async () => [{ id: 1, chainId: CHAIN_IDS.TESTNET, contract: TOKEN, name: "Fee Juice" }] }),
+		)
+		collection.add(
+			stub(ContactService.name, {
+				getContacts: async () => [{ id: "c1", profileId: "p1", name: "Private fee payer", address: TOKEN }],
+			}),
+		)
+		collection.add(dapp)
+		await collection.start()
+		const storage = (dapp as unknown as { storage: Map<string, DappInteraction> }).storage
+
+		void dapp
+			.requestCapabilities({
+				sessionId: SESSION.id,
+				manifest: {},
+				delta: [{ type: "transaction", scope: [{ contract: TOKEN, function: "transfer" }] }],
+				existingGrants: [],
+				knownContracts: [{ address: TOKEN, name: "Fee Juice" }],
+			})
+			.catch(() => {})
+		await expect.poll(() => storage.size).toBe(1)
+
+		const { params } = [...storage.values()][0].payload as CapabilityPayload
+		expect(params.knownContracts).toEqual([
+			{ address: `0x${"0".repeat(63)}3`, name: "Fee Juice" },
+			{ address: SPONSORED, name: "Sponsored fee payer" },
+			{ address: PRIVATE, name: "Private fee payer" },
+			{ address: "0x1ec33912c9f14470513e0eb23db81ddb2aa1ae3395e6ab4d3cba383f68dec3c5", name: "Auth registry" },
+		])
+	})
+})
+
+describe("DappInteractionService — an approved connect window is handed to the connection", () => {
+	const METADATA = { name: "dapp.example", url: "https://dapp.example" }
+
+	/** A real WindowManager on a fake browser: `open` starts an interaction and waits for its window. */
+	function handOverHarness() {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const clock = new MockClock()
+		const dapp = new DappInteractionService(noopLogger, new WindowManager(api.windows, clock, noopLogger))
+		const creates = vi.spyOn(api.windows, "create")
+		const removes = vi.spyOn(api.windows, "remove")
+		const storage = (dapp as unknown as { storage: Map<string, DappInteraction> }).storage
+		const interaction = (dapp as unknown as { interaction: (type: string, payload: unknown) => Promise<unknown> }).interaction
+		const open = async (start: () => Promise<unknown>) => {
+			const pending = start()
+			await expect.poll(() => creates.mock.results.length).toBe(1)
+			const created = (await creates.mock.results[0]?.value) as { id: number }
+			await flush()
+			return { pending, windowId: created.id, id: [...storage.keys()][0] as string }
+		}
+		const closeByUser = (windowId: number) => (api.windows as unknown as { closeByUser: (id: number) => void }).closeByUser(windowId)
+		return { dapp, clock, removes, open, interaction, closeByUser }
+	}
+
+	test("an approved discovery resolves with the handle's window id, never the page's, and the window stays open", async () => {
+		const h = handOverHarness()
+		const w = await h.open(() => h.dapp.discover({ dappMetadata: METADATA }))
+
+		await h.dapp.resolveInteraction(w.id, { approved: true, windowId: 999 } as DiscoveryResult)
+
+		await expect(w.pending).resolves.toEqual({ approved: true, windowId: w.windowId })
+		expect(w.windowId).not.toBe(999)
+		// Nothing watches the window now: its later close and the old timeout settle nothing.
+		h.closeByUser(w.windowId)
+		h.clock.advance(10 * 60 * 1000)
+		expect(h.removes).not.toHaveBeenCalled()
+	})
+
+	test("a discovery answer other than approved: true is a denial and closes the window", async () => {
+		const h = handOverHarness()
+		const w = await h.open(() => h.dapp.discover({ dappMetadata: METADATA }))
+
+		await h.dapp.resolveInteraction(w.id, { approved: "yes", windowId: 999 } as unknown as DiscoveryResult)
+
+		await expect(w.pending).resolves.toEqual({ approved: false })
+		expect(h.removes).toHaveBeenCalledWith(w.windowId)
+	})
+
+	test("a denied discovery settles and closes the window", async () => {
+		const h = handOverHarness()
+		const w = await h.open(() => h.dapp.discover({ dappMetadata: METADATA }))
+
+		await h.dapp.resolveInteraction(w.id, { approved: false })
+
+		await expect(w.pending).resolves.toEqual({ approved: false })
+		expect(h.removes).toHaveBeenCalledWith(w.windowId)
+	})
+
+	const capabilityPayload = { params: { sessionId: "s1" }, session: { profileId: "p1", dappMetadata: METADATA } }
+	test.each([
+		["capabilities", capabilityPayload, { approved: true }],
+		["execute", emptyPayload, [{ status: "ok", result: "0x01" }]],
+	])("a %s window answered through resolveInteraction settles with that answer and closes", async (kind, payload, answer) => {
+		const h = handOverHarness()
+		const w = await h.open(() => h.interaction.call(h.dapp, kind, payload))
+
+		await h.dapp.resolveInteraction(w.id, answer as never)
+
+		await expect(w.pending).resolves.toEqual(answer)
+		expect(h.removes).toHaveBeenCalledWith(w.windowId)
 	})
 })

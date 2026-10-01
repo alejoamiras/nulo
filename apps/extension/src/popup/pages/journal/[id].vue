@@ -8,31 +8,11 @@
 
 <script setup>
 /**
- * Detail page for a journal record that ended without producing an on-chain
- * transaction (cancelled, interrupted, failed-pre-broadcast). Cousin of
- * `tx/[id].vue` — that page handles records that DID produce a chain tx
- * via `TransactionService`. Journal records have no `hash`, no block, no
- * fee, no explorer URL.
- *
- * P10 brutalist restructure: mirrors `tx/[id].vue`'s information hierarchy
- * (hero_meta timestamps → optional amount block → categorical chip → origin
- * chip → details box → dev panel) using the same brutalist tokens (mono
- * labels, headline keys, 1px borders, no rounded corners). Reuses
- * tx/[id].vue's style vocabulary verbatim. The confirmed-tx detail page
- * is NOT touched.
- *
- * The categorical chip (P9 helper) distinguishes pre-broadcast failures
- * from interrupted-mid-flight, surfacing simulation-vs-on-chain UX without
- * exposing internal `JobError.kind` strings.
- *
- * Subscribes to `onOperationDeleted` so that if the record is removed
- * (GC or profile delete) while the user is on this page, we redirect back
- * to the activity feed rather than rendering a blank.
- *
- * Raw `op.error.message` AND `op.error.normalizedRaw` are gated behind the
- * same `developerMode || debugMode` toggle that `tx/[id].vue` uses for its
- * `TxDebugPanel` — `JobError.normalizedRaw` can contain serialized stacks
- * + internal strings.
+ * Detail page for a journal record with no settled `TransactionService` row; settled transactions
+ * open `tx/[id].vue`. Every load (mount, scope switch, the record's update, a reconnect) goes
+ * through `readJournalDetail`, so a record outside the popup's profile, network and account is
+ * never shown. `op.error.message` and `op.error.normalizedRaw` render only in developer or debug
+ * mode: they can hold serialized stacks and internal strings.
  */
 
 /** Components */
@@ -47,7 +27,8 @@ import { ConfigServiceClient } from "@/wallet/services/config/client"
 import { TokenServiceClient } from "@/wallet/services/token/client"
 
 /** Utils */
-import { ACTIVITY_FEED_KINDS, categoricalLabel, journalTerminalDisplay, sanitizeJournalSubtitle } from "@/utils/journal-state"
+import { categoricalLabel, journalTerminalDisplay, sanitizeJournalSubtitle } from "@/utils/journal-state"
+import { bindJournalDetailUpdates, readJournalDetail } from "./journal-detail-scope"
 import { humanizeMethodName, formatTransferType } from "@/utils/tx-enrichment"
 import { usePrices } from "@/composables/usePrices"
 import { PriceServiceClient } from "@/wallet/services/price/client"
@@ -95,7 +76,7 @@ const title = computed(() => {
 
 const amountDisplay = computed(() => {
 	if (!isTransfer.value || !op.value?.amountRaw || !token.value) return null
-	return balanceFormatted(op.value.amountRaw, token.value.decimals ?? 0, 8).value
+	return balanceFormatted(op.value.amountRaw, token.value.decimals ?? 0, 8, { compact: true }).value
 })
 
 const transferTypeLabel = computed(() => {
@@ -103,9 +84,9 @@ const transferTypeLabel = computed(() => {
 	return formatTransferType(op.value.transferType)
 })
 
-/** Hero fiat at today's rate. This page only renders failure-shaped records,
- *  and the owner wants those priced too — the dollar context of what the
- *  transfer WOULD have moved. */
+/** Hero fiat at today's rate. This page renders only records that failed or
+ *  ended early, and the owner wants those priced too: the dollar context of
+ *  the transfer's amount. */
 const transferFiat = computed(() => {
 	if (!isTransfer.value || !op.value?.amountRaw || !token.value) return null
 	return prices.tokenFiatLabel(token.value, BigInt(op.value.amountRaw)) ?? null
@@ -137,8 +118,7 @@ const originChip = computed(() => {
 const errorMessage = computed(() => op.value?.error?.message ?? null)
 const errorNormalizedRaw = computed(() => op.value?.error?.normalizedRaw ?? null)
 
-// B2 categorical label (P9 helper). Wallet-controlled — consumes only
-// op.error?.kind + op.kind + op.progress.stage. Never reads op.subtitle.
+// Wallet-controlled: never reads the dApp-controlled `op.subtitle`.
 const category = computed(() => (op.value ? categoricalLabel(op.value) : null))
 
 // State row value is title-case for visual parity with the other rows
@@ -170,45 +150,35 @@ const terminalAtLabel = computed(() => {
 	return DateTime.fromMillis(op.value.terminalAt).toFormat("MMM dd, yyyy 'at' HH:mm")
 })
 
+// A send its wallet is still checking has not ended as far as the wallet knows.
+const endedLabel = computed(() => (display.value?.state === "checking" ? null : terminalAtLabel.value))
+
+const activeScope = () => ({
+	profileId: appStore.profile?.id,
+	networkId: appStore.network?.id,
+	accountAddress: appStore.account?.address,
+})
+
 async function loadOp() {
-	if (!idFromRoute.value) {
-		op.value = null
-		notFound.value = true
-		return
-	}
-	const record = await journalService.getOperation(idFromRoute.value)
-	if (!record || !ACTIVITY_FEED_KINDS.has(record.kind) || record.terminalAt === null) {
-		op.value = null
-		notFound.value = true
-		return
-	}
-	// Cross-account isolation: a journal detail belongs to exactly one
-	// (profile, network, account). `getOperation` fetches by id alone, so if this
-	// record isn't the ACTIVE scope — e.g. the user switched accounts while on this
-	// page — refuse to render it (it would leak the other account's amount /
-	// recipient / dApp origin / error). The scope watcher below re-runs loadOp on
-	// any switch, flipping the page to not-found immediately.
-	if (
-		record.accountAddress !== appStore.account?.address ||
-		record.networkId !== appStore.network?.id ||
-		record.profileId !== appStore.profile?.id
-	) {
-		op.value = null
-		notFound.value = true
-		return
-	}
-	notFound.value = false
-	op.value = record
+	const record = idFromRoute.value ? await readJournalDetail(journalService, idFromRoute.value, activeScope) : undefined
+	op.value = record ?? null
+	notFound.value = !record
+}
+
+/** A failed reload keeps what the page shows; the record's next update or a reconnect reads it again. */
+function reloadOp() {
+	loadOp().catch(() => console.debug("[journal] the record's reload failed"))
 }
 
 function onOperationDeleted(deleted) {
 	if (deleted.id === idFromRoute.value) {
-		openToast({ label: "Record removed", icon: "info" })
+		openToast({ kind: "success", label: "Record removed" })
 		router.replace("/popup/activity")
 	}
 }
 
 journalService.onOperationDeleted.add(onOperationDeleted)
+const unbindUpdates = bindJournalDetailUpdates(journalService, () => idFromRoute.value, reloadOp)
 
 // Re-validate the record's scope whenever the active profile/network/account
 // changes — a switch while viewing A's journal detail must not keep it on-screen.
@@ -235,6 +205,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+	unbindUpdates()
 	journalService.disconnect()
 	configService.disconnect()
 	tokenService.disconnect()
@@ -248,10 +219,8 @@ onBeforeUnmount(() => {
 		<SubPageHeader :title="title" :backTo="'/popup/activity'" />
 
 		<Flex v-if="op && display" wide direction="column" gap="20" :class="$style.content">
-			<!-- Hero meta — terminal timestamp; matches tx/[id].vue's tx_time slot but
-				 with the journal-record terminal time instead of an explorer link.
-				 No chain hash / no explorer link branch because journal records have
-				 no on-chain tx. -->
+			<!-- Hero meta: the record's terminal time in tx/[id].vue's tx_time slot, with no
+				 explorer link. -->
 			<Flex align="center" justify="center" gap="8" :class="$style.hero_meta">
 				<span v-if="terminalAtLabel" :class="$style.tx_time">{{ terminalAtLabel }}</span>
 			</Flex>
@@ -306,9 +275,9 @@ onBeforeUnmount(() => {
 					<span :class="$style.detail_value_mono">{{ createdAtLabel }}</span>
 				</Flex>
 
-				<Flex v-if="terminalAtLabel" wide justify="between" align="center">
+				<Flex v-if="endedLabel" wide justify="between" align="center">
 					<span :class="$style.detail_key">Ended</span>
-					<span :class="$style.detail_value_mono">{{ terminalAtLabel }}</span>
+					<span :class="$style.detail_value_mono" data-testid="journal-detail-ended">{{ endedLabel }}</span>
 				</Flex>
 
 				<Flex wide justify="between" align="center">

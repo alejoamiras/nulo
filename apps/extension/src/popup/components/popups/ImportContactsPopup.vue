@@ -1,9 +1,11 @@
+<!-- Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0. -->
 <script setup>
 /** Utils */
 import { ContactServiceClient } from "@/wallet/services/contact/client"
 import { isValidHex, trimAddress } from "@/utils/string"
 
 /** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 const { openToast } = useToast()
 
@@ -58,7 +60,7 @@ const incomingSenderCount = computed(() => importContacts.value.filter((c) => c?
 
 function handleSelectContact(contact) {
 	if (contact.isInvalidAddress) {
-		openToast({ label: "To select, correct the address first", icon: "info" })
+		openToast({ kind: "error", label: "To select, correct the address first" })
 
 		return
 	}
@@ -173,7 +175,7 @@ watch(
 							<Text color="primary" weight="700">{{ appStore.network.name }}</Text>.
 						</Text>
 						<Text v-else-if="incomingSenderCount > 0" size="12" weight="600" color="secondary" align="center">
-							No active network — sender registrations will be skipped.
+							No active network. Sender registrations will be skipped.
 						</Text>
 					</Flex>
 
@@ -226,7 +228,7 @@ watch(
 						</Flex>
 					</Flex>
 
-					<Flex align="center" justify="between" gap="12" wide>
+					<Flex v-snack-footer align="center" justify="between" gap="12" wide>
 						<Button
 							@click="handleReject"
 							variant="primary_outline"

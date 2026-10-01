@@ -1,5 +1,6 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 import { getErrorMessage } from "@nulo/wallet-core/utils"
-import type { Fr } from "@aztec/foundation/curves/bn254"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { toRestoreError } from "@/utils/restore-error"
 import type { BrowserApi, StorageArea } from "@nulo/wallet-core/ports"
 import type { IConfig } from "@/wallet/config"
@@ -72,7 +73,7 @@ type PasskeyRestoreScratch = { stashDek?: ImportedKeysDek; storedPending: boolea
 /** The refusal at password change once the DEK slot no longer unseals: the DEK keys the PXE store
  *  and every dApp-session tag, so the only non-destructive repair is export + restore. */
 const DEK_UNRECOVERABLE_MESSAGE =
-	"Imported-keys key unrecoverable — imported keys and local chain state are lost. Export a full backup (or the recovery phrase) and restore it to repair."
+	"Imported-keys key unrecoverable. Imported keys and local chain state are lost. Export a full backup (or the recovery phrase) and restore it to repair."
 
 export class ProfileService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()(
@@ -1083,7 +1084,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			dek = await this.unsealDekWithPasshash(oldPasshash, profile.dekSealed)
 			if (dek && !(await this.envelopeMacValid(id, profile, secret, dek))) {
 				this.logger.log(this.name, LogLevel.Error, "envelope MAC does not cover the DEK slot at password change", id)
-				throw new Error("Profile integrity check failed — export a full backup and restore it before changing the password")
+				throw new Error("Profile integrity check failed. Export a full backup and restore it before changing the password")
 			}
 			if (!dek) {
 				this.logger.log(this.name, LogLevel.Error, "imported-keys DEK unrecoverable at password change — refusing", id)

@@ -1,6 +1,6 @@
 # @nulo/wallet-bridge
 
-The dApp-facing dispatcher. Implements the `@aztec/wallet-sdk` capability map,
+The dApp-facing dispatcher. Implements the `@aztec-labs/wallet-sdk` capability map,
 narrows protocol messages into typed service calls, and enforces session scope.
 Does not depend on the Aztec runtime — the bridge is transport-shaped, not
 chain-shaped.
@@ -22,6 +22,7 @@ to live in the service worker while the PXE lives in the offscreen document.
 | `src/dispatcher.ts` | The dispatcher. Routes every wallet-sdk method to typed service calls; narrows protocol shapes; threads the right session/capabilities through. |
 | `src/method-descriptors.ts` | **Single source of truth** for per-method metadata: capability, routing (network/account/handler), scope-checker reference, exempt flag, F-/AUDIT markers. The six former parallel tables (`METHOD_CAPABILITY_MAP`, `EXEMPT_METHODS`, `METHOD_TO_KIND`, `NETWORK_ONLY_KINDS`, `ACCOUNT_KINDS`, `METHOD_SCOPE_CHECKER`) are DERIVED from `METHOD_REGISTRY` here. Add/reclassify a method = one row (a build-failing exhaustiveness test + the dispatch-entry guard catch a forgotten one). |
 | `src/method-scope-checkers.ts` | Leaf module: per-method scope-check function bodies + their helpers. Referenced by the registry's `scopeCheck` fields and by `scope-enforcement.ts` — kept here (depended-on, never depending back) to break the registry↔scope-enforcement cycle. |
+| `src/field-address.ts` | Leaf module: the listed-contract address form (`isFieldAddress`) and the one comparison every grant-to-call contract check uses (`sameFieldAddress`, over `fieldAddressKey`). It compares the 32-byte value, so the case a dApp wrote never decides a match, and a malformed value matches nothing, itself included. |
 | `src/capability-map.ts` | Thin facade over the registry: `getRequiredCapability` / `isCapabilityExempt` read the derived capability map. |
 | `src/capabilities.ts` | Capability-request types and resolution helpers. |
 | `src/services-contract.ts` | Structural interfaces the dispatcher consumes (NetworkServices, AccountServices, DappSessionServices, …). Keeps the bridge import-free relative to concrete service impls in `@nulo/extension`. |
@@ -56,7 +57,7 @@ is the expected behavior. Added in 0.2.0.
 When a user cancels an in-flight tx (or other cancellable operation) from the
 wallet UI, the wallet-sdk delivers an error to the dApp's awaiting promise.
 
-**The current upstream `@aztec/wallet-sdk` collapses our structured envelope
+**The current upstream `@aztec-labs/wallet-sdk` collapses our structured envelope
 to a plain `Error` whose `.message` is the JSON-serialized payload.** The
 following recipe handles both that shape and a forward-compatible structured
 shape, so dApps stay correct if the SDK ever preserves structure:
@@ -120,6 +121,26 @@ For other failures (network errors, simulation failures, etc.), the dApp
 receives `err.message` as a plain non-JSON string. The recipe's
 `try { info = JSON.parse(...) } catch { ... }` falls through gracefully.
 
+A request its stored grant does not cover (a contract, call, class, account
+or sender outside the grant, or a flag the grant does not set) is refused
+before any window opens or anything runs, with one envelope for every such
+refusal:
+
+```jsonc
+{
+  "code": 4100,                                  // EIP-1193 unauthorized
+  "message": "This request is outside the permissions you gave this app.",
+  "data": { "walletErrorCode": "SCOPE_VIOLATION" }
+}
+```
+
+The message is a constant and the envelope names no field and no value. A
+dApp reads the contracts, calls, classes and flags it holds from its own
+`requestCapabilities` answer, which is the stored grant, and asks again with a
+wider manifest. The answer lists the session's accounts only when the grant
+sets `canGet`. `createAuthWit` for a raw message hash is not a scope refusal
+(no grant can admit one) and answers the plain string.
+
 ## getAccounts before requestCapabilities
 
 `wallet.getAccounts()` throws `CapabilityNotGrantedError` (code `4100`,
@@ -167,12 +188,10 @@ other "unauthorized" surface the wallet might add later. The error message is
 a public contract — it must stay byte-for-byte stable across versions because
 some dApps will substring-match on it.
 
-Note: today the wallet only ever throws this for the `accounts` capability
-(from `dispatcher.handleGetAccounts`). Other capability-gated methods reject
-with the existing scope-enforcement error format. Widening the
-`CapabilityNotGrantedError` surface to other methods is a separate, deferred
-follow-up — it would change the error-string contract for those methods, so
-it needs its own audit cycle before any rollout.
+Every capability-gated method answers this when the session holds no grant
+of the method's capability type, with `capabilityType` naming that type. A
+method whose type is granted but whose request the grant does not cover gets
+the `SCOPE_VIOLATION` envelope instead (§ What other error shapes look like).
 
 ## Scripts
 
@@ -233,7 +252,7 @@ new case added to their switches.
 
 ## Custom RPC methods (Nulo extensions)
 
-The wallet exposes three Nulo-custom RPCs on top of the canonical `@aztec/wallet-sdk`
+The wallet exposes three Nulo-custom RPCs on top of the canonical `@aztec-labs/wallet-sdk`
 `WalletSchema` (all three are runtime-patched onto `WalletSchema`; see the
 schema-patch contract below):
 
@@ -257,12 +276,11 @@ attacker-controllable.
 for the three Nulo-custom methods (`registerToken`, `isTokenRegistered`,
 `grantPublicAuthwit`). The patch is a **single private package**,
 [`@nulo/wallet-sdk-schema-patch`](../wallet-sdk-schema-patch/README.md), consumed
-by all three apps:
+by both apps:
 
 | Side | Import | In |
 |---|---|---|
 | Extension | `import "@nulo/wallet-sdk-schema-patch/register"` | `wallet-sdk/background.ts` (first import) |
-| Tools | `import "@nulo/wallet-sdk-schema-patch/register"` | `composables/createAztecWalletSession.ts` (first import) |
 | Playground | `import "@nulo/wallet-sdk-schema-patch/register"` | `lib/wallet.ts` (first import) |
 
 `./register` is **side-effect only** — importing it first mutates `WalletSchema`
@@ -278,7 +296,7 @@ new Nulo-custom RPC, edit the ONE source and add a paired reachability assertion
 Keeping the patch in a **dedicated private package** — not an export of
 `wallet-bridge` itself — is deliberate: `wallet-bridge` depends on `wallet-core`
 + `extension-messaging` and must stay extension-internal, so exposing it to the
-tools/playground dApp surfaces would leak its dispatcher/protocol internals to
+playground dApp surface would leak its dispatcher/protocol internals to
 third-party dApps.
 
 ### Dropped surface
@@ -297,7 +315,7 @@ patch does NOT restore them):
 
 If a future Aztec.js version ships its own `registerToken`, the patch's
 signature-drift guard throws at SW init (`expected 2 params, found N`). Pin the
-`@aztec/wallet-sdk` version exactly (`5.0.0-rc.2` today) so the patch's
+`@aztec-labs/wallet-sdk` version exactly (`6.0.0-rc.1` today) so the patch's
 assumptions are stable across upgrades.
 
 ### Not in `batch`

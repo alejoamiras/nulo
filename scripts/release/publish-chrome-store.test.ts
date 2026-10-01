@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import {
+	ACCEPTED_WARNINGS,
+	acceptedWarnings,
 	apiError,
 	collectWarnings,
 	compareStoreVersions,
+	interpretAcceptedPublish,
 	interpretAsyncUploadState,
 	interpretPreflight,
 	interpretPublish,
@@ -15,6 +18,26 @@ import {
 
 const ITEM = "abcdefghijklmnopabcdefghijklmnop"
 
+const BROAD_HOST = { reason: "BROAD_HOST_USAGE", description: "Your item is requesting broad host permissions which may require an in-depth review." }
+
+/** The refusal `blockOnWarnings: true` produces, detail for detail as the store sent it. */
+function refusal(warnings: unknown[] = [BROAD_HOST], over: { reason?: string; itemId?: string; extra?: unknown[]; status?: string } = {}) {
+	return {
+		error: {
+			code: 400,
+			message: "Validation warnings were encountered that require confirmation.",
+			status: over.status ?? "FAILED_PRECONDITION",
+			details: [
+				{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: over.reason ?? "MANUAL_CONFIRMATION_REQUIRED", domain: "chromewebstore.googleapis.com", metadata: { itemId: over.itemId ?? ITEM, publisherId: "pub" } },
+				{ "@type": "type.googleapis.com/google.rpc.LocalizedMessage", locale: "en-US", message: "Validation warnings were encountered that require confirmation." },
+				{ "@type": "type.googleapis.com/google.rpc.Help", links: [{ description: "Edit Item Link", url: "https://chrome.google.com/webstore/devconsole/pub/item/edit/package" }] },
+				{ "@type": "type.googleapis.com/google.chrome.webstore.v2.WarningsInfo", warnings },
+				...(over.extra ?? []),
+			],
+		},
+	}
+}
+
 describe("requests", () => {
 	test("upload goes to the upload host with a raw zip body; status and publish to the item", () => {
 		const up = uploadRequest("pub", ITEM, "tok", new Uint8Array([1]))
@@ -25,6 +48,7 @@ describe("requests", () => {
 		const pub = publishRequest("pub", ITEM, "tok", "STAGED_PUBLISH")
 		expect(pub.url.endsWith(":publish")).toBe(true)
 		expect(JSON.parse(pub.body as string)).toEqual({ publishType: "STAGED_PUBLISH", blockOnWarnings: true })
+		expect(JSON.parse(publishRequest("pub", ITEM, "tok", "STAGED_PUBLISH", false).body as string)).toEqual({ publishType: "STAGED_PUBLISH", blockOnWarnings: false })
 	})
 })
 
@@ -132,12 +156,89 @@ describe("publish", () => {
 		expect(refused.ok).toBe(false)
 		const reason = refused.ok ? "" : refused.reason
 		expect(reason).toContain("blocked on warnings")
-		expect(reason).toContain('{"reason":"ICON"}')
+		expect(reason).toContain("ICON")
+		// A refusal's warnings are listed by reason, so a second reason is never lost to the per-entry truncation.
+		const listed = collectWarnings(refusal([{ ...BROAD_HOST, description: "x".repeat(300) }, { reason: "LARGE_ICON", description: "icon" }]))
+		expect(listed.some((w) => w.startsWith("BROAD_HOST_USAGE: xxx"))).toBe(true)
+		expect(listed).toContain("LARGE_ICON: icon")
 	})
 
 	test("apiError keeps only the API's strings, truncated", () => {
 		expect(apiError({ error: { message: "m", status: "PERMISSION_DENIED" } })).toBe("m — PERMISSION_DENIED")
 		expect(apiError({ error: { message: "x".repeat(300) } }).length).toBe(200)
 		expect(apiError("nope")).toBe("no error detail")
+	})
+})
+
+describe("accepted warnings", () => {
+	// Growing this set is a reviewed change to the manifest's review surface, so the test names it in full.
+	test("the accepted list is exactly BROAD_HOST_USAGE", () => {
+		expect([...ACCEPTED_WARNINGS]).toEqual(["BROAD_HOST_USAGE"])
+	})
+
+	test("the store's own refusal on BROAD_HOST_USAGE alone is accepted, with its description", () => {
+		expect(acceptedWarnings(refusal(), 400, ITEM)).toEqual([BROAD_HOST])
+		const twice = acceptedWarnings(refusal([BROAD_HOST, { reason: "BROAD_HOST_USAGE" }]), 400, ITEM)
+		expect(twice?.map((w) => w.reason)).toEqual(["BROAD_HOST_USAGE", "BROAD_HOST_USAGE"])
+	})
+
+	test("any warning outside the list, or no warning at all, is never accepted", () => {
+		expect(acceptedWarnings(refusal([BROAD_HOST, { reason: "LARGE_ICON", description: "…" }]), 400, ITEM)).toBeNull()
+		expect(acceptedWarnings(refusal([{ reason: "NEW_REASON" }]), 400, ITEM)).toBeNull()
+		expect(acceptedWarnings(refusal([]), 400, ITEM)).toBeNull()
+		const noWarningsInfo = refusal()
+		noWarningsInfo.error.details = noWarningsInfo.error.details.slice(0, 3)
+		expect(acceptedWarnings(noWarningsInfo, 400, ITEM)).toBeNull()
+	})
+
+	test("an unreadable or unexpected refusal fails closed", () => {
+		expect(acceptedWarnings(refusal([{ description: "no reason" }]), 400, ITEM)).toBeNull()
+		expect(acceptedWarnings(refusal(["BROAD_HOST_USAGE"]), 400, ITEM)).toBeNull()
+		expect(acceptedWarnings(refusal([BROAD_HOST], { reason: "SOMETHING_ELSE" }), 400, ITEM)).toBeNull()
+		expect(acceptedWarnings(refusal([BROAD_HOST], { itemId: "other" }), 400, ITEM)).toBeNull()
+		expect(acceptedWarnings(refusal([BROAD_HOST], { status: "INVALID_ARGUMENT" }), 400, ITEM)).toBeNull()
+		expect(acceptedWarnings(refusal([BROAD_HOST], { extra: [{ "@type": "type.googleapis.com/google.rpc.PreconditionFailure", violations: [] }] }), 400, ITEM)).toBeNull()
+		expect(acceptedWarnings(refusal([BROAD_HOST], { extra: [{ reason: "BROAD_HOST_USAGE" }] }), 400, ITEM)).toBeNull()
+		expect(acceptedWarnings(refusal(), 403, ITEM)).toBeNull()
+		expect(acceptedWarnings({ error: { code: 400, status: "FAILED_PRECONDITION", details: [{ reason: "BROAD_HOST_USAGE" }] } }, 400, ITEM)).toBeNull()
+		expect(acceptedWarnings({ error: { code: 400, status: "FAILED_PRECONDITION" } }, 400, ITEM)).toBeNull()
+		expect(acceptedWarnings({ state: "PENDING_REVIEW" }, 200, ITEM)).toBeNull()
+		// A refusal that also carries the success envelope's fields is a shape the script does not know.
+		expect(acceptedWarnings({ ...refusal(), warningInfo: { warnings: [{ reason: "LARGE_ICON" }] } }, 400, ITEM)).toBeNull()
+		expect(acceptedWarnings({ ...refusal(), state: "PENDING_REVIEW" }, 400, ITEM)).toBeNull()
+		const twoConfirmations = refusal([BROAD_HOST], { extra: [refusal().error.details[0]] })
+		expect(acceptedWarnings(twoConfirmations, 400, ITEM)).toBeNull()
+		expect(acceptedWarnings(refusal([BROAD_HOST], { extra: [[BROAD_HOST]] }), 400, ITEM)).toBeNull()
+	})
+
+	test("rendering stays bounded whatever the store sends, and never throws", () => {
+		const flood = Array.from({ length: 1_000 }, (_, i) => ({ reason: `W${i}`, description: "x".repeat(500) }))
+		const lines = collectWarnings(refusal(flood))
+		expect(lines.length).toBeLessThanOrEqual(10)
+		for (const line of lines) expect(line.length).toBeLessThanOrEqual(200)
+		expect(collectWarnings({ warningInfo: { warnings: {} } })).toEqual(["{}"])
+		expect(collectWarnings({ warningInfo: [BROAD_HOST] })).toEqual([])
+		const many = interpretAcceptedPublish({ state: "PENDING_REVIEW", warningInfo: { warnings: flood } }, 200)
+		expect(many.ok ? "" : many.reason).toContain("(+990 more)")
+		expect((many.ok ? "" : many.reason).length).toBeLessThan(1_000)
+	})
+
+	test("a first-call success that still lists warnings stays a success and shows them", () => {
+		const live = interpretPublish({ state: "PUBLISHED", warningInfo: { warnings: [BROAD_HOST] } }, 200)
+		expect(live).toMatchObject({ ok: true, summary: expect.stringContaining("BROAD_HOST_USAGE: Your item") })
+	})
+
+	test("the retry's verdict fails once the store lists a warning it was not licensed to ignore", () => {
+		expect(interpretAcceptedPublish({ state: "PENDING_REVIEW", warningInfo: { warnings: [BROAD_HOST] } }, 200)).toMatchObject({ ok: true })
+		expect(interpretAcceptedPublish({ state: "PENDING_REVIEW", warningInfo: {} }, 200)).toMatchObject({ ok: true })
+		expect(interpretAcceptedPublish({ state: "STAGED" }, 200)).toMatchObject({ ok: true })
+		const stranger = interpretAcceptedPublish({ state: "PENDING_REVIEW", warningInfo: { warnings: [BROAD_HOST, { reason: "LARGE_ICON" }] } }, 200)
+		const reason = stranger.ok ? "" : stranger.reason
+		expect(reason).toContain("LARGE_ICON")
+		expect(reason).toContain("dashboard")
+		expect(interpretAcceptedPublish({ state: "PENDING_REVIEW", warningInfo: { warnings: "none" } }, 200)).toMatchObject({ ok: false, reason: expect.stringContaining("unreadable") })
+		expect(interpretAcceptedPublish({ state: "PENDING_REVIEW", warningInfo: { warnings: {} } }, 200)).toMatchObject({ ok: false, reason: expect.stringContaining("unreadable") })
+		expect(interpretAcceptedPublish({ state: "PENDING_REVIEW", warningInfo: [{ reason: "LARGE_ICON" }] }, 200)).toMatchObject({ ok: false, reason: expect.stringContaining("unreadable") })
+		expect(interpretAcceptedPublish(refusal(), 400)).toMatchObject({ ok: false, reason: expect.stringContaining("refused") })
 	})
 })

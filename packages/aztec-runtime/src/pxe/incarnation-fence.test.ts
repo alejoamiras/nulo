@@ -14,8 +14,8 @@ vi.mock("./note-schemas", () => ({
 	loadProductionNoteSchemas: async () => new Map<string, unknown>(),
 }))
 
-import type { PXE } from "@aztec/pxe/client/bundle"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import type { PXE } from "@aztec-labs/pxe/client/bundle"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { ChainRuntime, type NetworkInfo, type PxeFactory } from "./chain-runtime"
 import { PxeService, type IProfileReader } from "./service"

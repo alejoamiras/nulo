@@ -6,7 +6,7 @@
  * same-typed gasSettings slots the structural fee fixtures guard).
  */
 
-import type { TxExecutionRequest } from "@aztec/stdlib/tx"
+import type { TxExecutionRequest } from "@aztec-labs/stdlib/tx"
 import { computeMaxFee } from "@/utils/fee-estimation"
 import type { TxGasDetails } from "@/wallet/services/transaction/spec"
 

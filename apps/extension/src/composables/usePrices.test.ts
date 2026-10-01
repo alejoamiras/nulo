@@ -63,6 +63,32 @@ describe("composables/usePrices", () => {
 		expect(Object.keys(api.usableQuotes.value).sort()).toEqual(["aztec", "usd-coin"])
 	})
 
+	test("settled turns true on the first price answer: a refresh that resolves or rejects, or a broadcast", async () => {
+		let answer: (state: PriceState) => void = () => {}
+		const held = fakeClient()
+		held.refreshIfStale.mockReturnValue(
+			new Promise<PriceState>((resolve) => {
+				answer = resolve
+			}),
+		)
+		const { api } = await withPrices(held)
+		expect(api.settled.value).toBe(false)
+		answer({})
+		await flushPromises()
+		expect(api.settled.value).toBe(true)
+
+		const failed = fakeClient()
+		failed.refreshIfStale.mockRejectedValue(new Error("offline"))
+		expect((await withPrices(failed)).api.settled.value).toBe(true)
+
+		const broadcast = fakeClient()
+		broadcast.refreshIfStale.mockReturnValue(new Promise(() => {}))
+		const { api: live } = await withPrices(broadcast)
+		expect(live.settled.value).toBe(false)
+		broadcast.onQuotesUpdated.invoke(quoteState(Date.now()))
+		expect(live.settled.value).toBe(true)
+	})
+
 	test("a refreshIfStale rejection is swallowed (surfaces render token-only)", async () => {
 		const client = fakeClient()
 		client.refreshIfStale.mockRejectedValue(new Error("offline"))
@@ -88,15 +114,15 @@ describe("composables/usePrices", () => {
 	test("quoteFor resolves mapped tokens through the price map", async () => {
 		const client = fakeClient(quoteState(Date.now()))
 		const { api } = await withPrices(client)
-		expect(api.quoteFor(CHAIN_IDS.MAINNET, CUSD)?.coingeckoId).toBe("usd-coin")
+		expect(api.quoteFor(CHAIN_IDS.TESTNET, CUSD)?.coingeckoId).toBe("usd-coin")
 		// Case-insensitive contract match.
-		expect(api.quoteFor(CHAIN_IDS.MAINNET, CUSD.toUpperCase().replace("0X", "0x"))?.coingeckoId).toBe("usd-coin")
+		expect(api.quoteFor(CHAIN_IDS.TESTNET, CUSD.toUpperCase().replace("0X", "0x"))?.coingeckoId).toBe("usd-coin")
 	})
 
 	test("quoteFor is undefined for unmapped tokens and missing args", async () => {
 		const client = fakeClient(quoteState(Date.now()))
 		const { api } = await withPrices(client)
-		expect(api.quoteFor(CHAIN_IDS.MAINNET, "0xdeadbeef")).toBeUndefined()
+		expect(api.quoteFor(CHAIN_IDS.TESTNET, "0xdeadbeef")).toBeUndefined()
 		expect(api.quoteFor(12345, CUSD)).toBeUndefined()
 		expect(api.quoteFor(undefined, undefined)).toBeUndefined()
 	})
@@ -110,7 +136,7 @@ describe("composables/usePrices", () => {
 	test("tokenFiatMicro computes bigint fiat for a priced token, undefined otherwise", async () => {
 		const client = fakeClient(quoteState(Date.now()))
 		const { api } = await withPrices(client)
-		const token = { chainId: CHAIN_IDS.MAINNET, contract: CUSD, decimals: 18 }
+		const token = { chainId: CHAIN_IDS.TESTNET, contract: CUSD, decimals: 18 }
 		expect(api.tokenFiatMicro(token, 1_250n * 10n ** 18n)).toBe(1_249_821_250n)
 		expect(api.tokenFiatMicro({ chainId: 1, contract: "0x1", decimals: 18 }, 10n ** 18n)).toBeUndefined()
 		expect(api.tokenFiatMicro(undefined, 10n ** 18n)).toBeUndefined()
@@ -119,7 +145,7 @@ describe("composables/usePrices", () => {
 	test("tokenFiatLabel renders the ≈-prefixed display string", async () => {
 		const client = fakeClient(quoteState(Date.now()))
 		const { api } = await withPrices(client)
-		const token = { chainId: CHAIN_IDS.MAINNET, contract: CUSD, decimals: 18 }
+		const token = { chainId: CHAIN_IDS.TESTNET, contract: CUSD, decimals: 18 }
 		expect(api.tokenFiatLabel(token, 1_250n * 10n ** 18n)).toBe("≈ $1,249.82")
 		expect(api.tokenFiatLabel({ chainId: 1, contract: "0x1", decimals: 18 }, 1n)).toBeUndefined()
 	})

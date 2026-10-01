@@ -185,6 +185,20 @@ export class CapabilityNotGrantedError extends WalletError {
 }
 
 /**
+ * A dApp request asked for a contract, call, class, account or flag its stored grant does not
+ * cover. Raised by the grant check before any window opens or anything runs. The message names the
+ * method and the scope field, never a request value, and never reaches a dApp: its envelope is a
+ * constant.
+ */
+export class ScopeViolationError extends WalletError {
+	public static readonly CODE = "SCOPE_VIOLATION"
+
+	public constructor(message: string) {
+		super(ScopeViolationError.CODE, message, undefined, "ScopeViolationError")
+	}
+}
+
+/**
  * Raised when a dApp's sendTx is refused because the per-(profileId, chainId)
  * execution lane is at capacity — either the dApp's own per-origin pending cap
  * or the coarse total-lane cap (see `ExecutionMutex`). Backpressure, NOT a
@@ -227,7 +241,7 @@ export class DuplicateInitializationError extends WalletError {
  * A dApp asked for an RPC method this wallet does not implement.
  *
  * Typed rather than a bare `Error` because it is dApp-ACTIONABLE — the caller's whole response is
- * to fall back to another route, and the tools app already distinguishes it from a network failure —
+ * to fall back to another route, which needs it told apart from a network failure —
  * so it must survive the dApp-facing envelope's unclassified fall-through, which by design
  * replaces an unrecognised error's text with a constant.
  *
@@ -442,7 +456,7 @@ export class DuplicateWalletError extends WalletError {
  */
 export class RecoveryModeError extends WalletError {
 	public static readonly CODE = "RECOVERY_MODE"
-	public static readonly MESSAGE = "Wallet keys need recovery — export a backup and restore it"
+	public static readonly MESSAGE = "Wallet keys need recovery. Export a backup and restore it"
 
 	public constructor(message: string = RecoveryModeError.MESSAGE, details?: unknown) {
 		super(RecoveryModeError.CODE, message, details, "RecoveryModeError")
@@ -464,6 +478,7 @@ type KnownWalletErrorPayload =
 	| { code: typeof UserRejectedError.CODE; message: string; details?: unknown }
 	| { code: typeof JobCancelledError.CODE; message: string; details?: { jobId?: string } }
 	| { code: typeof CapabilityNotGrantedError.CODE; message: string; details?: { capabilityType?: string } }
+	| { code: typeof ScopeViolationError.CODE; message: string; details?: unknown }
 	| { code: typeof ValidationError.CODE; message: string; details?: unknown }
 	| { code: typeof InvalidPasswordError.CODE; message: string; details?: unknown }
 	| { code: typeof AccountAddressInconsistencyError.CODE; message: string; details?: unknown }
@@ -504,6 +519,8 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 			// stable message wording so the popup-side / dApp-side instanceof check
 			// and substring-match contracts both survive the JSON boundary.
 			return new CapabilityNotGrantedError(known.details?.capabilityType ?? "unknown", known.message)
+		case ScopeViolationError.CODE:
+			return new ScopeViolationError(known.message)
 		case ValidationError.CODE:
 			return new ValidationError(known.message, known.details)
 		case InvalidPasswordError.CODE:
@@ -540,6 +557,23 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 }
 
 /**
+ * A rejection that names the journal record its operation settled as failed. The thrower vouches
+ * for the pairing, so only the code that created the record builds one, with the id it was given.
+ * The response carries `error` exactly as it would alone, with `journalId` beside it.
+ */
+export class JournaledRejection {
+	public readonly error: unknown
+	public readonly journalId: string
+
+	public constructor(error: unknown, journalId: string) {
+		this.error = error
+		this.journalId = journalId
+	}
+}
+
+const journalIds = new WeakMap<Error, string>()
+
+/**
  * Reconstruct the client-side error from a response envelope's content.
  *
  * A structured `errorPayload` is rebuilt into its typed `WalletError` subclass
@@ -548,8 +582,16 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
  * offscreen (sendMessage) transport clients — the structural param keeps this
  * decoupled from each client's `ResponseContentLike`.
  */
-export function remoteErrorFromResponseContent(content: { errorPayload?: unknown; error?: string }): Error {
-	return content.errorPayload
+export function remoteErrorFromResponseContent(content: { errorPayload?: unknown; error?: string; journalId?: unknown }): Error {
+	const error = content.errorPayload
 		? walletErrorFromPayload(content.errorPayload as WalletErrorPayload)
 		: new Error(content.error ?? "Unknown error")
+	if (typeof content.journalId === "string") journalIds.set(error, content.journalId)
+	return error
+}
+
+/** The journal record a response named beside this rejection, or null. Only the response's own
+ *  `journalId` sets it; nothing on the error, its details included, can. */
+export function journalIdOf(error: unknown): string | null {
+	return error instanceof Error ? (journalIds.get(error) ?? null) : null
 }

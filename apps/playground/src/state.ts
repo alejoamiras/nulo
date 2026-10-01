@@ -32,6 +32,8 @@ export interface PgState {
 	inputs: Record<string, string>
 	protocolLog: Array<{ direction: "send" | "recv"; type: string; ts: number }>
 	lastError: string | null
+	/** The current connect attempt's channel hash, as the dApp side derived it. */
+	verificationHash: string | null
 }
 
 const initialState: PgState = {
@@ -43,6 +45,7 @@ const initialState: PgState = {
 	inputs: {},
 	protocolLog: [],
 	lastError: null,
+	verificationHash: null,
 }
 
 let state: PgState = { ...initialState }
