@@ -22,6 +22,12 @@ vi.mock("@/stores/app.store", () => ({
 	useAppStore: () => ({ network: { chainId: CHAIN_IDS.TESTNET }, defaultExplorer: "aztecscan" }),
 }))
 
+// No chain maps an explorer today; a fixture base keeps the link's contract pinned.
+vi.mock("@/wallet/constants/explorers", () => ({
+	getTransactionExplorerUrl: (_chainId: number, explorerId: string | null, hash: string) =>
+		explorerId ? `https://explorer.example/tx-effects/${hash}` : null,
+}))
+
 // Controllable price feed for the D2 fiat case.
 let mockQuotes: Record<string, unknown> = {}
 vi.mock("@/wallet/services/price/client", () => ({

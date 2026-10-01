@@ -1,7 +1,6 @@
 /**
  * D5-C: the received-detail page always-links the tx hash where an explorer URL exists, and
- * falls back to copy-hash on the sandbox (chainId 0 has no base URL). This pins the URL builder
- * that drives that branch.
+ * falls back to copy-hash where none does. This pins the URL builder that drives that branch.
  */
 import { describe, expect, test } from "vitest"
 import { CHAIN_IDS } from "@/utils/chain-ids"
@@ -10,8 +9,8 @@ import { getTransactionExplorerUrl } from "./explorers"
 const TX = `0x${"ab".repeat(32)}`
 
 describe("getTransactionExplorerUrl", () => {
-	test("testnet → testnet aztecscan tx-effects URL (link renders)", () => {
-		expect(getTransactionExplorerUrl(CHAIN_IDS.TESTNET, "aztecscan", TX)).toBe(`https://testnet.aztecscan.xyz/tx-effects/${TX}`)
+	test("testnet → null until an explorer serves the V6 chain (copy-hash fallback)", () => {
+		expect(getTransactionExplorerUrl(CHAIN_IDS.TESTNET, "aztecscan", TX)).toBeNull()
 	})
 
 	test("sandbox (chainId 0) → null (no base URL → copy-hash fallback)", () => {
