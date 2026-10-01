@@ -45,7 +45,7 @@ destination the user chooses (the node) or installs (the local prover) is still 
 
 | Data | Where it lives | Leaves the device | Destination |
 |---|---|---|---|
-| Recovery entropy, master secret, signing keys | Extension local storage, encrypted | Only when the user exports a backup file | The file the user saves (`downloads`) |
+| Recovery entropy, master secret, signing keys | Extension local storage, encrypted | Only when the user exports a backup file, or an account file (one account's signing key) | The file the user saves (`downloads`) |
 | Passkey credential id and sealed key material | Extension local storage | Only when the user exports a backup file | The file the user saves (`downloads`) |
 | Passkey label (profile name + short handle) | Handed to WebAuthn at creation, `wallet/utils/passkey-ceremony.ts:45-55` | Yes | The browser and the user's authenticator; the authenticator's provider may sync it (`legal/privacy.md` § 5.4) |
 | Account addresses | Extension local storage | Yes | The configured Aztec node (queries name the address); approved applications; the files the user exports |
@@ -53,8 +53,8 @@ destination the user chooses (the node) or installs (the local prover) is still 
 | Proving inputs (witnesses) | Process memory | Only with the optional local prover installed | `127.0.0.1` (`legal/privacy.md` § 5.8) |
 | Public proving parameters | Browser cache | Downloaded, never uploaded | `crs.aztec-cdn.foundation`, fallback `crs.aztec-labs.com` (§ 5.9) |
 | Token prices | Extension local storage (cache) | A request naming the tokens, no address | CoinGecko, unless fiat display is off (§ 5.2) |
-| Contacts (name, address), profile names | Extension local storage, `wallet/services/contact/spec.ts:9-17` | Only when the user exports contacts or a backup file | The file the user saves (`downloads`) |
-| Connected-app origins, names, icons, URLs, grants | Extension local storage, `wallet/services/dapp-session/spec.ts:35-50` | No | — |
+| Contacts (name, address), profile names | Extension local storage, `wallet/services/contact/spec.ts:9-17` | Only when the user exports contacts, a backup file, or an account file, whose file name carries the profile name | The file the user saves (`downloads`) |
+| Connected-app origins, names, icons, URLs, grants | Extension local storage, `wallet/services/dapp-session/spec.ts:35-50` | Only an app's name, which each transaction it sent records, in a backup file the user exports | The file the user saves (`downloads`) |
 | Diagnostic logs | Memory; session storage with Developer Mode on | Only when the user exports them | The file the user saves |
 | Terms-acceptance record | Extension local storage | No | — |
 
