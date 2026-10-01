@@ -22,6 +22,7 @@ import {
 	PROMOTIONS,
 	planPath,
 	type Row,
+	rawMeta,
 	readManifest,
 	rowsByPath,
 	UNTRACK_BASE,
@@ -185,15 +186,17 @@ function baseProblems(cwd: string, rows: readonly Row[]): string[] {
 	return problems
 }
 
-type Change = { status: string; source: string; target: string }
+type Change = { status: string; exact: boolean; source: string; target: string }
 
-/** `git diff --name-status -z` records; a rename or copy carries its target as a third field. */
+/** `git diff --raw --no-abbrev -z` records; a rename or copy carries its target as a third field. */
 function changes(fields: readonly string[]): Change[] {
 	const out: Change[] = []
 	for (let i = 0; i < fields.length; ) {
-		const status = fields[i]
-		const paired = status.startsWith("R") || status.startsWith("C")
-		out.push({ status, source: fields[i + 1], target: paired ? fields[i + 2] : fields[i + 1] })
+		const meta = rawMeta(fields[i])
+		if (meta === null) throw new Error(`not a git diff --raw field: ${fields[i]}`)
+		const paired = meta.status === "R" || meta.status === "C"
+		const [source, target] = [fields[i + 1], paired ? fields[i + 2] : fields[i + 1]]
+		out.push({ status: meta.status, exact: meta.status === "R" && meta.same, source, target })
 		i += paired ? 3 : 2
 	}
 	return out
@@ -203,11 +206,11 @@ function changes(fields: readonly string[]): Change[] {
  * A rename is a removal when it leaves a transcript name or a deleted ignore file, or leaves the plan
  * tree with any byte changed.
  */
-function isRemoval({ status, source, target }: Change): boolean {
+function isRemoval({ status, exact, source, target }: Change): boolean {
 	if (status === "D") return true
-	if (!status.startsWith("R")) return false
+	if (status !== "R") return false
 	if (lib.isCanonical(source) || DELETED.includes(source)) return true
-	return !target.startsWith(`${PLANS}/`) && status !== "R100"
+	return !target.startsWith(`${PLANS}/`) && !exact
 }
 
 /**
@@ -215,7 +218,7 @@ function isRemoval({ status, source, target }: Change): boolean {
  * pathspec: one limited to the plan tree pairs a move out of it with nothing and reads it as a deletion.
  */
 export function removedOnBranch(cwd: string, promotions: readonly Promotion[] = PROMOTIONS): string[] {
-	const diff = changes(lines0(git(cwd, "diff", "--name-status", "-M", "-z", `${DEV_REF}...HEAD`)))
+	const diff = changes(lines0(git(cwd, "diff", "--raw", "--no-abbrev", "-M", "-z", `${DEV_REF}...HEAD`)))
 	const removed = diff.filter((c) => c.source.startsWith(`${PLANS}/`) && isRemoval(c)).map((c) => c.source)
 	const base = mergeBase(cwd)
 	for (const p of promotions) {

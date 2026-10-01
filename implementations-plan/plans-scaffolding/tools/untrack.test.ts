@@ -81,28 +81,32 @@ describe("untrack", () => {
 		expect(verify({ cwd: repo, promotions })).toEqual([`${MANIFEST} is missing, so no row can be verified`])
 	})
 
-	test("a kept file moved out of the plan tree byte for byte needs no row; one edited on the way, or a transcript, does", () => {
+	test("a kept file moved out of the plan tree byte for byte needs no row; one edited on the way, even at R100, or a transcript, does", () => {
 		const lines = Array.from({ length: 12 }, (_, i) => `line ${i}`)
 		const { repo } = planRepo({
 			[`${P}/a/kept.ts`]: "export const k = 1\n",
 			[`${P}/a/edited.txt`]: `${lines.join("\n")}\n`,
 			[`${P}/a/audit-x.md`]: "x\n",
+			[`${P}/a/shuffled.ts`]: "first()\nsecond()\nthird()\n",
 		})
-		git(repo, "rm", "-q", `${P}/a/kept.ts`, `${P}/a/edited.txt`, `${P}/a/audit-x.md`)
+		git(repo, "rm", "-q", `${P}/a/kept.ts`, `${P}/a/edited.txt`, `${P}/a/audit-x.md`, `${P}/a/shuffled.ts`)
 		writeFiles(repo, {
 			"scripts/kept.ts": "export const k = 1\n",
+			"scripts/shuffled.ts": "third()\nsecond()\nfirst()\n",
 			"data/edited.txt": `${[...lines.slice(0, 11), "line 11, edited"].join("\n")}\n`,
 			"docs/audit-x.md": "x\n",
 		})
-		commitAll(repo, "move three files out of the plan tree")
+		commitAll(repo, "move four files out of the plan tree")
 		const diff = git(repo, "diff", "--name-status", "-M", "origin/dev...HEAD").split("\n")
 		const status = Object.fromEntries(diff.map((l) => l.split("\t")).map(([s, from]) => [from, s]))
 		expect(status[`${P}/a/kept.ts`]).toBe("R100")
 		expect(status[`${P}/a/audit-x.md`]).toBe("R100")
+		expect(status[`${P}/a/shuffled.ts`]).toBe("R100")
 		expect(status[`${P}/a/edited.txt`]).toMatch(/^R0\d\d$/)
 		expect(verify({ cwd: repo, promotions: [] })).toEqual([
 			`${P}/a/audit-x.md leaves the tree without a row`,
 			`${P}/a/edited.txt leaves the tree without a row`,
+			`${P}/a/shuffled.ts leaves the tree without a row`,
 		])
 	})
 
