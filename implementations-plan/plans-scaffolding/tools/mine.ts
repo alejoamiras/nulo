@@ -101,8 +101,8 @@ export type Decisions = { verdicts: Omit<Verdict, "kind">[]; lines: Omit<Line, "
 
 const sha256 = (b: Uint8Array | string) => createHash("sha256").update(b).digest("hex")
 export const scrub = (s: string) => s.replace(LOCAL_TOKEN_RE, "<local path>")
-/** An entry keeps its identity when the archive move re-points its links. */
-const norm = (text: string) => text.replaceAll("](archive/", "](")
+/** An entry keeps its identity when the archive move re-points its links and plan-path mentions. */
+const norm = (text: string) => text.replaceAll("](archive/", "](").replaceAll(`${PLANS}/archive/`, `${PLANS}/`)
 /**
  * A line-stage verdict binds to this, so moving the line, editing its text or follow-up, or swapping its evidence
  * voids it. JSON keeps each field's bounds, whatever it holds.

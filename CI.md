@@ -1,6 +1,6 @@
 # CI guide
 
-Contributor-facing reference for what runs when, how to opt in to slow gates, how to release, and how to debug a failing PR. The implementation details (workflow YAMLs, composite actions, reusables) live in [`.github/`](./.github/); the design rationale lives in [`implementations-plan/ci-cd/`](./implementations-plan/ci-cd/), whose plan links its audits by permalink.
+Contributor-facing reference for what runs when, how to opt in to slow gates, how to release, and how to debug a failing PR. The implementation details (workflow YAMLs, composite actions, reusables) live in [`.github/`](./.github/); the design rationale lives in [`implementations-plan/archive/ci-cd/`](./implementations-plan/archive/ci-cd/), whose plan links its audits by permalink.
 
 ## Branch model
 
@@ -30,7 +30,7 @@ Always runs on every PR. Lightweight gates:
 - `unit-tests` — `bun run test:all` (vitest across all workspaces; `--if-present` skips only `playground`, which has no `test` script — `landing` has one and runs). Every workspace `test` script is `bun --bun vitest run`, so the suites execute on the pinned Bun (`setup-bun`), not on the runner image's ambient Node; the Puppeteer e2e jobs still run vitest under Node.
 - `build-extension` — chrome + firefox builds, both on every PR that builds the extension, uploaded as the `extension-chrome` / `extension-firefox` artifacts (7-day retention) with the version stamped `X.Y.Z-pr.<N>` (`version_suffix`). The advisory `preview-comment` job keeps ONE sticky comment on the PR linking to them, edited in place on every push (a run whose head the PR has since moved past leaves the comment alone, so a slow run never overwrites a newer one) — download, unzip, **Load unpacked**. Same-repo PRs only; `continue-on-error` and not in `quality-status`'s `needs`, so it can red neither the run nor the gate. Logic in `scripts/ci-cd/preview-comment.ts`.
 
-The `quality-status` aggregator at the end is the required check on `main` / `dev` branch protection (the bare job/check-run name; the old required context `Quality / Status` was a phantom that never matched a produced check — see [CLAUDE.md § Branching](./CLAUDE.md#branching--merging) and `implementations-plan/required-check-mismatch/`).
+The `quality-status` aggregator at the end is the required check on `main` / `dev` branch protection (the bare job/check-run name; the old required context `Quality / Status` was a phantom that never matched a produced check — see [CLAUDE.md § Branching](./CLAUDE.md#branching--merging) and `implementations-plan/archive/required-check-mismatch/`).
 
 ### `pr-extension-smoke-e2e.yml`
 
@@ -77,7 +77,7 @@ A few **STUB** tests (`cancel-mid-prove`, `concurrent-sendtx-{approve,confirm}`)
 
 **Real BB proving stays covered** by the `network-e2e-canary` job (prover-ON, presto-server), on Chrome and on Firefox: `transfers` (wallet UI, waits through real prove → mine) + `tx-sendTx-default` (dApp, waits through real prove → submit — the node validates a real proof at `node.sendTx`; playground hard-codes `wait: "NO_WAIT"` so block-mine isn't awaited) + the two execution canaries (`frozen-account-canary`, `passkey-execution-canary` — the `@aztec` bump gate, CLAUDE.md "Account-address freeze"). The job's `Assert canary results` step reads vitest's json report back against `scripts/ci-cd/canary-expectations.json`, so a listed file that never ran, a skipped test or a vanished canary is a red job.
 
-**Production safety.** `NULO_E2E_PROVERLESS` is a **double-opt-in** build flag (`VITE_NULO_E2E_PROVERLESS` + `VITE_NULO_E2E_PROVERLESS_CONFIRM`; fail-closed throw if exactly one is set). The proverless branch + barrier are dead-code-eliminated from prod (referenced only inside `if (E2E_PROVERLESS)`); [`_build-extension.yml`](./.github/workflows/_build-extension.yml) asserts the build stamp + `nulo:e2e:proof-gate` key are ABSENT from every shipped `dist/{chrome,firefox}`. See [`implementations-plan/e2e-proverless-stub/`](./implementations-plan/e2e-proverless-stub/plan.md).
+**Production safety.** `NULO_E2E_PROVERLESS` is a **double-opt-in** build flag (`VITE_NULO_E2E_PROVERLESS` + `VITE_NULO_E2E_PROVERLESS_CONFIRM`; fail-closed throw if exactly one is set). The proverless branch + barrier are dead-code-eliminated from prod (referenced only inside `if (E2E_PROVERLESS)`); [`_build-extension.yml`](./.github/workflows/_build-extension.yml) asserts the build stamp + `nulo:e2e:proof-gate` key are ABSENT from every shipped `dist/{chrome,firefox}`. See [`implementations-plan/archive/e2e-proverless-stub/`](./implementations-plan/archive/e2e-proverless-stub/plan.md).
 
 ### `pr-extension-smoke-e2e-firefox.yml` / `pr-extension-network-e2e-firefox.yml`
 
@@ -195,7 +195,7 @@ The `pr-quick` / `pr-extension-smoke-e2e` / `pr-extension-network-e2e` `changes`
 1. **Never use a bare `!` negation pattern.** `dorny/paths-filter` defaults to `predicate-quantifier: some` (a file matches a filter if it matches ANY pattern), so a bare `!packages/x/**/*.md` matches *every file that isn't that md* → the filter silently becomes `**` and fires on every PR. Exclude by listing positive paths only (or, for true subset-exclusion, picomatch extglobs — never a bare `!`).
 2. **Gate on the graph.** When the extension or the landing gains a new `@nulo/*` dependency, add it to the relevant filters. [`scripts/ci-cd/behavior-gating.test.ts`](./scripts/ci-cd/behavior-gating.test.ts) recomputes each target's transitive graph from `package.json` and **fails CI** (via the `test:ci-gating` step in `_unit-tests.yml`) if a gate doesn't cover it, or if a `!` negation reappears — so the lists can't silently rot. The gates intentionally **over-trigger** (a colocated `*.test.ts`/`*.stories.ts` edit under `src/` runs the e2e suites) — the safe direction: err toward running, never skipping.
 
-History + the dual-audit trail: [`implementations-plan/paths-filter-negation-fix/`](./implementations-plan/paths-filter-negation-fix/plan.md).
+History + the dual-audit trail: [`implementations-plan/archive/paths-filter-negation-fix/`](./implementations-plan/archive/paths-filter-negation-fix/plan.md).
 
 ## Adding a new gate
 
@@ -218,13 +218,13 @@ Composite actions (step-level reuse):
 
 ## Known limitations
 
-- **Extension smoke e2e is required on both `dev` and `main`** (as `extension-smoke-e2e-status`). Its fixtures can still flake (cross-file Chrome teardown — see [`implementations-plan/ci-cd/smoke-gating-and-branch-cleanup.md`](./implementations-plan/ci-cd/smoke-gating-and-branch-cleanup.md) §5); treat a red smoke like any gate — flake → re-run, breakage → fix — never neutralize it.
+- **Extension smoke e2e is required on both `dev` and `main`** (as `extension-smoke-e2e-status`). Its fixtures can still flake (cross-file Chrome teardown — see [`implementations-plan/archive/ci-cd/smoke-gating-and-branch-cleanup.md`](./implementations-plan/archive/ci-cd/smoke-gating-and-branch-cleanup.md) §5); treat a red smoke like any gate — flake → re-run, breakage → fix — never neutralize it.
 - **Extension network e2e quarantines nothing.** Every skip in `tests/e2e/network/` is a `skipIf` on the test's own precondition, such as an Aztec config, a local network or a behaviour only one browser has (`CHROME_ONLY` and `FIREFOX_ONLY` in `apps/extension/tests/e2e/fixtures/browser/index.ts` carry each browser reason). Open flake fingerprints live in the `e2e-testing` skill's flake ledger.
 - **Store publishing has run on Chrome only**: the Chrome job uploaded v0.28.0 on 2026-09-23; the Firefox job has not run yet (the first AMO submission was manual). Both jobs need their GitHub environments (`chrome-web-store`, `firefox-add-ons`: reviewer = owner, `main` only) and an existing item on each store (see § `release.yml`). Nulo V6 reuses both items, renamed. The Firefox `gecko.id`, `wallet@nulo.sh`, is final.
 
 ## See also
 
 - [`.github/README.md`](./.github/README.md) — quick reference for the workflows + labels
-- [`implementations-plan/ci-cd/plan.md`](./implementations-plan/ci-cd/plan.md) — original design + audits
-- [`implementations-plan/ci-cd/smoke-gating-and-branch-cleanup.md`](./implementations-plan/ci-cd/smoke-gating-and-branch-cleanup.md) — smoke gating + branch cleanup design
+- [`implementations-plan/archive/ci-cd/plan.md`](./implementations-plan/archive/ci-cd/plan.md) — original design + audits
+- [`implementations-plan/archive/ci-cd/smoke-gating-and-branch-cleanup.md`](./implementations-plan/archive/ci-cd/smoke-gating-and-branch-cleanup.md) — smoke gating + branch cleanup design
 - [`CLAUDE.md`](./CLAUDE.md) §"Quality gates" — what the AI assistants should know about gates

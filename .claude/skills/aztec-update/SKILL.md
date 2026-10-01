@@ -5,7 +5,7 @@ description: Runbook for bumping the Aztec version line, @aztec-labs/* and @azte
 
 # Aztec version update
 
-Operational runbook distilled from the shipped bumps (4.2→5.0 hard fork: `implementations-plan/aztec-5.0-upgrade/`; rc.1→rc.2 + testnet redeploy: `implementations-plan/aztec-5.0-rc2/`; rc.2→5.0.0 stable + reset under intent tooling: `implementations-plan/aztec-5.0.0-stable/`; 5.2.0→6.0.0-rc.1, a scope move with a network reset and a new address regime: `implementations-plan/nulo-v6/` — read those plans + their `lessons/` for complete worked examples). Non-trivial bumps still go through `/blueprint` — this skill is the domain checklist the plan draws from, not a substitute for planning.
+Operational runbook distilled from the shipped bumps (4.2→5.0 hard fork: `implementations-plan/archive/aztec-5.0-upgrade/`; rc.1→rc.2 + testnet redeploy: `implementations-plan/archive/aztec-5.0-rc2/`; rc.2→5.0.0 stable + reset under intent tooling: `implementations-plan/archive/aztec-5.0.0-stable/`; 5.2.0→6.0.0-rc.1, a scope move with a network reset and a new address regime: `implementations-plan/nulo-v6/` — read those plans + their `lessons/` for complete worked examples). Non-trivial bumps still go through `/blueprint` — this skill is the domain checklist the plan draws from, not a substitute for planning.
 
 The bridge's half of a bump — the generation runbook (formerly Branch B here), the Noir contract surface and the bridge drift detectors — moved with the bridge to [`alejoamiras/unleashed`](https://github.com/alejoamiras/unleashed). Until that repo is populated, read them in [this skill at the freeze commit](https://github.com/alejoamiras/nulo/blob/6611f8611100931fe266f6fd1dfff27e331e2897/.claude/skills/aztec-update/SKILL.md).
 

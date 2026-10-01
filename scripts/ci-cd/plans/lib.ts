@@ -108,7 +108,7 @@ function indexEntries(cwd: string): Map<string, Entry> {
 	return entries
 }
 
-function readBlobs(cwd: string, oids: readonly string[]): Map<string, string> {
+export function readBlobs(cwd: string, oids: readonly string[]): Map<string, string> {
 	const res = spawnSync("git", ["cat-file", "--batch"], {
 		cwd,
 		env: GIT_ENV,
@@ -132,7 +132,7 @@ function readBlobs(cwd: string, oids: readonly string[]): Map<string, string> {
 	return blobs
 }
 
-function ancestorDirs(files: Iterable<string>): Set<string> {
+export function ancestorDirs(files: Iterable<string>): Set<string> {
 	const dirs = new Set<string>()
 	for (const file of files) {
 		for (let at = file.indexOf("/"); at !== -1; at = file.indexOf("/", at + 1)) dirs.add(file.slice(0, at))
@@ -219,11 +219,22 @@ export function parseIndex(src: string): { entries: IndexEntry[]; malformed: num
 	return { entries, malformed }
 }
 
+/**
+ * A plain `<dir>/<file>` path: no dot segment, escape, encoding, query or fragment. Only then do the
+ * target's text, its rendered href and the path a browser opens agree (`\.` renders as `.`, `%2e%2e` opens as `..`).
+ */
+const ENTRY_TARGET_RE = /^[\w-][\w.-]*(?:\/[\w-][\w.-]*)+$/
+
+/** The plan dir an index target names; null unless the target is a plain path inside one dir beside the index. */
+export function entryDir(target: string): string | null {
+	return ENTRY_TARGET_RE.test(target) ? target.slice(0, target.indexOf("/")) : null
+}
+
 /** Top-level plan dirs the active index lists, or null before the archive split, when there is no active set yet. */
 export function activePlanDirs(ctx: Ctx): Set<string> | null {
 	if (!ctx.tracked.has(ARCHIVE_INDEX)) return null
 	const { entries } = parseIndex(ctx.read(ACTIVE_INDEX))
-	return new Set(entries.map((e) => e.target.split("/")[0]))
+	return new Set(entries.flatMap((e) => entryDir(e.target) ?? []))
 }
 
 /** Names of the directories directly below `parent` that hold tracked files. */
@@ -244,10 +255,7 @@ export function mode(env: Env = process.env): "enforce" | "report" {
 	return PULL_REQUEST_EVENTS.has(env.GITHUB_EVENT_NAME ?? "") ? "enforce" : "report"
 }
 
-/**
- * Rules whose findings fail an enforcing run wherever they are. The index and archive rules only
- * report, having no active set until the archive split; `path-token` is `ENFORCED_IN_CODE`.
- */
+/** Rules whose findings fail an enforcing run. The index and archive rules find nothing before the archive split. */
 export const ENFORCED: ReadonlySet<RuleId> = new Set<RuleId>([
 	"tracked-artifact",
 	"hygiene-files",
@@ -259,15 +267,15 @@ export const ENFORCED: ReadonlySet<RuleId> = new Set<RuleId>([
 	"permalink-shape",
 	"permalink-base",
 	"permalink-ancestry",
+	"path-token",
+	"index-structure",
+	"archive-structure",
 	"curated-budget",
 	"local-path",
 ])
 
-/** Rules that fail an enforcing run in code and config; in a document they only report until the archive split. */
-export const ENFORCED_IN_CODE: ReadonlySet<RuleId> = new Set<RuleId>(["path-token"])
-
 export function isEnforced(f: Finding): boolean {
-	return ENFORCED.has(f.rule) || (ENFORCED_IN_CODE.has(f.rule) && !isDocument(f.file))
+	return ENFORCED.has(f.rule)
 }
 
 export function verdict(findings: readonly Finding[], env: Env): "pass" | "fail" {

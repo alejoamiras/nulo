@@ -41,7 +41,8 @@ const LIVE_DOCS = [
 const HISTORY_DOCS = new Set(["CHANGELOG.md", "AUDIT.md"])
 /**
  * Frozen research, audit and reference trees are out of the path-token scan, like the release history;
- * so are the soak baselines, which record the path each was written to, and this gate's fixtures.
+ * so are the soak baselines, which record the path each was written to, and this gate's fixtures. Plan
+ * prose is history too, except the index and curated files.
  */
 const PATH_TOKEN_EXCLUDES = [
 	":!implementations-plan",
@@ -368,21 +369,28 @@ function hitFindings(ctx: Ctx, hit: Hit, bases: Bases, held: ReadonlySet<string>
 	]
 }
 
-export function pathTokenFindings(ctx: Ctx, bases: Bases, allowlist: readonly HeldMention[] = PATH_TOKEN_ALLOWLIST): Finding[] {
+/** Lines naming a plan path in the staged blobs `pathspecs` select. */
+function planPathHits(ctx: Ctx, pathspecs: readonly string[]): Hit[] {
 	// `-a`: a NUL byte would otherwise make git skip the whole file as binary. `-z`: each name ends in a
 	// NUL and is never quoted, so a colon or a newline in it cannot shift the fields.
-	const grep = ctx.git("grep", "--cached", "-n", "-a", "-z", "-E", "implementations-plan/", "--", ".", ...PATH_TOKEN_EXCLUDES)
+	const grep = ctx.git("grep", "--cached", "-n", "-a", "-z", "-E", "implementations-plan/", "--", ...pathspecs)
 	// Exit status 1 is "no match", not an error.
 	if (grep.status === 1) return []
 	if (!grep.ok) throw new Error(`git grep failed: ${grep.stderr.trim()}`)
-	const held = new Set(allowlist.filter((h) => ctx.oids.get(h.file) === h.blob).map((h) => `${h.file}\0${h.token}`))
-	const findings: Finding[] = []
+	const hits: Hit[] = []
 	const hit = /([^\0]*)\0(\d+)\0([^\n]*)\n/y
 	let at = 0
 	for (let m = hit.exec(grep.stdout); m; m = hit.exec(grep.stdout)) {
-		findings.push(...hitFindings(ctx, { file: m[1], line: Number(m[2]), text: m[3] }, bases, held))
+		hits.push({ file: m[1], line: Number(m[2]), text: m[3] })
 		at = hit.lastIndex
 	}
 	if (at !== grep.stdout.length) throw new Error(`git grep printed an unparsable record at byte ${at}`)
-	return findings
+	return hits
+}
+
+export function pathTokenFindings(ctx: Ctx, bases: Bases, allowlist: readonly HeldMention[] = PATH_TOKEN_ALLOWLIST): Finding[] {
+	const held = new Set(allowlist.filter((h) => ctx.oids.get(h.file) === h.blob).map((h) => `${h.file}\0${h.token}`))
+	// A pathspec exclusion cannot be undone in the same grep, so the plan tree's live files get their own.
+	const hits = [...planPathHits(ctx, [".", ...PATH_TOKEN_EXCLUDES]), ...planPathHits(ctx, [...INDEX_FILES, ...CURATED_FILES])]
+	return hits.flatMap((hit) => hitFindings(ctx, hit, bases, held))
 }

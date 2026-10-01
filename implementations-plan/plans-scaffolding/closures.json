@@ -3392,10 +3392,10 @@
 		},
 		{
 			"dir": "tools-extraction",
-			"class": "active",
-			"status": "ACTIVE",
+			"class": "closed",
+			"status": "completed",
 			"followUps": [],
-			"evidence": "live plan",
+			"evidence": "S1: merged #690, #691, #692, #693, #694, #695, #697, #706, #707, #708, #709, #710, #711, #713, #714",
 			"date": "2026-09-28",
 			"prs": [
 				690,

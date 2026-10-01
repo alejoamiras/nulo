@@ -406,6 +406,21 @@ describe("path-token", () => {
 		])
 	})
 
+	test("plan prose is not scanned; the indexes and curated files are, code spans included", () => {
+		const stale = "See `implementations-plan/gone/plan.md`.\n"
+		const repo = makeRepo({
+			"implementations-plan/p/plan.md": stale,
+			"implementations-plan/index.md": "- [p](p/plan.md) — active — replaces `implementations-plan/gone/plan.md`\n",
+			"implementations-plan/archive/index.md": stale,
+			"implementations-plan/follow-ups.md": stale,
+		})
+		expect(findings(repo, "path-token").map((f) => f.file)).toEqual([
+			"implementations-plan/archive/index.md",
+			"implementations-plan/follow-ups.md",
+			"implementations-plan/index.md",
+		])
+	})
+
 	test("the reference projects and the soak baselines record their paths and are not scanned", () => {
 		const stale = "// implementations-plan/gone/plan.md\n"
 		const repo = makeRepo({
