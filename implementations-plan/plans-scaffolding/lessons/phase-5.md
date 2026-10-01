@@ -154,8 +154,27 @@ The network suite runs as the PR's required check.
 
 - **Rerun the gate after the restack.** `path-token` now fails a code mention of anything J untracks or moves. Run `bun run check:plans` and `untrack.ts --verify` on the restacked tip.
 - **`passkey-e2e/` is empty.** Its only file moved, and J's `closures.json` still carries its row (closed, no Outcome file). D's Outcome generator and archive mover must skip it: there is no directory left to archive.
-- **The notices' reopen triggers** point at `implementations-plan/follow-ups.md`, which gets the six items of `third-party-notices/follow-ups.md` only when J lifts them (recon row 10).
+- **The notices' reopen triggers** point at `implementations-plan/follow-ups.md`. J lifted all six items of `third-party-notices/follow-ups.md` into its § Dependencies and supply chain: the five declined items as one entry with their triggers, and the dev-server routing as its own.
 - **#669** deletes the old baselines and adds regenerated ones at C's destination. Its rebase over C can conflict there: add/add wherever git does not pair #669's rewrite with the old file. #669's baselines win. Its `BASELINES_DIR` line and Biome exclude are identical to C's.
 - **R100-frozen text.** `reference/aztec-5.0.0-stable/regime-a-vectors.ts:5` still tells a reader to run `bun implementations-plan/aztec-5.0.0-stable/reference/regime-a-vectors.ts`. `PRF-NON-PORTABLE.md` keeps its pre-restructure `packages/extension/` paths. A plain edit after C can fix both; C cannot.
 - **For D's strict docs mode:** the angle-bracket gotcha above; and after the archive split, a held wallet-crypto mention still resolves nowhere, so the allowlist stays until those files are edited.
 - C trips the extension, packages, landing (`legal/**`) and root-config filters, so both e2e suites and the advisory Firefox lanes run on its PR.
+
+## Restacks onto J
+
+Each restack was `git rebase --onto <J tip> <previous J tip>`. Every replayed commit stayed signed, and each one moved C by exactly J's diff between the two tips (`cmp` of the two diffs).
+
+| C tip | J tip | Gate |
+|---|---|---|
+| `95fccfe6` | none: built on `910a4def` | the table above, on `46d2b7f9` |
+| `20de6e05` | `7bb11cb6`, round 1 | the plan-tree checks |
+| `aa45f6b0` | `a2758473`, round 2 | Phase 5's full gate, below |
+| `ed03e1b8` | `4b5b4fd9`, round 3 | the plan-tree checks: J's round 3 touched only `implementations-plan/plans-scaffolding/` |
+
+The plan-tree checks are `check:plans`, the tools tests, `classify.ts --check`, `mine.ts --verify` and `untrack.ts --verify`. They exit 0 on each tip.
+
+Phase 5's gate on `aa45f6b0`, against `a2758473`:
+- **R100:** the plan's form passes vacuously (step 2). The corrected form pairs 42 moves, all `R100`. `packages/wallet-crypto/src` has no non-test change. The JSON diff is 32 `R100` renames plus `biome.json`'s one line.
+- **Smoke:** CI's smoke build, then `bun run test:e2e --shard=i/5` in five parallel shards, each with its own copy of `dist/chrome` as `EXTENSION_PATH`, since the global setup kills Chrome by its `--load-extension` path. 40 files pass and 3 skip, with 166 tests passing and 7 skipped. It took 441 s against 1,203 s unsharded, and `e2e:reap` found nothing left.
+- **Exit 0:** `test:all`, `typecheck:all`, `test:ci-gating`, `lint`, `lint:actions`, `phantom-sweep.ts`, the soak tests, `check:plans`, the tools tests, `classify.ts --check`, `mine.ts --verify`, `untrack.ts --verify`, `check-no-local-paths.sh` and `audit:vue`.
+- **Exit 1:** `test:release`, with the same 3 `zip-reproducible` failures as before (`zip` is not on this machine's PATH).
