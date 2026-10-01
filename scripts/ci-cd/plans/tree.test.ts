@@ -23,24 +23,23 @@ describe("plan tree gate", () => {
 		expect(verdict(findings, process.env), findings.filter(isEnforced).map(formatFinding).join("\n")).toBe("pass")
 	}, 60_000)
 
-	test("enforcement fails a pull request or a local run on an enforced finding, and never a push or a reported rule", () => {
+	test("enforcement fails a pull request or a local run on an enforced finding, and never a push", () => {
 		const one: Finding[] = [{ rule: "link-missing", file: "README.md", line: 1, detail: "d", fix: "f" }]
 		expect(verdict(one, PULL_REQUEST)).toBe("fail")
 		expect(verdict(one, { ...PULL_REQUEST, GITHUB_BASE_REF: "" })).toBe("fail")
 		expect(verdict(one, {})).toBe("fail")
 		expect(verdict(one, { GITHUB_ACTIONS: "true", GITHUB_EVENT_NAME: "push", GITHUB_BASE_REF: "dev" })).toBe("pass")
 		expect(verdict([], PULL_REQUEST)).toBe("pass")
-		expect(verdict([{ ...one[0], rule: "path-token" }], PULL_REQUEST)).toBe("pass")
-		expect(RULE_IDS.filter((id) => !ENFORCED.has(id))).toEqual(["path-token", "index-structure", "archive-structure"])
+		expect(RULE_IDS.filter((id) => !ENFORCED.has(id))).toEqual([])
 	})
 
-	test("path-token enforces in code and config, and only reports in a document", () => {
+	test("path-token enforces in code, config and documents alike", () => {
 		const token = (file: string): Finding[] => [{ rule: "path-token", file, line: 1, detail: "d", fix: "f" }]
 		expect(verdict(token("src/a.ts"), PULL_REQUEST)).toBe("fail")
 		expect(verdict(token("package.json"), {})).toBe("fail")
+		expect(verdict(token("docs/notes.md"), PULL_REQUEST)).toBe("fail")
+		expect(verdict(token("docs/page.html"), {})).toBe("fail")
 		expect(verdict(token("src/a.ts"), { GITHUB_ACTIONS: "true", GITHUB_EVENT_NAME: "push" })).toBe("pass")
-		expect(verdict(token("docs/notes.md"), PULL_REQUEST)).toBe("pass")
-		expect(verdict(token("docs/page.html"), {})).toBe("pass")
 	})
 
 	test("every held path-token mention is live, so a repointed one leaves the allowlist", () => {

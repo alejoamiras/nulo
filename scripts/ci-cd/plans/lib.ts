@@ -244,10 +244,7 @@ export function mode(env: Env = process.env): "enforce" | "report" {
 	return PULL_REQUEST_EVENTS.has(env.GITHUB_EVENT_NAME ?? "") ? "enforce" : "report"
 }
 
-/**
- * Rules whose findings fail an enforcing run wherever they are. The index and archive rules only
- * report, having no active set until the archive split; `path-token` is `ENFORCED_IN_CODE`.
- */
+/** Rules whose findings fail an enforcing run. The index and archive rules find nothing before the archive split. */
 export const ENFORCED: ReadonlySet<RuleId> = new Set<RuleId>([
 	"tracked-artifact",
 	"hygiene-files",
@@ -259,15 +256,15 @@ export const ENFORCED: ReadonlySet<RuleId> = new Set<RuleId>([
 	"permalink-shape",
 	"permalink-base",
 	"permalink-ancestry",
+	"path-token",
+	"index-structure",
+	"archive-structure",
 	"curated-budget",
 	"local-path",
 ])
 
-/** Rules that fail an enforcing run in code and config; in a document they only report until the archive split. */
-export const ENFORCED_IN_CODE: ReadonlySet<RuleId> = new Set<RuleId>(["path-token"])
-
 export function isEnforced(f: Finding): boolean {
-	return ENFORCED.has(f.rule) || (ENFORCED_IN_CODE.has(f.rule) && !isDocument(f.file))
+	return ENFORCED.has(f.rule)
 }
 
 export function verdict(findings: readonly Finding[], env: Env): "pass" | "fail" {
