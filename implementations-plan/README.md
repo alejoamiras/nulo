@@ -20,7 +20,7 @@ implementations-plan/<topic>/
 └── STATUS.md          # Live-progress log, deleted after merge.
 ```
 
-Not every plan uses every file. Audit transcripts (`audit-*.md`), competing drafts and revisions (`plan-*.md`), scratch briefs (`_*.md`) and `eli5.html` stay local: [`.gitignore`](.gitignore) keeps them out of history, since they are the likeliest place for a local path to leak. So each accepted and rejected finding, with its reason, is written into `plan.md` before the work closes, and a plan is revised in place. Transcripts committed before this rule were untracked: each stays readable at a pinned commit, every link to one is a permalink, and [`untrack-manifest.json`](plans-scaffolding/untrack-manifest.json) maps each removed path to its commit.
+Not every plan uses every file. Audit transcripts (`audit-*.md`), competing drafts and revisions (`plan-*.md`), scratch briefs (`_*.md`) and `eli5.html` stay local: [`.gitignore`](.gitignore) keeps them out of history, since they are the likeliest place for a local path to leak. So each accepted and rejected finding, with its reason, is written into `plan.md` before the work closes, and a plan is revised in place. Transcripts committed before this rule were untracked: each stays readable at a pinned commit, every link to one is a permalink, and [`untrack-manifest.json`](archive/plans-scaffolding/untrack-manifest.json) maps each removed path to its commit.
 
 ## When to add a plan
 

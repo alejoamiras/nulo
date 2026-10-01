@@ -6,7 +6,7 @@ Gotchas from closed plans, read before every task. One line each, linking its ev
 
 - Bun never re-checks a warm cache against the lockfile's sha512, so a poisoned cache survives a frozen install: a job making release bytes restores none (1.4.2, 2026-09). [Evidence](archive/tools-extraction/lessons/phase-2.md)
 - An incremental `bun install` leaves a removed dependency on disk, so a leftover import passes locally and fails on CI: prove removals on a fresh install (1.4.2, 2026-09). [Evidence](archive/vitest-vite8-dedupe/lessons/phase-2.md)
-- Under the isolated linker `bunx <tool>` at the repo root sees only root dependencies and fetches the rest from npm `@latest`, past the lockfile and age gate: use workspace scripts (1.4.2, 2026-10). [Evidence](plans-scaffolding/lessons/phase-7.md)
+- Under the isolated linker `bunx <tool>` at the repo root sees only root dependencies and fetches the rest from npm `@latest`, past the lockfile and age gate: use workspace scripts (1.4.2, 2026-10). [Evidence](archive/plans-scaffolding/lessons/phase-7.md)
 - When one `bun run --parallel` leg fails, Bun SIGINTs the rest, so `audit:vue` can exit 130: the cause is the leg that printed `Exited with code N` (1.4.2, 2026-09). [Evidence](archive/isolated-linker-store/lessons/phase-1.md)
 - `@aztec-labs/*` throws from `expect.addEqualityTesters` in a cold-cache `bun test` (use a `bun` subprocess; 6.0.0-rc.1, 2026-10); bb.js threw `std::bad_cast` in jsdom (use `// @vitest-environment node`; 5.2.0). [Evidence](archive/tools-extraction/lessons/phase-2.md), [more](archive/harden-2026-09-remediation/lessons/b4.md)
 
@@ -25,7 +25,7 @@ Gotchas from closed plans, read before every task. One line each, linking its ev
 
 - A `pull_request` run takes workflows from the merge ref but builds `head.sha`, so a fix `dev` gained after the branch point is absent: merge `dev` before debugging. [Evidence](archive/dedup-ledger/README.md)
 - A job needing a skipped job is skipped unless its `if` calls a status function, and `always()` also runs after a cancel: guard side effects with `always() && !cancelled()`. [Evidence](archive/release-pipeline-hardening/lessons/phase-1.md)
-- `git diff -M` pairs renames by shared lines, so R100 is not byte identity (compare blob ids and modes); a pathspec cuts the diff before pairing, splitting a move across it into a delete and an add. [Evidence](plans-scaffolding/lessons/phase-5.md), [more](plans-scaffolding/lessons/phase-7.md)
+- `git diff -M` pairs renames by shared lines, so R100 is not byte identity (compare blob ids and modes); a pathspec cuts the diff before pairing, splitting a move across it into a delete and an add. [Evidence](archive/plans-scaffolding/lessons/phase-5.md), [more](archive/plans-scaffolding/lessons/phase-7.md)
 - A `gh stack` runs the plans gate on every arc head, so an arc cannot link a later arc's file; after the squash merge, merging `dev` into a branch on the old head is add/add. [Evidence](archive/ux-feedback/lessons/final-pass.md), [more](archive/amount-honesty/lessons/phase-3.md)
 
 ## Extension runtime
