@@ -39,7 +39,7 @@ export default defineConfig({
 		// Mirrors vitest.e2e.network.config.ts.
 		server: {
 			deps: {
-				inline: [/@aztec/],
+				inline: [/@aztec(-labs|-foundation)?\//],
 			},
 		},
 	},

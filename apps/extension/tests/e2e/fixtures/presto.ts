@@ -1,5 +1,9 @@
 import type { HTTPRequest, Page } from "puppeteer"
 import { PRESTO_HOST, PRESTO_HTTPS_PORT, PRESTO_PORT } from "@/presto/config"
+import packageJson from "../../../package.json"
+
+/** The line `__AZTEC_VERSION__` bakes in; Presto reports "available" only when it serves this one. */
+const AZTEC_VERSION = packageJson.dependencies["@aztec-labs/pxe"]
 
 // The wallet probes Presto HTTPS-first; after an HTTPS failure the SDK runs one witness-free HTTP
 // diagnostic. Both are intercepted below the TLS handshake, so no certificate is needed.
@@ -11,8 +15,8 @@ export const PRESTO_DETAILED_HEALTH = {
 	status: "ok",
 	api_version: 1,
 	version: "1.1.1",
-	aztec_version: "5.2.0",
-	available_versions: ["5.2.0"],
+	aztec_version: AZTEC_VERSION,
+	available_versions: [AZTEC_VERSION],
 	bb_available: true,
 	https_port: PRESTO_HTTPS_PORT,
 }

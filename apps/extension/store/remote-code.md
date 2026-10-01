@@ -10,7 +10,7 @@ declaration ("No remote code", on both stores) rests on a stated mechanism rathe
 An application connected over the wallet-sdk channel can register a contract: an **instance**
 (address preimage) and, optionally, an **artifact** (`packages/wallet-bridge/src/dispatcher.ts:1448-1455`).
 The artifact is a JSON document — an ABI plus, per function, ACIR bytecode and Brillig bytecode
-(`@aztec-labs/stdlib/src/abi/abi.ts:248-249`). The wallet parses it against a schema before storing it
+(`@aztec-labs/stdlib/src/abi/abi.ts:273-274`). The wallet parses it against a schema before storing it
 (`packages/aztec-runtime/src/pxe/service.ts:438-463`) and derives the contract address from the
 preimage, refusing a mismatch. The artifact is **data**: it is never evaluated as JavaScript, never
 injected into a page, never loaded as a script.
@@ -21,7 +21,7 @@ Contract functions run inside the Aztec PXE, hosted in a hidden extension docume
 offscreen document, or a frame of the background page on Firefox,
 `apps/extension/src/wallet/utils/offscreen.ts:36-42`). The PXE feeds each function's bytecode to
 the ACVM, a virtual machine compiled to WebAssembly and bundled in the package
-(`@aztec-labs/simulator/src/private/acvm_wasm.ts:71-79`;
+(`@aztec-labs/simulator/src/private/acvm_wasm.ts:89-97`;
 `@aztec-labs/pxe/src/contract_function_simulator/oracle/private_execution.ts:48`). That the WASM is
 the bundled copy is a property of the loaders, not of the policy: the ACVM glue instantiates
 `acvm_js_bg.wasm` from its own module URL (`@aztec-foundation/noir-acvm_js/web/acvm_js.js:924`, an asset
@@ -39,19 +39,19 @@ string is replaced by a stub for that reason (`apps/extension/src/shims/function
 **Directly: nothing outside the VM.** The ACVM interprets an arithmetic circuit; a Brillig
 opcode can request a *foreign call*, and the only foreign-call handler is the one built over the
 wallet's own oracle: `buildACIRCallback` maps each registered oracle name to a method of the handler
-it is given and nothing else (`@aztec-labs/pxe/src/contract_function_simulator/oracle/acir_callback.ts:21-36`).
+it is given and nothing else (`@aztec-labs/pxe/src/contract_function_simulator/oracle/acir_callback.ts:24-96`).
 
 **Through the oracle, the calls it serves.** Utility functions get the methods of
 `@aztec-labs/pxe/src/contract_function_simulator/oracle/utility_execution_oracle.ts` (the public
-methods from `:192` on: random fields, key validation, membership witnesses, block headers, contract
+methods from `:200` on: random fields, key validation, membership witnesses, block headers, contract
 instances, auth witnesses, the caller's own notes and nullifiers, capsules and fact collections,
 logging, nested utility calls). Private functions add the methods of
-`@aztec-labs/pxe/src/contract_function_simulator/oracle/private_execution_oracle.ts` (from `:118`:
+`@aztec-labs/pxe/src/contract_function_simulator/oracle/private_execution_oracle.ts` (from `:117`:
 context inputs, note creation and nullification notices, tagging secrets, hash preimages, log
 emission). Some of those answers are fetched from the Aztec node the user configured — for example
-a public-storage read (`@aztec-labs/pxe/src/contract_function_simulator/oracle/utility_execution_oracle.ts:536-547`) becomes
+a public-storage read (`@aztec-labs/pxe/src/contract_function_simulator/oracle/utility_execution_oracle.ts:547-558`) becomes
 `getPublicStorageAt` requests, and membership witnesses become the corresponding node queries
-(`:256`, `:283`, `:312`, `:334`, `:352`, `:376`, `:505`). So a contract function **can cause
+(`:264`, `:291`, `:321`, `:343`, `:361`, `:389`, `:518`). So a contract function **can cause
 requests to leave the device, to one fixed endpoint it does not choose**, carrying the addresses and
 slots it reads. It cannot name a host, send a body of its choosing, or read the response of
 anything but the typed query the oracle made on its behalf.

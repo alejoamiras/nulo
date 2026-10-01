@@ -5,8 +5,9 @@
  */
 const PACKAGE = /.*node_modules\/((?:@[^/]+\/)?[^/]+)\/(.+)$/
 
-/** The proving, simulation and contract stack: what makes the offscreen page's bundle tens of MB. */
-const HEAVY_SCOPES = ["@aztec/", "@noir-lang/", "@aztec-foundation/", "@alejoamiras/"]
+/** Package-name prefixes of the proving, simulation and contract stack: what makes the offscreen
+ *  page's bundle tens of MB. `@aztec/viem` is the one package the Aztec line keeps in its old scope. */
+const HEAVY_PREFIXES = ["@aztec-labs/", "@aztec-foundation/", "@aztec/viem", "@noir-lang/", "@alejoamiras/"]
 
 /**
  * Whatever chunk holds `@aztec-labs/wallet-sdk` is web-accessible to every page, because the content
@@ -19,7 +20,7 @@ const slug = (name: string): string => name.replace(/^@/, "").replace(/[^A-Za-z0
 function heavyModule(moduleId: string): { pkg: string; file: string } | null {
 	const id = moduleId.split("?")[0].replaceAll("\\", "/")
 	const [, pkg, file] = PACKAGE.exec(id) ?? []
-	if (!pkg || NEVER_GROUPED.has(pkg) || !HEAVY_SCOPES.some((scope) => pkg.startsWith(scope))) return null
+	if (!pkg || NEVER_GROUPED.has(pkg) || !HEAVY_PREFIXES.some((prefix) => pkg.startsWith(prefix))) return null
 	return { pkg, file }
 }
 

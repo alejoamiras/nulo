@@ -17,7 +17,7 @@ describe("layout identity — extension-anchored", () => {
 	it("sqlite3mc-wasm: declared pin, in lockstep with the copy @aztec-labs/kv-store consumes", () => {
 		const report = assertPackageIdentity("@aztec-labs/sqlite3mc-wasm", {
 			from: fromExtension,
-			expectVersion: "5.2.0",
+			expectVersion: "6.0.0-rc.1",
 			lockstepVia: "@aztec-labs/kv-store",
 		})
 		expect(report.lockstepRealRoot).toBe(report.realRoot)
@@ -33,7 +33,7 @@ describe("layout identity — extension-anchored", () => {
 		] as const) {
 			assertPackageIdentity(pkg, {
 				from: fromExtension,
-				expectVersion: "5.2.0",
+				expectVersion: "6.0.0-rc.1",
 				mustContain: { file: "package.json", marker: `"node": "./${entry}"` },
 			})
 			expect(existsSync(resolvePackageAsset(pkg, entry, { from: fromExtension }))).toBe(true)

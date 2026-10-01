@@ -49,7 +49,7 @@ export default defineConfig({
 		// Use the unstable loader to relax this check in the global setup process.
 		server: {
 			deps: {
-				inline: [/@aztec/],
+				inline: [/@aztec(-labs|-foundation)?\//],
 			},
 		},
 	},

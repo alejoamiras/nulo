@@ -64,14 +64,14 @@ describe("resolveExportedAsset", () => {
 
 describe("assertPackageIdentity", () => {
 	test("verifies name + exact version and returns realpath evidence", () => {
-		const report = assertPackageIdentity("@aztec-labs/sqlite3mc-wasm", { from: fromExtension, expectVersion: "5.2.0" })
+		const report = assertPackageIdentity("@aztec-labs/sqlite3mc-wasm", { from: fromExtension, expectVersion: "6.0.0-rc.1" })
 		expect(report.realRoot).toBe(realpathSync(report.root))
-		expect(report.version).toBe("5.2.0")
+		expect(report.version).toBe("6.0.0-rc.1")
 	})
 
 	test("wrong expectVersion throws with both versions in the message", () => {
 		expect(() => assertPackageIdentity("@aztec-labs/sqlite3mc-wasm", { from: fromExtension, expectVersion: "9.9.9" })).toThrow(
-			/5\.2\.0.*9\.9\.9/,
+			/6\.0\.0-rc\.1.*9\.9\.9/,
 		)
 	})
 
@@ -80,7 +80,7 @@ describe("assertPackageIdentity", () => {
 			from: fromExtension,
 			mustContain: { file: "package.json", marker: '"node": "./nodejs/noirc_abi_wasm.js"' },
 		})
-		expect(report.version).toBe("5.2.0")
+		expect(report.version).toBe("6.0.0-rc.1")
 	})
 
 	test("mustContain with an absent marker throws", () => {
@@ -95,7 +95,7 @@ describe("assertPackageIdentity", () => {
 	test("lockstep: direct extension resolution and the kv-store two-hop realpath to the SAME copy", () => {
 		const report = assertPackageIdentity("@aztec-labs/sqlite3mc-wasm", {
 			from: fromExtension,
-			expectVersion: "5.2.0",
+			expectVersion: "6.0.0-rc.1",
 			lockstepVia: "@aztec-labs/kv-store",
 		})
 		expect(report.lockstepRealRoot).toBe(report.realRoot)

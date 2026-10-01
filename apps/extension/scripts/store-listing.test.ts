@@ -100,14 +100,15 @@ describe("store listing", () => {
 	})
 })
 
-// `@aztec/<pkg>/src/...` citations point into the installed package; under the isolated linker the
-// only stable location is the store's `<pkg>@<version>` directory, so any installed version counts.
+// `<scope>/<pkg>/src/...` citations point into the installed package; under the isolated linker the
+// only stable location is the store's `<scope>+<pkg>@<version>` directory, so any installed version counts.
 function resolveCited(path: string): string | null {
-	if (path.startsWith("@aztec/")) {
+	const scope = /^@aztec-(?:labs|foundation)(?=\/)/.exec(path)?.[0]
+	if (scope) {
 		const [, pkg, ...rest] = path.split("/")
 		const store = resolve(REPO, "node_modules/.bun")
-		const dir = readdirSync(store).find((d) => d.startsWith(`@aztec+${pkg}@`))
-		return dir ? join(store, dir, "node_modules/@aztec", pkg, ...rest) : null
+		const dir = readdirSync(store).find((d) => d.startsWith(`${scope}+${pkg}@`))
+		return dir ? join(store, dir, "node_modules", scope, pkg, ...rest) : null
 	}
 	const candidates = [resolve(REPO, path), resolve(ROOT, path), resolve(ROOT, "src", path)]
 	return candidates.find((c) => existsSync(c)) ?? null
