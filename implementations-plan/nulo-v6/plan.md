@@ -801,7 +801,7 @@ The smoke recipe used below, per browser (`<b>` is `chrome` or `firefox`):
   diff stands in for the KDF digest tripwire meanwhile.
 - Layers: lint, types, unit, builds, supply chain.
 
-### P2 · The V6 account regime
+### P2 · The V6 account regime ✓
 
 1. Vendor `@aztec-labs/accounts@6.0.0-rc.1/artifacts/SchnorrAccount.json` byte-exact to
    `packages/aztec-runtime/src/account/artifacts/SchnorrAccount.json`. Rewrite `PROVENANCE.md` with:
