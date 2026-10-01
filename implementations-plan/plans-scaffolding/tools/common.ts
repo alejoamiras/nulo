@@ -2,13 +2,13 @@
 import { spawnSync } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join, posix } from "node:path"
-import { lib } from "./gate"
+import { lib, OWN } from "./gate"
 
 export const PLANS = lib.PLANS
 export const PERMALINK_PREFIX = "https://github.com/alejoamiras/nulo/blob/"
 /** The untrack base the plan pins first; a later merge-base with `origin/dev` covers what landed after it. */
 export const UNTRACK_BASE = "9f11de70b13933be2d54c3eb79622b1ff2719aba"
-export const MANIFEST = `${PLANS}/plans-scaffolding/untrack-manifest.json`
+export const MANIFEST = `${OWN}/untrack-manifest.json`
 export const BASES_FILE = "scripts/ci-cd/plans/permalink-bases.json"
 export const DEV_REF = "refs/remotes/origin/dev"
 

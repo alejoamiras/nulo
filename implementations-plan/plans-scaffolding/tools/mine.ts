@@ -18,9 +18,9 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { CLOSURES, type Closures } from "./classify"
 import { git, PLANS } from "./common"
-import { structure } from "./gate"
+import { OWN, structure } from "./gate"
 
-export const MINING = `${PLANS}/plans-scaffolding/mining.jsonl`
+export const MINING = `${OWN}/mining.jsonl`
 export const CURATED = { "lessons.md": `${PLANS}/lessons.md`, "follow-ups.md": `${PLANS}/follow-ups.md` } as const
 export type CuratedFile = keyof typeof CURATED
 

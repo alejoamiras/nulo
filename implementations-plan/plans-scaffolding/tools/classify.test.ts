@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { checkClosures, deriveRows, HISTORICAL, type Pr, RELOCATED } from "./classify"
 import { cleanupRepos, commitAll, git, P, writeFiles } from "./fixture"
-import { fixtures } from "./gate"
+import { fixtures, OWN } from "./gate"
 
 afterAll(cleanupRepos)
 
@@ -98,15 +98,16 @@ describe("classify", () => {
 		writeFiles(repo, { [`${P}/release-cut/plan.md`]: "# reopened\n" })
 		commitAll(repo, "docs: reopen release-cut")
 		const snapshot = (items: unknown[], totalCount: number) => JSON.stringify({ capturedAt: "2026-09-30", totalCount, items })
-		writeFiles(repo, { [`${P}/plans-scaffolding/gh-prs.json`]: snapshot([...prs.values()], prs.size) })
-		writeFileSync(join(repo, P, "plans-scaffolding/gh-issues.json"), snapshot([{ number: 20 }], 2))
+		writeFiles(repo, { [`${OWN}/gh-prs.json`]: snapshot([...prs.values()], prs.size) })
+		writeFileSync(join(repo, OWN, "gh-issues.json"), snapshot([{ number: 20 }], 2))
 		const base = closuresBase.slice(0, 8)
 		expect(checkClosures(repo, { closuresBase, rows }, "HEAD", imported)).toEqual({
 			problems: [
-				`${P}/plans-scaffolding/gh-issues.json: 1 items of 2`,
+				`${OWN}/gh-issues.json: 1 items of 2`,
 				"context: its class is not what closuresBase derives",
 				"context: its outcomeFile is not what closuresBase derives",
 				"gone: no such dir at closuresBase",
+				"dup: no row, though closuresBase derives one",
 				"waiting: ambiguous (AMBIGUOUS — no merged PR, no answer)",
 				"gone: no such dir",
 				`check-names: changed since ${base}; re-answer it and regenerate`,
@@ -135,8 +136,8 @@ describe("classify", () => {
 		commitAll(repo, "Merge branch 'side'")
 		const snapshot = (items: unknown[]) => JSON.stringify({ capturedAt: "2026-09-30", totalCount: items.length, items })
 		writeFiles(repo, {
-			[`${P}/plans-scaffolding/gh-prs.json`]: snapshot([...prs.values()]),
-			[`${P}/plans-scaffolding/gh-issues.json`]: snapshot([]),
+			[`${OWN}/gh-prs.json`]: snapshot([...prs.values()]),
+			[`${OWN}/gh-issues.json`]: snapshot([]),
 		})
 		const base = closuresBase.slice(0, 8)
 		expect(checkClosures(repo, { closuresBase, rows }, "HEAD", imported).problems).toEqual([

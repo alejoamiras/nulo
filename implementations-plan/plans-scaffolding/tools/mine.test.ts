@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import type { Closures, Row } from "./classify"
+import { CLOSURES, type Closures, type Row } from "./classify"
 import { cleanupRepos, commitAll, git, P, writeFiles } from "./fixture"
 import { fixtures } from "./gate"
 import {
@@ -71,7 +71,7 @@ function minedTree(): { repo: string; file: Closures } {
 		closuresBase: git(repo, "rev-parse", "HEAD"),
 		rows: [row("a", `${P}/a/plan.md`, ["a-rerun"]), row("b", `${P}/b/README.md`), row("c", null)],
 	}
-	writeFiles(repo, { [`${P}/plans-scaffolding/closures.json`]: JSON.stringify(file) })
+	writeFiles(repo, { [CLOSURES]: JSON.stringify(file) })
 	return { repo, file }
 }
 

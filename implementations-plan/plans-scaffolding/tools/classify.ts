@@ -13,7 +13,7 @@ import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { git, PLANS, rawMeta } from "./common"
-import { lib, links, structure } from "./gate"
+import { lib, links, OWN, structure } from "./gate"
 
 export type Pr = { number: number; state: "MERGED" | "OPEN" | "CLOSED"; base: string; mergedAt: string | null; mergeCommit: string | null }
 type Snapshot<T> = { capturedAt: string; totalCount: number; items: T[] }
@@ -31,10 +31,9 @@ export type Row = {
 }
 export type Closures = { closuresBase: string; rows: Row[] }
 
-const HERE = `${PLANS}/plans-scaffolding`
-export const CLOSURES = `${HERE}/closures.json`
-const PRS_FILE = `${HERE}/gh-prs.json`
-const ISSUES_FILE = `${HERE}/gh-issues.json`
+export const CLOSURES = `${OWN}/closures.json`
+const PRS_FILE = `${OWN}/gh-prs.json`
+const ISSUES_FILE = `${OWN}/gh-issues.json`
 const IMPORT = "5ee8ec1351cca0088118ec1008a0bfc15ccd9781"
 const IMPORT_DATE = "2026-05-19"
 export const HISTORICAL = `historical — pre-open-source import (${IMPORT_DATE})`
@@ -52,7 +51,7 @@ const ACTIVE_DIRS: ReadonlySet<string> = new Set(["plans-scaffolding", "tools-ex
 type Answer = { class: RowClass; status: string; followUps?: string[]; ask: string }
 const done = (ask: string, followUps: string[] = []): Answer => ({ class: "closed", status: "completed", followUps, ask })
 
-/** § Approval, 2026-09-25: every S Ask as recommended. S2 is a class (legacy imports), so only its exception is here. */
+/** The owner's answers, 2026-09-25: every S Ask as recommended. S2 is a class (legacy imports), so only its exception is here. */
 export const ANSWERS: Readonly<Record<string, Answer>> = {
 	"harden-quality-arc": done("S1", ["harden-quality-q13"]),
 	"v3-followups": done("S1", ["v3-followups-p2"]),
@@ -330,10 +329,15 @@ function hostProblems(cwd: string, rows: readonly Row[], upto: string): string[]
 	)
 }
 
-/** Each row must equal its derivation at the table's base: the archive tools trust every field. */
+/**
+ * The table must equal its derivation at its base, row for row: the archive tools trust every field, and a dir
+ * without a row reads as active.
+ */
 function rowProblems(rows: readonly Row[], derived: readonly Row[]): string[] {
 	const want = new Map(derived.map((r) => [r.dir, r]))
-	return rows.flatMap((row) => {
+	const have = new Set(rows.map((r) => r.dir))
+	const missing = derived.filter((d) => !have.has(d.dir)).map((d) => `${d.dir}: no row, though closuresBase derives one`)
+	const wrong = rows.flatMap((row) => {
 		const d = want.get(row.dir)
 		if (!d) return [`${row.dir}: no such dir at closuresBase`]
 		const keys = [...new Set([...Object.keys(row), ...Object.keys(d)])] as (keyof Row)[]
@@ -341,6 +345,7 @@ function rowProblems(rows: readonly Row[], derived: readonly Row[]): string[] {
 			.filter((k) => JSON.stringify(row[k]) !== JSON.stringify(d[k]))
 			.map((k) => `${row.dir}: its ${k} is not what closuresBase derives`)
 	})
+	return [...wrong, ...missing]
 }
 
 /** `upto` is the base being archived onto: HEAD for this arc, the refreshed `dev` for a later one. */
