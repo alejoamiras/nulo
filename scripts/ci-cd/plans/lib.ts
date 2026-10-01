@@ -10,7 +10,6 @@
  */
 import { spawnSync } from "node:child_process"
 import { appendFileSync } from "node:fs"
-import { posix } from "node:path"
 
 export type RuleId =
 	| "tracked-artifact"
@@ -221,13 +220,14 @@ export function parseIndex(src: string): { entries: IndexEntry[]; malformed: num
 }
 
 /**
- * The plan dir an index target names, read as its link resolves: query and fragment dropped, decoded
- * (a browser reads `%2e%2e` as `..`), normalized. Null unless it names a path inside one dir beside the index.
+ * A plain `<dir>/<file>` path: no dot segment, escape, encoding, query or fragment. Only then do the
+ * target's text, its rendered href and the path a browser opens agree (`\.` renders as `.`, `%2e%2e` opens as `..`).
  */
+const ENTRY_TARGET_RE = /^[\w-][\w.-]*(?:\/[\w-][\w.-]*)+$/
+
+/** The plan dir an index target names; null unless the target is a plain path inside one dir beside the index. */
 export function entryDir(target: string): string | null {
-	const bare = safeDecodeUri(target.trim().replace(/[?#].*$/, ""))
-	const [dir, ...rest] = posix.normalize(bare).split("/")
-	return dir === "" || dir === "." || dir === ".." || rest.length === 0 ? null : dir
+	return ENTRY_TARGET_RE.test(target) ? target.slice(0, target.indexOf("/")) : null
 }
 
 /** Top-level plan dirs the active index lists, or null before the archive split, when there is no active set yet. */

@@ -140,18 +140,16 @@ export function outcomeState(doc: Pick<Doc, "sections"> | undefined): OutcomeSta
 	return OUTCOME_FIELDS.every((re) => re.test(section.text)) ? "complete" : "incomplete"
 }
 
-/** Where an index line's link lands and the plan dir it names; null unless the link lands inside that dir. */
 function entryHost(indexFile: string, entry: IndexEntry): { host: string; dir: string } | null {
 	const dir = entryDir(entry.target)
-	const target = resolveHref(indexFile, entry.target)
-	if (dir === null || target.kind !== "repo" || target.path === null) return null
-	return target.path.startsWith(`${posix.dirname(indexFile)}/${dir}/`) ? { host: target.path, dir } : null
+	return dir === null ? null : { host: `${posix.dirname(indexFile)}/${entry.target}`, dir }
 }
 
 function judgeActiveEntry(ctx: Ctx, docs: ReadonlyMap<string, Doc>, entry: IndexEntry, seen: Set<string>): Finding[] {
 	const at = (detail: string, fix: string) => finding("index-structure", ACTIVE_INDEX, entry.line, detail, fix)
 	const named = entryHost(ACTIVE_INDEX, entry)
-	if (named === null) return [at(`${entry.target} names no file inside a plan dir`, "point the line at the plan's host file")]
+	if (named === null)
+		return [at(`${entry.target} is not a plain <dir>/<file> path`, "point it at the plan's host file, as `<dir>/<file>`")]
 	const { host, dir } = named
 	const out: Finding[] = []
 	if (dir === "archive") out.push(at(`${entry.name} points into archive/`, "move the line to archive/index.md"))
@@ -189,7 +187,7 @@ export function indexStructureFindings(ctx: Ctx, docs: ReadonlyMap<string, Doc>)
 function judgeArchiveEntry(ctx: Ctx, docs: ReadonlyMap<string, Doc>, entry: IndexEntry, listed: Set<string>): Finding[] {
 	const at = (detail: string, fix: string) => finding("archive-structure", ARCHIVE_INDEX, entry.line, detail, fix)
 	const named = entryHost(ARCHIVE_INDEX, entry)
-	if (named === null) return [at(`${entry.target} names no file inside an archived plan dir`, "point the line at the Outcome host")]
+	if (named === null) return [at(`${entry.target} is not a plain <dir>/<file> path`, "point it at the Outcome host, as `<dir>/<file>`")]
 	const { host, dir } = named
 	const out = listed.has(dir) ? [at(`${dir} is listed twice`, "keep one line per plan")] : []
 	listed.add(dir)

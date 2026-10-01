@@ -118,7 +118,7 @@ describe("index-structure", () => {
 		])
 	})
 
-	test("a target is judged by its normalized path: `./` names its dir, `..` cannot hide one", () => {
+	test("a target must be a plain `<dir>/<file>` path: `./` and `..` name no dir", () => {
 		const repo = makeRepo({
 			...split,
 			"implementations-plan/index.md": ["- [a](./a/plan.md) — active — a", "- [b](b/../README.md) — active — b"].join("\n"),
@@ -127,8 +127,10 @@ describe("index-structure", () => {
 			"implementations-plan/b/plan.md": `# B\n\n${OUTCOME}`,
 		})
 		expect(findings(repo, "index-structure").map((f) => f.detail)).toEqual([
+			"a has no line in index.md",
 			"b has no line in index.md",
-			"b/../README.md names no file inside a plan dir",
+			"./a/plan.md is not a plain <dir>/<file> path",
+			"b/../README.md is not a plain <dir>/<file> path",
 		])
 	})
 
@@ -179,25 +181,30 @@ describe("archive-structure", () => {
 		])
 	})
 
-	test("a line cannot lend another dir's Outcome: `..`, encoded or not, names the dir the link lands in", () => {
+	test("a line cannot lend a decoy's Outcome: `..`, `%2e%2e` or an escaped `\\.` names no dir, and a second line fails", () => {
 		const repo = makeRepo({
 			"implementations-plan/archive/index.md": [
 				line("a"),
 				line("a"),
 				"- [b](b/../a/plan.md) — completed — b",
 				"- [c](c/%2e%2e/a/plan.md) — completed — c",
+				"- [d](d/\\.\\./a/plan.md) — completed — d",
 			].join("\n"),
 			"implementations-plan/archive/a/plan.md": `# A\n\n${OUTCOME}`,
 			"implementations-plan/archive/b/plan.md": "# B\n",
 			"implementations-plan/archive/c/plan.md": "# C\n",
 			"implementations-plan/archive/c/%2e%2e/a/plan.md": `# Decoy\n\n${OUTCOME}`,
+			"implementations-plan/archive/d/plan.md": "# D\n",
+			"implementations-plan/archive/d/\\.\\./a/plan.md": `# Decoy\n\n${OUTCOME}`,
 		})
 		expect(findings(repo, "archive-structure").map((f) => `${f.file}:${f.line} ${f.detail}`)).toEqual([
 			"implementations-plan/archive/b:1 b has no line in archive/index.md",
 			"implementations-plan/archive/c:1 c has no line in archive/index.md",
+			"implementations-plan/archive/d:1 d has no line in archive/index.md",
 			"implementations-plan/archive/index.md:2 a is listed twice",
-			"implementations-plan/archive/index.md:3 a is listed twice",
-			"implementations-plan/archive/index.md:4 a is listed twice",
+			"implementations-plan/archive/index.md:3 b/../a/plan.md is not a plain <dir>/<file> path",
+			"implementations-plan/archive/index.md:4 c/%2e%2e/a/plan.md is not a plain <dir>/<file> path",
+			"implementations-plan/archive/index.md:5 d/\\.\\./a/plan.md is not a plain <dir>/<file> path",
 		])
 	})
 })
