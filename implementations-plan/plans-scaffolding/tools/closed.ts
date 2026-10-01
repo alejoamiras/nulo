@@ -2,7 +2,6 @@
  * What the archive tools share: the closed dirs the closure table lets them touch, where each one lives,
  * the move map, and a read-only view of a tree, the git index or a commit.
  */
-import { spawnSync } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { CLOSURES, type Closures, type Row } from "./classify"
@@ -25,38 +24,8 @@ export function has(view: Pick<View, "tracked" | "dirs">, path: string): boolean
 	return view.tracked.has(clean) || view.dirs.has(clean)
 }
 
-export function ancestorDirs(files: Iterable<string>): Set<string> {
-	const dirs = new Set<string>()
-	for (const file of files) {
-		for (let at = file.indexOf("/"); at !== -1; at = file.indexOf("/", at + 1)) dirs.add(file.slice(0, at))
-	}
-	return dirs
-}
-
 export function indexView(cwd: string): View {
 	return lib.createCtx({ cwd })
-}
-
-function catBlobs(cwd: string, oids: readonly string[]): Map<string, string> {
-	const res = spawnSync("git", ["cat-file", "--batch"], {
-		cwd,
-		env: { ...process.env, GIT_NO_LAZY_FETCH: "1" },
-		input: `${oids.join("\n")}\n`,
-		maxBuffer: 1 << 30,
-	})
-	if (res.status !== 0) throw new Error(`git cat-file --batch failed: ${res.stderr?.toString().trim()}`)
-	const out = res.stdout
-	const blobs = new Map<string, string>()
-	let at = 0
-	for (const oid of oids) {
-		const eol = out.indexOf(0x0a, at)
-		const header = out.toString("latin1", at, eol)
-		const size = header.startsWith(`${oid} blob `) ? Number(header.slice(oid.length + 6)) : Number.NaN
-		if (!Number.isSafeInteger(size)) throw new Error(`git cat-file --batch: ${header}`)
-		blobs.set(oid, out.toString("utf8", eol + 1, eol + 1 + size))
-		at = eol + 2 + size
-	}
-	return blobs
 }
 
 /** The tree of `ref`; like the gate, it reads regular files only. */
@@ -69,11 +38,11 @@ export function commitView(cwd: string, ref: string): View {
 	const blobs = new Map<string, string>()
 	const load = (paths: Iterable<string>) => {
 		const want = [...new Set([...paths].flatMap((p) => oids.get(p) ?? []))].filter((oid) => !blobs.has(oid))
-		if (want.length > 0) for (const [oid, text] of catBlobs(cwd, want)) blobs.set(oid, text)
+		if (want.length > 0) for (const [oid, text] of lib.readBlobs(cwd, want)) blobs.set(oid, text)
 	}
 	return {
 		tracked: new Set(oids.keys()),
-		dirs: ancestorDirs(oids.keys()),
+		dirs: lib.ancestorDirs(oids.keys()),
 		load,
 		read(path) {
 			const oid = oids.get(path)
@@ -89,7 +58,7 @@ export function overlay(base: View, edits: ReadonlyMap<string, string>): View {
 	const tracked = new Set([...base.tracked, ...edits.keys()])
 	return {
 		tracked,
-		dirs: new Set([...base.dirs, ...ancestorDirs(edits.keys())]),
+		dirs: new Set([...base.dirs, ...lib.ancestorDirs(edits.keys())]),
 		load: (paths) => base.load(paths),
 		read: (path) => edits.get(path) ?? base.read(path),
 	}

@@ -108,7 +108,7 @@ function indexEntries(cwd: string): Map<string, Entry> {
 	return entries
 }
 
-function readBlobs(cwd: string, oids: readonly string[]): Map<string, string> {
+export function readBlobs(cwd: string, oids: readonly string[]): Map<string, string> {
 	const res = spawnSync("git", ["cat-file", "--batch"], {
 		cwd,
 		env: GIT_ENV,
@@ -132,7 +132,7 @@ function readBlobs(cwd: string, oids: readonly string[]): Map<string, string> {
 	return blobs
 }
 
-function ancestorDirs(files: Iterable<string>): Set<string> {
+export function ancestorDirs(files: Iterable<string>): Set<string> {
 	const dirs = new Set<string>()
 	for (const file of files) {
 		for (let at = file.indexOf("/"); at !== -1; at = file.indexOf("/", at + 1)) dirs.add(file.slice(0, at))

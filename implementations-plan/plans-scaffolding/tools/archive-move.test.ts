@@ -11,7 +11,7 @@ afterAll(cleanupRepos)
 
 const STEPS: readonly string[][] = [["outcome", "--date", "2026-09-30"], ["archive-move"], ["split-index"], ["repair-links"]]
 
-/** The planTree fixture after the archive pipeline, one commit per step as the plan runs it. */
+/** The planTree fixture after the archive pipeline: Outcomes, the move alone, then the index and links, each a commit. */
 function archived() {
 	const { files, rows } = planTree()
 	const { repo, head } = closuresRepo(files, rows)

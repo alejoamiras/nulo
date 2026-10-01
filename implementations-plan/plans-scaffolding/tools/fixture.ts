@@ -3,8 +3,8 @@ import { spawnSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { CLOSURES, type Row } from "./classify"
-import { ancestorDirs, type View } from "./closed"
-import { fixtures } from "./gate"
+import type { View } from "./closed"
+import { fixtures, lib } from "./gate"
 
 export const { cleanupRepos, commitAll, git, writeFiles } = fixtures
 export const P = "implementations-plan"
@@ -65,7 +65,7 @@ export function read(repo: string, path: string): string {
 /** An in-memory tree. */
 export function memView(files: Record<string, string>): View {
 	const paths = new Set(Object.keys(files))
-	return { tracked: paths, dirs: ancestorDirs(paths), load: () => {}, read: (p) => files[p] ?? "" }
+	return { tracked: paths, dirs: lib.ancestorDirs(paths), load: () => {}, read: (p) => files[p] ?? "" }
 }
 
 const INDEX = `# Implementations plan index

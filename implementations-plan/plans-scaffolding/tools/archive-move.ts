@@ -16,7 +16,6 @@
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import {
-	ancestorDirs,
 	ARCHIVE,
 	baseIndexLines,
 	closedTargets,
@@ -32,14 +31,14 @@ import {
 	unmapPath,
 	type View,
 } from "./closed"
-import { blobIds, git, PLANS, rawMeta } from "./common"
-import { lib } from "./gate"
+import { blobIds, git, rawMeta } from "./common"
+import { lib, OWN } from "./gate"
 import { followUpEntries, planOutcomes } from "./outcome"
 import { planRepairs } from "./repair-links"
 import { splitIndex } from "./split-index"
 
 export const MAX_CHANGED = 3000
-const OWN_DIR = `${PLANS}/plans-scaffolding/`
+const OWN_DIR = `${OWN}/`
 
 /** `git mv`s each target still in the plan tree into `archive/`; returns how many moved. */
 export function moveClosed(cwd: string, targets: readonly Target[]): number {
@@ -55,7 +54,7 @@ function movedView(view: View, moved: ReadonlySet<string>): View {
 	const tracked = new Set([...view.tracked].map((p) => mapPath(moved, p)))
 	return {
 		tracked,
-		dirs: ancestorDirs(tracked),
+		dirs: lib.ancestorDirs(tracked),
 		load: (paths) => view.load([...paths].map((p) => unmapPath(moved, p))),
 		read: (path) => (tracked.has(path) ? view.read(unmapPath(moved, path)) : ""),
 	}

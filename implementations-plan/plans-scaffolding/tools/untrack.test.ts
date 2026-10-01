@@ -91,6 +91,7 @@ describe("untrack", () => {
 		})
 		commitAll(repo, "archive a with a link repair")
 		expect(git(repo, "diff", "--name-status", "-M", "origin/dev...HEAD")).toContain(`D\t${P}/a/notes.md`)
+		writeManifest(repo, [])
 		expect(verify({ cwd: repo, promotions: [] })).toEqual([`${P}/a/audit-y.md leaves the tree without a row`])
 	})
 
