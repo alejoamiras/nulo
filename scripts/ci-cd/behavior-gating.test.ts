@@ -479,3 +479,51 @@ describe("canary lanes", () => {
     expect(existsSync(join(ROOT, "scripts/ci-cd/assert-canary-results.ts"))).toBe(true)
   })
 })
+
+// Bun never re-checks cached files against bun.lock, and its install runs trusted packages'
+// lifecycle scripts: a poisoned cache must reach neither shipped bytes nor a job holding a write token.
+describe("Bun's install cache", () => {
+  // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
+  const parse = (file: string): any => Bun.YAML.parse(readFileSync(join(ROOT, file), "utf8"))
+  const SETUP_BUN = "./.github/actions/setup-bun"
+  type Step = { uses?: string; with?: Record<string, unknown>; if?: unknown }
+  type Job = { uses?: string; permissions?: unknown; steps?: Step[] }
+  const holdsWrite = (permissions: unknown): boolean =>
+    permissions === "write-all" ||
+    (typeof permissions === "object" && permissions !== null && Object.values(permissions).includes("write"))
+  /** A job's own steps, or every step of the local reusable workflow it calls. */
+  const stepsOf = (job: Job): Step[] =>
+    job.uses?.startsWith("./.github/workflows/")
+      ? (Object.values(parse(job.uses.slice(2)).jobs) as Job[]).flatMap((called) => called.steps ?? [])
+      : (job.steps ?? [])
+
+  test("the composite restores it only when asked", () => {
+    const action = parse(".github/actions/setup-bun/action.yml")
+    expect(action.inputs.cache.default).toBe("true")
+    const caches = (action.runs.steps as Step[]).filter((step) => step.uses?.startsWith("actions/cache@"))
+    expect(caches.map((step) => step.if)).toEqual(["inputs.cache == 'true'"])
+  })
+
+  test("the extension build takes it on pull requests only", () => {
+    const steps = stepsOf({ uses: "./.github/workflows/_build-extension.yml" }).filter((step) => step.uses === SETUP_BUN)
+    expect(steps.length).toBeGreaterThan(0)
+    for (const step of steps) expect(step.with?.cache).toBe("${{ github.event_name == 'pull_request' }}")
+  })
+
+  test("no job holding a write permission takes it", () => {
+    const files = readdirSync(join(ROOT, ".github/workflows")).filter((file) => file.endsWith(".yml"))
+    let checked = 0
+    for (const file of files) {
+      const wf = parse(`.github/workflows/${file}`)
+      for (const [name, job] of Object.entries(wf.jobs ?? {}) as [string, Job][]) {
+        // A job's own block replaces the workflow's rather than adding to it.
+        if (!holdsWrite(job.permissions ?? wf.permissions)) continue
+        for (const step of stepsOf(job).filter((step) => step.uses === SETUP_BUN)) {
+          expect(step.with?.cache, `${file} → ${name}`).toBe("false")
+          checked++
+        }
+      }
+    }
+    expect(checked, "the scan found the write-scoped jobs that run the composite").toBeGreaterThan(0)
+  })
+})
