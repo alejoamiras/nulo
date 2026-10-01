@@ -4,20 +4,28 @@ import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { resolvePackageAsset } from "@nulo/resolve-asset"
 import { describe, expect, test } from "vitest"
-import { derivePrivateFpc } from "./protocol-fpcs"
+import { derivePrivateFpc, deriveSponsoredFpc } from "./protocol-fpcs"
 
-/** The PrivateFPC's canonical deployment, identical on testnet and mainnet. A red run means the
+/** The PrivateFPC's canonical deployment; nothing in it is network-specific. A red run means the
  *  artifact, the salt or upstream's derivation moved: fix it against the deployed contract, never
  *  by re-pinning these literals alone. */
 const CANONICAL_PRIVATE_FPC = {
 	salt: "0x0000000000000000000000000000000000000000000000000000000000000001",
 	deployer: "0x0000000000000000000000000000000000000000000000000000000000000000",
-	address: "0x1a6d21ce5fd80137df0e99632a4ca17e58a42dc8f6c08191a96ca8ae907a1bc0",
+	address: "0x0b3bc795b5c077b57920d590ecc163af18705554abf7164cb0f8c52850943c08",
+}
+
+/** The SponsoredFPC deployed and funded on the testnet, the wallet's default fee sponsor. A red run
+ *  means the wallet would sponsor fees through a contract that does not exist there. */
+const CANONICAL_SPONSORED_FPC = {
+	salt: "0x0000000000000000000000000000000000000000000000000000000000000000",
+	deployer: "0x0000000000000000000000000000000000000000000000000000000000000000",
+	address: "0x06a9fa0208c78509921b0487a6b5cd5c2e93baf17de1a18d310f65a3cc1d924b",
 }
 
 /** sha256 of the key-sorted `target/` artifact without its debug file map, as reviewed for
- *  `@alejoamiras/private-fee-juice@5.0.1`. */
-const REVIEWED_PRIVATE_FPC_ARTIFACT = "7dd0ff19b3767b0296d059d911dd9745502624e2b402a11ae8b35b2299e48f1b"
+ *  `@alejoamiras/private-fee-juice@6.0.0-rc.1`. */
+const REVIEWED_PRIVATE_FPC_ARTIFACT = "7092f28d73832aeff38bb7e4c01e88ee8b9c15993e869d22d73c74d0916f67c6"
 
 function artifactWithoutDebugInfo(file: string): unknown {
 	const path = resolvePackageAsset("@alejoamiras/private-fee-juice", file, { from: import.meta.url })
@@ -40,6 +48,15 @@ describe("protocol FPC derivation", () => {
 			deployer: instance.deployer.toString(),
 			address: instance.address.toString(),
 		}).toEqual(CANONICAL_PRIVATE_FPC)
+	})
+
+	test("the wallet derives the deployed SponsoredFPC", async () => {
+		const { instance } = await deriveSponsoredFpc()
+		expect({
+			salt: instance.salt.toString(),
+			deployer: instance.deployer.toString(),
+			address: instance.address.toString(),
+		}).toEqual(CANONICAL_SPONSORED_FPC)
 	})
 
 	// The class id leaves out function flags such as `isStatic`, which the wallet copies into the
