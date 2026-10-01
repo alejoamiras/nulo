@@ -7,7 +7,7 @@ import {
 	isSeed,
 	openItems,
 	outcomeProblems,
-	placedPerA15,
+	placedAtTop,
 	planOutcomes,
 	seedEdit,
 	untouchedProblems,
@@ -46,13 +46,13 @@ describe("outcome", () => {
 		expect(() => seedEdit("x.md", "<pre>/goal x</pre>\n", "2026-09-30")).toThrow("no source position")
 	})
 
-	test("front matter is YAML between byte-0 fences, and A15 reads a setext Outcome heading at its text line", () => {
+	test("front matter is YAML between byte-0 fences, and the placement check reads a setext Outcome heading at its text line", () => {
 		expect(frontMatterLines(["---", "plan: x", "  nested: y", "---", "# X"])).toBe(4)
 		expect(frontMatterLines(["---", "A thematic break, then prose.", "---"])).toBe(0)
-		expect(placedPerA15("x.md", "Outcome\n---\n\n- **Date**: d.\n")).toBe(true)
+		expect(placedAtTop("x.md", "Outcome\n---\n\n- **Date**: d.\n")).toBe(true)
 	})
 
-	test("writes every closed block where A15 puts it, completes a partial one inside its field list, retires seeds, and leaves live dirs alone", () => {
+	test("writes every closed block at the top, completes a partial one inside its field list, retires seeds, and leaves live dirs alone", () => {
 		const { files, rows } = planTree()
 		const { repo, head } = closuresRepo(files, rows)
 		const run = tool(repo, "outcome", "--date", "2026-09-30")
@@ -136,7 +136,7 @@ describe("outcome", () => {
 		const opts = { stamp: "2026-09-30", followUps: [] }
 		expect(outcomeProblems(indexView(repo), targetsOf(repo), opts)).toEqual([
 			`${P}/half/plan.md: its Outcome is incomplete`,
-			`${P}/mis/plan.md: its Outcome is not where A15 puts it`,
+			`${P}/mis/plan.md: its Outcome is not at the top`,
 			`${P}/owed/plan.md: 0 Outcome blocks`,
 			`${P}/owed/sub/plan.md: 0 Outcome blocks`,
 			`${P}/twice/plan.md: 2 Outcome blocks`,

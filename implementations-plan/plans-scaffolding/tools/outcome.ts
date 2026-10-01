@@ -3,11 +3,12 @@
  * Writes each closed plan's `## Outcome` block in place, from `closures.json`: in its host (the table's
  * `outcomeFile`, else a stub `plan.md`), in every nested `plan.md` with the parent's status, and a
  * `Seeds retired` line above the first seed block of every other document in the dir. A block goes
- * directly after byte-0 YAML front matter, else at byte 0, before the H1 either way (A15). A complete
- * block is never touched; an incomplete one gains only its missing fields, at its end.
+ * directly after byte-0 YAML front matter, else at byte 0, before the H1 either way. A complete block is
+ * never touched; an incomplete one gains only its missing fields, at the end of the list it opens with,
+ * else after its last text line.
  *
  * `--date <YYYY-MM-DD>` stamps what it writes. `--verify [--parent <ref>]` checks that every closed host
- * and nested plan holds exactly one complete block placed per A15 (`GRANDFATHERED` excepted), that every
+ * and nested plan holds exactly one complete block, at the top (`GRANDFATHERED` excepted), that every
  * follow-up the table names is linked from `follow-ups.md`, that a rerun would change nothing, and, against
  * `<ref>`, that no document of a dir the table does not close gained or lost an Outcome or a seed line.
  */
@@ -31,7 +32,7 @@ import { git, PLANS } from "./common"
 import { lib, links, structure } from "./gate"
 import { nodes } from "./rewrite-links"
 
-/** Blocks written below their H1 before this generator existed; only they are exempt from A15. */
+/** Blocks written below their H1 before this generator existed; only they may stay there. */
 export const GRANDFATHERED: ReadonlySet<string> = new Set([
 	"send-publish-ledger/plan.md",
 	"grant-check-address-case/plan.md",
@@ -200,8 +201,8 @@ export function frontMatterLines(lines: readonly string[]): number {
 	return close !== -1 && lines.slice(1, close).every((l) => YAML_LINE_RE.test(l)) ? close + 1 : 0
 }
 
-/** A15: the Outcome heading is the first non-blank line after byte-0 front matter, or the file's first line without it. */
-export function placedPerA15(file: string, src: string): boolean {
+/** The Outcome heading is the first non-blank line after byte-0 front matter, or the file's first line without it. */
+export function placedAtTop(file: string, src: string): boolean {
 	const lines = src.split("\n")
 	const at = frontMatterLines(lines)
 	let first = at
@@ -448,7 +449,7 @@ function blockProblems(view: View, file: string, exempt: boolean): string[] {
 	const count = doc.h2.filter((h) => h === OUTCOME).length
 	if (count !== 1) return [`${file}: ${count} Outcome blocks`]
 	if (structure.outcomeState(doc) !== "complete") return [`${file}: its Outcome is incomplete`]
-	return exempt || placedPerA15(file, src) ? [] : [`${file}: its Outcome is not where A15 puts it`]
+	return exempt || placedAtTop(file, src) ? [] : [`${file}: its Outcome is not at the top`]
 }
 
 /** Why the generated state is wrong or unfinished in `view`: missing, partial or misplaced blocks, unmined follow-ups, a pending rerun. */

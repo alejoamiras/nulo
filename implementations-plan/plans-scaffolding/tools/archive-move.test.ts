@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { appendFileSync } from "node:fs"
+import { appendFileSync, chmodSync } from "node:fs"
 import { join } from "node:path"
 import { derive, fidelityProblems, swapProblems } from "./archive-move"
 import { stampOf } from "./closed"
@@ -104,6 +104,16 @@ describe("archive-move", () => {
 		expect(probe(() => git(repo, "mv", `${P}/archive/whole`, `${P}/whole`))).toContain(`${P}/whole/plan.md: no rename pairs it`)
 		expect(probe(() => git(repo, "mv", "apps/x.ts", "apps/y.ts"))).toContain("apps/x.ts → apps/y.ts: a rename outside the move")
 		expect(fidelityProblems(repo, head, d, 5).join("\n")).toContain("at or over the 5 cap")
+		const executable = (paths: readonly string[]) => () => {
+			for (const path of paths) chmodSync(join(repo, path), 0o755)
+		}
+		const flipped = [`${P}/archive/stubbed/notes.md`, `${P}/archive/fm/plan.md`, `${P}/archive/done/cites.md`, "CLAUDE.md"]
+		expect(probe(executable(flipped)).split("\n").sort()).toEqual([
+			"CLAUDE.md: mode 100644 → 100755",
+			`${P}/done/cites.md → ${P}/archive/done/cites.md: mode 100644 → 100755`,
+			`${P}/fm/plan.md → ${P}/archive/fm/plan.md: mode 100644 → 100755`,
+			`${P}/stubbed/notes.md → ${P}/archive/stubbed/notes.md: mode 100644 → 100755`,
+		])
 		expect(probe(() => ["plan", "notes"].map((f) => append(`${P}/plans-scaffolding/${f}.md`)()))).toBe("")
 		expect(probe(() => git(repo, "rm", "-q", `${P}/archive/stubbed/plan.md`))).toBe(
 			`${P}/archive/stubbed/plan.md: a planned edit is missing from HEAD`,

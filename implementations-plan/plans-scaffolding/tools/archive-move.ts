@@ -97,7 +97,7 @@ export function derive(cwd: string, parent: string, stamp: string): Derivation {
 	return { renames, edits, added }
 }
 
-export type Change = { status: string; score: number; same: boolean; paths: string[] }
+export type Change = { status: string; score: number; same: boolean; modes: [string, string]; paths: string[] }
 
 /** `git diff --raw --no-abbrev -M -z` between two commits. */
 export function rawChanges(cwd: string, from: string, to: string): Change[] {
@@ -107,13 +107,17 @@ export function rawChanges(cwd: string, from: string, to: string): Change[] {
 		const meta = rawMeta(fields[i])
 		if (meta === null) throw new Error(`not a git diff --raw field: ${fields[i]}`)
 		const count = meta.status === "R" || meta.status === "C" ? 2 : 1
-		changes.push({ status: meta.status, score: meta.score, same: meta.same, paths: fields.slice(i + 1, i + 1 + count) })
+		changes.push({ ...meta, paths: fields.slice(i + 1, i + 1 + count) })
 		i += 1 + count
 	}
 	return changes
 }
 
 type Judge = { d: Derivation; paired: Set<string>; swaps: [string, string][] }
+
+function modeProblems(what: string, [from, to]: readonly [string, string]): string[] {
+	return from === to ? [] : [`${what}: mode ${from} → ${to}`]
+}
 
 function renameProblems(c: Change, j: Judge): string[] {
 	const [from, to] = c.paths
@@ -122,15 +126,16 @@ function renameProblems(c: Change, j: Judge): string[] {
 	if (mapped === undefined) return [`${from} → ${to}: a rename outside the move`]
 	if (mapped !== to) j.swaps.push([from, to])
 	if (!c.same && !j.d.edits.has(to)) return [`${from} → ${to}: changed (R${c.score}) with no planned edit`]
-	return []
+	return modeProblems(`${from} → ${to}`, c.modes)
 }
 
 function changeProblems(c: Change, j: Judge): string[] {
 	const [path] = c.paths
 	if (c.status === "R") return renameProblems(c, j)
 	if (c.status === "A") return j.d.added.has(path) ? [] : [`${path}: added, but neither archive/index.md nor a stub`]
-	if (c.status === "M") return j.d.edits.has(path) || path.startsWith(OWN_DIR) ? [] : [`${path}: modified with no planned edit`]
-	return [`${c.paths.join(" → ")}: ${c.status}, which the archive commits never make`]
+	if (c.status !== "M") return [`${c.paths.join(" → ")}: ${c.status}, which the archive commits never make`]
+	if (path.startsWith(OWN_DIR)) return []
+	return j.d.edits.has(path) ? modeProblems(path, c.modes) : [`${path}: modified with no planned edit`]
 }
 
 /** A rename git paired off its mapped path is harmless only between two identical files: `from` and the true source of `to`. */
@@ -166,6 +171,16 @@ function outsidePairs(changes: readonly Change[], unpaired: ReadonlyMap<string, 
 	return changes.filter((c) => !(c.status === "D" && unpaired.has(c.paths[0])) && !(c.status === "A" && targets.has(c.paths[0])))
 }
 
+/** An unpaired move keeps its mode too: the deletion's source mode against the addition's destination mode. */
+function unpairedModeProblems(changes: readonly Change[], unpaired: ReadonlyMap<string, string>): string[] {
+	const modeOf = new Map<string, string>()
+	for (const c of changes) {
+		if (c.status === "D") modeOf.set(c.paths[0], c.modes[0])
+		if (c.status === "A") modeOf.set(c.paths[0], c.modes[1])
+	}
+	return [...unpaired].flatMap(([from, to]) => modeProblems(`${from} → ${to}`, [modeOf.get(from) ?? "", modeOf.get(to) ?? ""]))
+}
+
 /** Every way HEAD departs from the derivation. */
 export function fidelityProblems(cwd: string, parent: string, d: Derivation, cap = MAX_CHANGED): string[] {
 	const changes = rawChanges(cwd, parent, "HEAD")
@@ -173,6 +188,7 @@ export function fidelityProblems(cwd: string, parent: string, d: Derivation, cap
 	const j: Judge = { d, paired: new Set(unpaired.keys()), swaps: [] }
 	const problems = changes.length >= cap ? [`${changes.length} changed files, at or over the ${cap} cap`] : []
 	for (const c of outsidePairs(changes, unpaired)) problems.push(...changeProblems(c, j))
+	problems.push(...unpairedModeProblems(changes, unpaired))
 	problems.push(...swapProblems(cwd, parent, j.swaps, d.renames))
 	for (const from of d.renames.keys()) if (!j.paired.has(from)) problems.push(`${from}: no rename pairs it with ${d.renames.get(from)}`)
 	const head = commitView(cwd, "HEAD")
