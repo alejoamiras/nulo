@@ -1,5 +1,93 @@
 # Changelog
 
+## [0.29.0](https://github.com/alejoamiras/nulo/compare/v0.28.0...v0.29.0) (2026-10-01)
+
+
+### Features
+
+* **aztec:** move the wallet to aztec 6.0.0-rc.1 and the v6 testnet as nulo v6 ([#736](https://github.com/alejoamiras/nulo/issues/736)) ([80663b6](https://github.com/alejoamiras/nulo/commit/80663b61fb1419018395b787796ba758af7282f0))
+* **connect:** one connect window shows the emoji check after allow ([#727](https://github.com/alejoamiras/nulo/issues/727)) ([2ca0e69](https://github.com/alejoamiras/nulo/commit/2ca0e69637b3267c6f86add0a983b39ca3d295ba))
+* **infra:** redirect worker for the tools hostnames ([#708](https://github.com/alejoamiras/nulo/issues/708)) ([2e8524c](https://github.com/alejoamiras/nulo/commit/2e8524c25ba5c8711e95dc38eec950dcf580b772))
+* **layout:** activity rows 10px apart, tab titles at their drawn height ([#724](https://github.com/alejoamiras/nulo/issues/724)) ([4d1925a](https://github.com/alejoamiras/nulo/commit/4d1925a1597332fc6671f4ff974946eea52fe4ea))
+* **permissions:** one authorizations switch where off means ask, in the window and settings ([#703](https://github.com/alejoamiras/nulo/issues/703)) ([da79ac3](https://github.com/alejoamiras/nulo/commit/da79ac346a148bdcd6de01421bc91cb92130f83a))
+* **permissions:** redraw the permission window in four groups with a details table ([#704](https://github.com/alejoamiras/nulo/issues/704)) ([624117c](https://github.com/alejoamiras/nulo/commit/624117cdee1aab15447b09bea3d13b9cf44c7f49))
+* **publish:** stage and publish the three shared packages with npm provenance ([#694](https://github.com/alejoamiras/nulo/issues/694)) ([8ebeb00](https://github.com/alejoamiras/nulo/commit/8ebeb003092c64dc49618b98ce373c9cac8762b2))
+* **send:** check the network after a failed send; no false failure while proving ([#721](https://github.com/alejoamiras/nulo/issues/721)) ([7358369](https://github.com/alejoamiras/nulo/commit/7358369ea5aea52ac6d33ee981b50c977dd7d701))
+* **send:** say when the sponsor can't pay and when tokens fail to load ([#728](https://github.com/alejoamiras/nulo/issues/728)) ([3957675](https://github.com/alejoamiras/nulo/commit/39576757321764b22502bf5882ad3fb77252ea04))
+* **ux:** compact amounts, history token lookup, send loading, nulo sponsor default ([#718](https://github.com/alejoamiras/nulo/issues/718)) ([f32b1e0](https://github.com/alejoamiras/nulo/commit/f32b1e0ac8eaf54b920de4bbc263fd5ac6cdf380))
+* **ux:** first run without a name field, fee lines that say what you pay, and a lock chip ([#699](https://github.com/alejoamiras/nulo/issues/699)) ([3d02d5c](https://github.com/alejoamiras/nulo/commit/3d02d5cee85857f632a5c9285fc69339a321c0fc))
+* **ux:** snackbar above the nav, one link or button per row, a receipt's arrival plays once ([#702](https://github.com/alejoamiras/nulo/issues/702)) ([a233062](https://github.com/alejoamiras/nulo/commit/a233062c63ab69cf92aa827cfdb1ee5addbc8d4f))
+* **windows:** open every dapp window at the browser window's top-right, no taller than it ([#700](https://github.com/alejoamiras/nulo/issues/700)) ([8a6c68a](https://github.com/alejoamiras/nulo/commit/8a6c68ade64a73b9a9fbadcc439cd3f656aca282))
+
+
+### Bug Fixes
+
+* **amounts:** state activity amounts only in known decimals and never reread an amount ([#735](https://github.com/alejoamiras/nulo/issues/735)) ([910a4de](https://github.com/alejoamiras/nulo/commit/910a4defcbacbb4e76b53c1d57551a457b1d3fb0))
+* **backup:** one import clock per network, skip what every pxe rebuilds, retry a stalled one ([#726](https://github.com/alejoamiras/nulo/issues/726)) ([94ef1b1](https://github.com/alejoamiras/nulo/commit/94ef1b11c897c3fb5803930b9d14763ff677322d))
+* **copy:** no clause em dashes, a snack over the terms sheet, unknown-contract row names ([#734](https://github.com/alejoamiras/nulo/issues/734)) ([c3d6afd](https://github.com/alejoamiras/nulo/commit/c3d6afd578f8cde76f026bad2321730181755b50))
+* **extension:** render the store icons with bun's portable image backend ([#685](https://github.com/alejoamiras/nulo/issues/685)) ([5ee1d77](https://github.com/alejoamiras/nulo/commit/5ee1d77a5716e58e90a3093abcbedba8b642b6a9))
+* **extraction:** keep nulo's upstream out of unleashed and harden the recipe ([#706](https://github.com/alejoamiras/nulo/issues/706)) ([ed9c380](https://github.com/alejoamiras/nulo/commit/ed9c38023569be31f5876359768e46c7b87477c7))
+* **keyboard:** enter does what the focused control says, once ([#720](https://github.com/alejoamiras/nulo/issues/720)) ([4387b11](https://github.com/alejoamiras/nulo/commit/4387b1123ce0b75ad4b5c4b6643d7797ba53113c))
+* **landing:** cover wide screens with the feed, drop pause and the public-token line ([#679](https://github.com/alejoamiras/nulo/issues/679)) ([313bbb5](https://github.com/alejoamiras/nulo/commit/313bbb5c785d87de0f059d25c78b3b2ee5bf7946))
+* **legal:** attribute azguard wallet as apache-2.0 section 4 requires ([#680](https://github.com/alejoamiras/nulo/issues/680)) ([50e3726](https://github.com/alejoamiras/nulo/commit/50e37261d3e75025f886ec0c7bd47cedcd0b2eb1))
+* **legal:** ship the azguard notice in the extension and name it in the terms ([#682](https://github.com/alejoamiras/nulo/issues/682)) ([df37c0f](https://github.com/alejoamiras/nulo/commit/df37c0f4510585ebf4a0d4915b64fe757c22275c))
+* **links:** drop the dead tools links and seed unleashed's testnet usdc ([#713](https://github.com/alejoamiras/nulo/issues/713)) ([1d63ca4](https://github.com/alejoamiras/nulo/commit/1d63ca400c8438725f2585881bde16dd4f408c7a))
+* **permissions:** compare granted contract addresses by value, not by spelling ([#716](https://github.com/alejoamiras/nulo/issues/716)) ([f51ec00](https://github.com/alejoamiras/nulo/commit/f51ec001266c72a3bbb35334ffc28b1be3c8b81a))
+* **permissions:** refusals carry no request value; answer grants as stored ([#722](https://github.com/alejoamiras/nulo/issues/722)) ([b5c2581](https://github.com/alejoamiras/nulo/commit/b5c25815dfe76ff11e483c47c56c4f0f9ae7708b))
+* **popup:** escape closes the top popup, the way tapping outside does ([#675](https://github.com/alejoamiras/nulo/issues/675)) ([5b447f4](https://github.com/alejoamiras/nulo/commit/5b447f4513297dd3a7b2ceb36be59e520b9d4d81))
+* **publish:** keep [@aztec](https://github.com/aztec) out of the test process so a cold runner passes ([#695](https://github.com/alejoamiras/nulo/issues/695)) ([ee66a23](https://github.com/alejoamiras/nulo/commit/ee66a23351d8ba49c065a2640109bcf847507d9e))
+* **release:** generate release notes for the tag being published, with commit links ([#686](https://github.com/alejoamiras/nulo/issues/686)) ([b0aa21c](https://github.com/alejoamiras/nulo/commit/b0aa21cc3a6e76b435600688381e5a88b41be062))
+* **release:** let the chrome publish proceed past an accepted store warning ([#684](https://github.com/alejoamiras/nulo/issues/684)) ([726d95a](https://github.com/alejoamiras/nulo/commit/726d95af7e1424b97e39c85f6f12e4dc31239605))
+* **release:** zip the extension builds reproducibly ([#687](https://github.com/alejoamiras/nulo/issues/687)) ([bd7d34f](https://github.com/alejoamiras/nulo/commit/bd7d34fd9dd978792ab728eb4f4b275c56f3416e))
+* **security:** enter confirms only the focused button; fence trust; purge profile keys ([#717](https://github.com/alejoamiras/nulo/issues/717)) ([a7b1ff6](https://github.com/alejoamiras/nulo/commit/a7b1ff6235e1e55147c9b88deb33578e8f55f669))
+* **send:** keep typed and max amounts exact, and send a million or more ([#725](https://github.com/alejoamiras/nulo/issues/725)) ([c64a708](https://github.com/alejoamiras/nulo/commit/c64a708544193c9d92729b6cf6eb61eddd8a99c7))
+* three popup-escape follow-ups (passkey escape, firefox preview, ownership flake) ([#678](https://github.com/alejoamiras/nulo/issues/678)) ([f8bf0aa](https://github.com/alejoamiras/nulo/commit/f8bf0aa60f5f08aca857dd00f7640a9ea06ae59b))
+
+
+### Refactoring
+
+* **aztec-runtime:** own the fee-juice helper; pin the privatefpc derivation ([#690](https://github.com/alejoamiras/nulo/issues/690)) ([6611f86](https://github.com/alejoamiras/nulo/commit/6611f8611100931fe266f6fd1dfff27e331e2897))
+
+
+### Tests
+
+* **backup:** bound the retry tests' wait by real time, not turns ([#732](https://github.com/alejoamiras/nulo/issues/732)) ([9cbe486](https://github.com/alejoamiras/nulo/commit/9cbe48626b81a955cc477c4db5545ef9f9dbc430))
+* **e2e:** wait for the arrival chip before measuring it ([#731](https://github.com/alejoamiras/nulo/issues/731)) ([1462247](https://github.com/alejoamiras/nulo/commit/1462247678b960279939c9b34d095a729ebbacc7))
+* fix seven e2e and unit test reliability defects at their cause ([#719](https://github.com/alejoamiras/nulo/issues/719)) ([85c4d20](https://github.com/alejoamiras/nulo/commit/85c4d20fb29e455163738437b178f784c1c04fda))
+* **tools-e2e:** hold the racing steppers to the record id the send has named ([#689](https://github.com/alejoamiras/nulo/issues/689)) ([6e6439a](https://github.com/alejoamiras/nulo/commit/6e6439a1101936163158a1e8ad207345f9b9c003))
+* **tools-e2e:** reach the send review only once the route quote has been asked and landed ([#688](https://github.com/alejoamiras/nulo/issues/688)) ([42ba121](https://github.com/alejoamiras/nulo/commit/42ba1214b872f435ddb7dc80150faea07596f05d))
+
+
+### CI
+
+* **plans:** add the plan-tree gate in report-only mode ([#696](https://github.com/alejoamiras/nulo/issues/696)) ([137f193](https://github.com/alejoamiras/nulo/commit/137f193929085724a6c042594a978839930f9a98))
+
+
+### Misc
+
+* **extraction:** add the unleashed import recipe and bind 0.1.0 to rehearsed bytes ([#697](https://github.com/alejoamiras/nulo/issues/697)) ([b15f521](https://github.com/alejoamiras/nulo/commit/b15f52187f157390bde2c462b2fda0d3d1d0f725))
+* **hygiene:** retry-safe token specs, settled hero read, true comments and docs ([#723](https://github.com/alejoamiras/nulo/issues/723)) ([27ce96d](https://github.com/alejoamiras/nulo/commit/27ce96d8392b60fbbd109f7cc53bdc2916624ce6))
+* **infra:** take the tools names dark and retire the redirect worker ([#710](https://github.com/alejoamiras/nulo/issues/710)) ([33bb1d3](https://github.com/alejoamiras/nulo/commit/33bb1d3436492ff61ff866cac93af28f87890068))
+* **landing:** deploy as a workers static-assets site ([#693](https://github.com/alejoamiras/nulo/issues/693)) ([ae4260f](https://github.com/alejoamiras/nulo/commit/ae4260f315b2bbf3abb898b2cd921880e1a1ac6d))
+* **plans:** untrack plan transcripts, pin their links and enforce the plan-tree gate ([#698](https://github.com/alejoamiras/nulo/issues/698)) ([e476e91](https://github.com/alejoamiras/nulo/commit/e476e919813d7a94ba09c5fbf3438cb475142fd5))
+* re-baseline prerelease manifest to 0.28.0 ([ed92e5e](https://github.com/alejoamiras/nulo/commit/ed92e5e55e9a41ad8bd74be2570c414523b20858))
+* **release:** retire the pages landing hook now nulo.sh is a worker ([#711](https://github.com/alejoamiras/nulo/issues/711)) ([b172f0c](https://github.com/alejoamiras/nulo/commit/b172f0cad0eac8b01c9078f910b3cfab607d95f1))
+* remove the tools app, bridge packages and their ci ([#691](https://github.com/alejoamiras/nulo/issues/691)) ([14f1edd](https://github.com/alejoamiras/nulo/commit/14f1edd8507edfda09582583309092c9c7b553e6))
+* sync main → dev ([#677](https://github.com/alejoamiras/nulo/issues/677)) ([89ed746](https://github.com/alejoamiras/nulo/commit/89ed746f9371ec7660af570ea2d5d51419b7bd69))
+
+
+### Docs
+
+* **extraction:** correct the builds token premise, log the landing worker ([#709](https://github.com/alejoamiras/nulo/issues/709)) ([dbe3dfc](https://github.com/alejoamiras/nulo/commit/dbe3dfc5f42333e65208de1128d42939a53fc8fb))
+* **extraction:** log unleashed's b2–b4 arcs and the cross-arc review ([#707](https://github.com/alejoamiras/nulo/issues/707)) ([d53574c](https://github.com/alejoamiras/nulo/commit/d53574cf7794c7f6616f90b4de69dadfa2658623))
+* **legal:** fill the store listing urls and record the store-launch account session ([#683](https://github.com/alejoamiras/nulo/issues/683)) ([1a7e1a9](https://github.com/alejoamiras/nulo/commit/1a7e1a9bce99fbda0591a9c6c259151dee4d1d48))
+* **plan:** mark popup-escape-followups completed, add ledger [#35](https://github.com/alejoamiras/nulo/issues/35) ([#681](https://github.com/alejoamiras/nulo/issues/681)) ([c300f42](https://github.com/alejoamiras/nulo/commit/c300f428bcabfa9dd436405fcf5dbd476b6ffb6e))
+* **plans:** close tools-extraction except p1, promote its lessons ([#714](https://github.com/alejoamiras/nulo/issues/714)) ([c3b5dbb](https://github.com/alejoamiras/nulo/commit/c3b5dbb215a774436f0eafa582e99c7498d480da))
+* **plans:** close ux-feedback with its outcome, lessons and follow-ups ([#712](https://github.com/alejoamiras/nulo/issues/712)) ([0fa5a2c](https://github.com/alejoamiras/nulo/commit/0fa5a2cbdfc9de64b46c7a86898753b206988e9b))
+* **plans:** record three owner sign-offs as the options they picked ([#730](https://github.com/alejoamiras/nulo/issues/730)) ([7a5ac76](https://github.com/alejoamiras/nulo/commit/7a5ac766137acaebc4b4a016d8eae115a96d912b))
+* **plans:** ship a plan's archive move with its delivery ([#733](https://github.com/alejoamiras/nulo/issues/733)) ([9d98424](https://github.com/alejoamiras/nulo/commit/9d9842442845cf34a86f6435d4e5836ed40468eb))
+* point the wallet repo's docs, plans and skills at unleashed ([#692](https://github.com/alejoamiras/nulo/issues/692)) ([9f11de7](https://github.com/alejoamiras/nulo/commit/9f11de70b13933be2d54c3eb79622b1ff2719aba))
+
 ## [0.28.0](https://github.com/alejoamiras/nulo/compare/v0.27.0...v0.28.0) (2026-09-23)
 
 
