@@ -57,11 +57,10 @@
  * IF YOU'RE THINKING OF DELETING THIS HELPER
  * ─────────────────────────────────────────────────────────────────
  *
- * Two independent audits both flagged that dropping the
- * cap and letting `completeFeeOptions`'s `1.5×` default flow through
- * would silently break dApps using the patterns above. Before removing,
- * verify with a real dApp that hits an embedded fee path. See
- * `implementations-plan/embedded-fpc-firsttx-cosmetic/plan.md`.
+ * Dropping the cap lets `completeFeeOptions`'s `1.5×` default through,
+ * which silently breaks dApps using the patterns above. Before removing
+ * it, verify with a real dApp that hits an embedded fee path. Why:
+ * https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/embedded-fpc-firsttx-cosmetic/plan-v2.md
  */
 import { GasFees, GasSettings } from "@aztec-labs/stdlib/gas"
 import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
