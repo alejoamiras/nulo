@@ -31,7 +31,14 @@ import { createAztecNodeClient } from "@aztec-labs/aztec.js/node"
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { getPXEConfig } from "@aztec-labs/pxe/config"
 import { createPXE, type PXE } from "@aztec-labs/pxe/server"
-import { encodeArguments, FunctionCall, FunctionSelector, FunctionType, getFunctionArtifactByName } from "@aztec-labs/stdlib/abi"
+import {
+	encodeArguments,
+	FunctionCall,
+	FunctionSelector,
+	FunctionType,
+	getFunctionArtifactByName,
+	getFunctionReturnType,
+} from "@aztec-labs/stdlib/abi"
 import type { AuthWitness } from "@aztec-labs/stdlib/auth-witness"
 import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { computePartialAddress, getContractInstanceFromInstantiationParams } from "@aztec-labs/stdlib/contract"
@@ -79,7 +86,16 @@ describe.skipIf(!ARMED)("stale-anchor recovery against a real PXE and a reorged 
 	async function utilityCall(name: string, args: unknown[]): Promise<FunctionCall> {
 		const fn = getFunctionArtifactByName(SchnorrInitializerlessAccountContractArtifact, name)
 		const selector = await FunctionSelector.fromNameAndParameters(fn.name, fn.parameters)
-		return new FunctionCall(fn.name, account, selector, FunctionType.UTILITY, false, true, encodeArguments(fn, args), fn.returnTypes)
+		return new FunctionCall(
+			fn.name,
+			account,
+			selector,
+			FunctionType.UTILITY,
+			false,
+			true,
+			encodeArguments(fn, args),
+			getFunctionReturnType(fn),
+		)
 	}
 
 	beforeAll(async () => {

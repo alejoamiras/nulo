@@ -40,7 +40,6 @@ export const getSetAuthorizedFn = () =>
 				visibility: "private",
 			},
 		],
-		returnTypes: [],
 		errorTypes: {},
 	}) as FunctionAbi
 

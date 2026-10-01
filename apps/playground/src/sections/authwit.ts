@@ -92,7 +92,6 @@ async function transferIntent(from: AztecAddress, consumer: AztecAddress) {
 			hideMsgSender: false,
 			isStatic: false,
 			args: [from.toField(), consumer.toField(), new Fr(amount), new Fr(nonce)],
-			returnTypes: [],
 		}),
 	}
 }

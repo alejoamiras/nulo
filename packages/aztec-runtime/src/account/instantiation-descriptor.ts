@@ -14,7 +14,7 @@
  */
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import type { Point } from "@aztec-labs/foundation/curves/grumpkin"
-import { FunctionCall, FunctionSelector, type ContractArtifact } from "@aztec-labs/stdlib/abi"
+import { FunctionCall, FunctionSelector, type ContractArtifact, getFunctionReturnType } from "@aztec-labs/stdlib/abi"
 import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { AztecAddress as AztecAddressClass } from "@aztec-labs/stdlib/aztec-address"
 
@@ -82,6 +82,6 @@ export async function buildFrozenConstructorCall(
 		false,
 		ctorFn.isStatic,
 		frozenConstructorArgs(signingPublicKey),
-		ctorFn.returnTypes,
+		getFunctionReturnType(ctorFn),
 	)
 }

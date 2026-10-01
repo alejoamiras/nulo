@@ -154,7 +154,6 @@ export class OperationPlanner {
 					name: fn.name,
 					type: fn.type,
 					isStatic: fn.isStatic,
-					returnTypes: [],
 				},
 			],
 		}
@@ -214,7 +213,7 @@ export class OperationPlanner {
 				name: call.name,
 				type: call.type,
 				isStatic: call.isStatic,
-				returnTypes: call.returnTypes,
+				returnType: call.returnType,
 			} satisfies EncodedCallAction)
 		}
 

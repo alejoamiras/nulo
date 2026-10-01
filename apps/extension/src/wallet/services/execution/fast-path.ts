@@ -33,7 +33,7 @@
  * expressible by upstream's flat `appCallOffset` model.
  */
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
-import { FunctionCall, FunctionType, type FunctionAbi } from "@aztec-labs/stdlib/abi"
+import { FunctionCall, FunctionType, type FunctionAbi, getFunctionReturnType } from "@aztec-labs/stdlib/abi"
 import type { TxSimulationResult } from "@aztec-labs/stdlib/tx"
 import { SimulationError } from "@aztec-labs/stdlib/errors"
 import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
@@ -148,7 +148,7 @@ export async function bindOptimizableCalls(pxe: IPXE, resolver: ContractResolver
 				call.hideMsgSender,
 				fn.isStatic,
 				call.args,
-				fn.returnTypes ?? [],
+				getFunctionReturnType(fn),
 			),
 		)
 	}

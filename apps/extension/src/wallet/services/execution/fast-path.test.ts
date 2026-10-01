@@ -211,7 +211,6 @@ describe("rehydrateOptimizablePrefix", () => {
 			isStatic: true,
 			hideMsgSender: false,
 			args: [new Fr(7n)],
-			returnTypes: [],
 		})
 		const overWire = JSON.parse(JSON.stringify(real))
 		const result = rehydrateOptimizablePrefix([overWire])

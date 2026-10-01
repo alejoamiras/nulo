@@ -365,7 +365,7 @@ function validatePageOrdering(
 /** Decode a single `Transfer` log, or `undefined` (with a warn) on any per-item failure. */
 function decodePublicTransfer(entry: LogResult, log?: PublicEventLogger): PublicTransferEvent | undefined {
 	try {
-		const decoded = decodeFromAbi([TRANSFER_EVENT.abiType], entry.logData.slice(1)) as {
+		const decoded = decodeFromAbi(TRANSFER_EVENT.abiType, entry.logData.slice(1)) as {
 			from: AztecAddress
 			to: AztecAddress
 			amount: bigint

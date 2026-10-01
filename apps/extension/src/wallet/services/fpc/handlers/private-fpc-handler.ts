@@ -1,4 +1,4 @@
-import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
+import { type ContractArtifact, getFunctionReturnType } from "@aztec-labs/stdlib/abi"
 import { Gas } from "@aztec-labs/stdlib/gas"
 import type { Action } from "@/wallet/services/execution/spec"
 import type { FpcInfo } from "../spec"
@@ -10,7 +10,7 @@ export class PrivateFpcHandler implements IFpcHandler {
 		if (!payFee) {
 			throw new Error("Function `pay_fee` not found")
 		}
-		if (payFee.parameters.length !== 0 || payFee.returnTypes.length !== 0) {
+		if (payFee.parameters.length !== 0 || getFunctionReturnType(payFee) !== undefined) {
 			throw new Error("Function `pay_fee` has unsupported signature")
 		}
 

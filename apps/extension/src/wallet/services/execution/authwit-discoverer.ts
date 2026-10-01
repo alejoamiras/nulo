@@ -25,14 +25,13 @@
  */
 
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
-import { AbiTypeSchema, FunctionSelector, type FunctionType, FunctionCall, encodeArguments } from "@aztec-labs/stdlib/abi"
+import { FunctionSelector, type FunctionType, FunctionCall, encodeArguments, getFunctionReturnType } from "@aztec-labs/stdlib/abi"
 import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { computeAuthWitMessageHash, CallAuthorizationRequest, computeInnerAuthWitHash } from "@aztec-labs/aztec.js/authorization"
 import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
 import type { NodeInfo, ContractInstanceWithAddress } from "@aztec-labs/stdlib/contract"
 import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import { collectOffchainEffects, type TxExecutionRequest } from "@aztec-labs/stdlib/tx"
-import z from "zod"
 import type { ILogger } from "@/wallet/logger"
 import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
@@ -167,7 +166,7 @@ export class AuthwitDiscoverer {
 					content.hideSender === true,
 					fn.isStatic,
 					encodeArguments(fn, content.args),
-					fn.returnTypes,
+					getFunctionReturnType(fn),
 				),
 			},
 			{
@@ -177,11 +176,9 @@ export class AuthwitDiscoverer {
 		)
 	}
 
-	/** Compute the authwit message hash for an `encoded_call`-kind content.
-	 *  If content lacks `name/type/isStatic/returnTypes`, reads them from
-	 *  the artifact by matching `FunctionSelector.fromNameAndParameters`
-	 *  against `content.selector` — backfills missing fields on `content`
-	 *  (mutating — preserved from today's service.ts:2101-2165 behavior). */
+	/** Compute the authwit message hash for an `encoded_call`-kind content. Resolves the function
+	 *  by `content.selector`, rejects a mismatched `content.name`, and overwrites
+	 *  `name/type/isStatic/returnType` on `content` with the ABI's values (mutating). */
 	public async computeEncodedCallMessageHash(
 		content: EncodedCallAuthwitContent,
 		nodeInfo: NodeInfo,
@@ -190,7 +187,7 @@ export class AuthwitDiscoverer {
 	): Promise<Fr> {
 		// Resolve the ABI UNCONDITIONALLY and bind `content.name` to the selector's
 		// real function before hashing. Reading the ABI only when fields were absent
-		// let a dApp supply name/type/isStatic/returnTypes to skip the lookup and
+		// let a dApp supply name/type/isStatic/returnType to skip the lookup and
 		// obtain an authwit over a selector that did not match the claimed name. The
 		// fields set below are ABI truth; any dApp-supplied values are overwritten.
 		const artifact = requireArtifact(instances, artifacts, content.to)
@@ -206,7 +203,7 @@ export class AuthwitDiscoverer {
 		content.name = fn.name
 		content.type = fn.functionType
 		content.isStatic = fn.isStatic
-		content.returnTypes = fn.returnTypes
+		content.returnType = getFunctionReturnType(fn)
 		return await computeAuthWitMessageHash(
 			{
 				caller: AztecAddress.fromStringUnsafe(content.caller),
@@ -218,7 +215,7 @@ export class AuthwitDiscoverer {
 					content.hideMsgSender === true,
 					content.isStatic,
 					content.args.map((x) => Fr.fromString(x)),
-					await z.array(AbiTypeSchema).parseAsync(content.returnTypes),
+					getFunctionReturnType(fn),
 				),
 			},
 			{

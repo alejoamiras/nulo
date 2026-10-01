@@ -42,7 +42,7 @@
  */
 
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
-import { encodeArguments, FunctionCall, FunctionSelector, FunctionType } from "@aztec-labs/stdlib/abi"
+import { encodeArguments, FunctionCall, FunctionSelector, FunctionType, getFunctionReturnType } from "@aztec-labs/stdlib/abi"
 import { AuthWitness } from "@aztec-labs/stdlib/auth-witness"
 import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { Gas, GasSettings } from "@aztec-labs/stdlib/gas"
@@ -544,7 +544,7 @@ async function buildSetAuthorizedCall(messageHash: Fr): Promise<{ functionCall: 
 		false,
 		fn.isStatic,
 		encodeArguments(fn, [messageHash, true]),
-		fn.returnTypes,
+		getFunctionReturnType(fn),
 	)
 	return {
 		functionCall,
@@ -574,7 +574,7 @@ function newCallFunctionCall(
 		action.hideSender === true,
 		fn.isStatic,
 		encodeArguments(fn, action.args),
-		fn.returnTypes,
+		getFunctionReturnType(fn),
 	)
 }
 
@@ -583,7 +583,7 @@ function newCallFunctionCall(
  *  were absent let a dApp supply them to skip the lookup and execute a
  *  selector that did not match the authorized `name` — scope authorizes the
  *  name, execution ran the selector. Build the call from ABI truth; never
- *  trust dApp-supplied type/isStatic/returnTypes for execution metadata. */
+ *  trust dApp-supplied type/isStatic/returnType for execution metadata. */
 function validateEncodedCallFn(
 	action: Extract<Action, { kind: "encoded_call" }>,
 	fn: Awaited<ReturnType<typeof findFunctionBySelector>>,
@@ -611,6 +611,6 @@ function newEncodedCallFunctionCall(
 		action.hideMsgSender === true,
 		fn.isStatic,
 		action.args.map((x) => Fr.fromString(x)),
-		fn.returnTypes ?? [],
+		getFunctionReturnType(fn),
 	)
 }

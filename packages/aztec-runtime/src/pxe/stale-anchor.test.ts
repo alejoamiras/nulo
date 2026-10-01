@@ -150,7 +150,6 @@ describe("PxeService.executeUtility runs through the helper", () => {
 			false,
 			false,
 			[],
-			[],
 		)
 		return JSON.parse(jsonStringify(call)) as FunctionCall
 	}

@@ -159,7 +159,7 @@ async function readUtility(call: any, scope: AztecAddress): Promise<string> {
 	// biome-ignore lint/suspicious/noExplicitAny: ExecuteUtilityOptions cast at boundary
 	const opts = { scopes: [scope], authWitnesses: [], capsules: [], extraHashedArgs: [] } as any
 	const out = await wallet.executeUtility(call, opts)
-	return String(decodeFromAbi(call.returnTypes, out.result))
+	return String(decodeFromAbi(call.returnType, out.result))
 }
 
 function on(root: HTMLElement, testid: string, method: string, fn: () => Promise<unknown>): void {
