@@ -803,6 +803,7 @@ In order. No `/code-review`: `code_review` is `off`.
 | L39 | A move is byte-identical only when git's raw diff shows the same blob on both sides | Arc C codex, shared by J's drift rule (J16) | Trusting R100: git scores a rename by its lines, so a file moved with its lines reordered pairs at 100 | adopted; narrows L34 |
 | L40 | An allowlisted permalink hides the plan paths inside it only when the whole URL passes `isAllowedPermalink`: its span keeps inner brackets and drops only the sentence punctuation, emphasis, table pipes and unbalanced closers after it, as GitHub's autolinker does | Arc C codex K2, K6, K9 | Judging a prefix: an allowlisted SHA followed by `%2e%2e` segments, or by `(x)/%2e%2e`, resolved to `blob/dev` and hid its path | adopted |
 | L41 | A path token takes `<` and `>` only as a `<name>` placeholder, so an autolink's `>` ends the path and `<plan>` stays a template | Arc C codex K3, K7 | Stripping only a trailing `>`: `…/a.md>tail` and `<…/a.md><…/b.md>` still read as templates | adopted |
+| L42 | A wallet-crypto path-token hold that a `dev` change ended re-pins, on restack, to the file's blob at the new base | Restack onto `80663b61` (#736 rescoped two files' imports) | Repointing the comments: F15 keeps `packages/wallet-crypto/src` free of non-test edits | adopted |
 
 **Findings**
 

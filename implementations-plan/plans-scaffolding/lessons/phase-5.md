@@ -201,3 +201,15 @@ Each new test case fails against round 1's `links.ts` (3 missing findings in eac
 Round 3 (on `1519fb03`, the loop's cap): changes needed, 1 blocking. **K9:** keeping inner brackets in the span left `)**` after `**[a](URL)**.` and `)|` after a table cell's `|[a](URL)|`, so a valid allowlisted permalink failed. `urlOf` now also trims `*`, `_`, `~` and `|` after the URL, as GitHub's autolinker does. Both repros fail against round 2's `links.ts`. At `9b8e4455`, `lint`, `check:plans` and `test:ci-gating` (249 pass) exit 0.
 
 Verification pass (the owner's call at the cap, limited to `9b8e4455`): clean. A URL whose last character is a literal `_`, `*`, `~` or `|` reads as formatting; none of the tree's 177 permalinks ends with one.
+
+## Restack onto the nulo v6 base
+
+`dev` moved to `80663b61` (#736: the wallet on Aztec 6.0.0-rc.1 with the `@aztec-labs` scopes, nulo v6) after the loop converged. J moved there cleanly (`1054e7fb`); `git rebase --onto 1054e7fb 737d1faf` took C from `04933e84` to `d6e853ce`, every replayed commit signed, with five conflicts, each resolved to #736's text with C's repoint applied:
+- `UPDATE.md`'s KDF coupling line: #736's `@aztec-labs/stdlib`, C's `reference/aztec-5.0.0-stable/`.
+- `account-seed-vectors.test.ts` and `derivation-vectors.test.ts`: #736's new `reference/nulo-v6/vectors.json` import and doc text kept beside C's `reference/key-model-v2/` import; the doc paths repointed.
+- `packages/wallet-crypto/README.md`: #736's `@aztec-labs/foundation`, C's `apps/extension/tests/e2e/PRF-NON-PORTABLE.md`.
+- `CI.md`'s known limitations: C's network line, #736's store-publishing line.
+
+#736 also rescoped the imports of `account-derivation.ts` and `mnemonic-master.ts`, so their blobs moved and their path-token holds lapsed: `check:plans` failed both. F15 keeps `packages/wallet-crypto/src` free of non-test edits, so the holds re-pin to the new blobs (`d6e853ce`, ledger L42) rather than repointing the comments. #736 added and removed no e2e file and changed no test count, so CI.md's suite sizes hold.
+
+Phase 5's gate on `d6e853ce`, against `1054e7fb`, exits as on `aa45f6b0`: smoke in five shards (40 files pass and 3 skip; 166 tests pass and 7 skip; 487 s), `test:all`, `typecheck:all`, `test:ci-gating`, `lint`, `lint:actions`, `phantom-sweep.ts`, the soak tests, `check:plans` (0 findings), the tools tests, `classify.ts --check`, `mine.ts --verify`, `untrack.ts --verify`, `check-no-local-paths.sh` and `audit:vue` exit 0; the JSON row exits 1 on `biome.json`'s one line (step 2), and `test:release` on the 3 `zip-reproducible` cases (`zip` is not on this machine's PATH). C then moved onto J's restack log (`315d9797`) by `git rebase --onto`, which touched only `implementations-plan/plans-scaffolding/lessons/phase-4.md`.
