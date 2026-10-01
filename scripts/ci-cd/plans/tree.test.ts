@@ -3,7 +3,8 @@ import { spawnSync } from "node:child_process"
 import { join } from "node:path"
 import { checkTree } from "./check"
 import { cleanupRepos, makeRepo } from "./fixture-repo"
-import { countByRule, ENFORCED, type Env, type Finding, formatFinding, isEnforced, RULE_IDS, verdict, writeSummary } from "./lib"
+import { countByRule, createCtx, ENFORCED, type Env, type Finding, formatFinding, isEnforced, RULE_IDS, verdict, writeSummary } from "./lib"
+import { PATH_TOKEN_ALLOWLIST } from "./links"
 
 const ROOT = join(import.meta.dir, "..", "..", "..")
 const PULL_REQUEST: Env = { GITHUB_ACTIONS: "true", GITHUB_EVENT_NAME: "pull_request", GITHUB_BASE_REF: "dev" }
@@ -31,6 +32,23 @@ describe("plan tree gate", () => {
 		expect(verdict([], PULL_REQUEST)).toBe("pass")
 		expect(verdict([{ ...one[0], rule: "path-token" }], PULL_REQUEST)).toBe("pass")
 		expect(RULE_IDS.filter((id) => !ENFORCED.has(id))).toEqual(["path-token", "index-structure", "archive-structure"])
+	})
+
+	test("path-token enforces in code and config, and only reports in a document", () => {
+		const token = (file: string): Finding[] => [{ rule: "path-token", file, line: 1, detail: "d", fix: "f" }]
+		expect(verdict(token("src/a.ts"), PULL_REQUEST)).toBe("fail")
+		expect(verdict(token("package.json"), {})).toBe("fail")
+		expect(verdict(token("src/a.ts"), { GITHUB_ACTIONS: "true", GITHUB_EVENT_NAME: "push" })).toBe("pass")
+		expect(verdict(token("docs/notes.md"), PULL_REQUEST)).toBe("pass")
+		expect(verdict(token("docs/page.html"), {})).toBe("pass")
+	})
+
+	test("every held path-token mention is live, so a repointed one leaves the allowlist", () => {
+		const ctx = createCtx({ cwd: ROOT })
+		for (const held of PATH_TOKEN_ALLOWLIST) {
+			expect(ctx.oids.get(held.file), held.file).toBe(held.blob)
+			expect(ctx.read(held.file)).toContain(held.token)
+		}
 	})
 
 	test("the CLI exits by the same verdict: a push run reports an enforced finding and passes", () => {

@@ -32,17 +32,10 @@ export default defineConfig({
 		// behavior in case a future vitest version shifts the default.
 		pool: "forks",
 		isolate: true,
-		// 3 attempts per test. Mostly a guard against transient CI flake — the
-		// rotating popup-timeout flakes documented in
-		// implementations-plan/network-test-triage/full-suite-findings.md were
-		// actually a Vue popup race (popup approve handler silently returning
-		// when clicked before init completed). That race is fixed at the source
-		// (see implementations-plan/network-followups/audit-codex-rootcause.md
-		// for the investigation + fix); retry is just belt-and-suspenders now.
-		// Default 3 attempts (transient-CI-flake absorber). Parameterized via
-		// NULO_E2E_RETRY so the Phase-5 soak can run with retry:0 — a soak that
-		// passes only on retries is not zero-flake, so the soak sets NULO_E2E_RETRY=0
-		// to make any flake fail an iteration (the "zero retries consumed" gate).
+		// Two retries unless NULO_E2E_RETRY says otherwise: the PR gates and the soak pass 0, so a
+		// test that passes only on a retry fails there. The rotating popup timeouts retries once
+		// absorbed were a popup race, fixed at the source:
+		// https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/network-followups/investigation-journey.md
 		retry: process.env.NULO_E2E_RETRY ? Number(process.env.NULO_E2E_RETRY) : 2,
 		reporters: e2eReporters(),
 		// Node v24 enforces JSON import attributes; @aztec-labs/accounts imports JSON without them.

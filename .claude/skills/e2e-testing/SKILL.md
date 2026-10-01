@@ -397,7 +397,7 @@ assertion; drive the rest of the flow with the ordinary helpers.
 - **Passkeys: the virtual authenticator is per FrameTreeNode**, not per browser context, and PRF
   state is not serialisable over CDP. Register, lock/unlock and reset→import are drivable in the SAME
   popup (`fixtures/passkey.ts` `setupPasskeyVirtualAuth`); cross-popup and cross-authenticator flows
-  are not (`implementations-plan/passkey-e2e/PRF-NON-PORTABLE.md`). Keep the anchor popup open.
+  are not (`apps/extension/tests/e2e/PRF-NON-PORTABLE.md`). Keep the anchor popup open.
 - **A mid-restore kill is two deliberately gated scenarios**, each enforcing its own contract: a
   kill at `service-restore` must roll back, a kill at `account-state` must recover. The
   `restore-gate` rendezvous anchors the kill at the named phase; a torn refusal is the failure

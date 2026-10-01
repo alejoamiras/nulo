@@ -1,11 +1,11 @@
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { describe, expect, test } from "vitest"
-import vectors from "../../../implementations-plan/key-model-v2/reference/vectors.json"
+import vectors from "../../../reference/key-model-v2/vectors.json"
 import { deriveSigningKeyFromSeed } from "./account-derivation"
 
 /**
  * NULO-ACCOUNT-KDF v2 known-answer vectors — REFERENCE-GENERATED, never regenerate from this
- * implementation. Source of truth: `implementations-plan/key-model-v2/reference/` (published
+ * implementation. Source of truth: `reference/key-model-v2/` (published
  * 5.0.1 tarballs; the construction is upstream's removed `deriveSigningKey` under the Nulo
  * separator, provenance in `nulo-separators.ts`). If a vector fails, the CONSTRUCTION drifted —
  * stop and investigate; do not re-pin. The downstream chain (secretKey/address,

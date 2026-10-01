@@ -110,7 +110,7 @@ one Vite served from cache stays.
   recorded by hand in `DERIVED`, whose entries render in every build and meet the same source, text
   and licence rules as a `VENDORED` component.
 - What is deliberately not covered, and what would reopen each item, is in
-  `implementations-plan/third-party-notices/follow-ups.md`.
+  `implementations-plan/follow-ups.md`.
 
 ## Fonts
 

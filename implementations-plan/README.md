@@ -33,13 +33,13 @@ Single-file bug fixes do not need a plan. The PR description is enough. Name the
 ## Code and plans
 
 1. **Code comments never reference plans by milestone tag.** Not `M4.10`, `A11.1`, `phase 4b`, `PR-2`. Git history is in git; the milestone vocabulary lives here.
-2. **Code MAY reference a plan by path**, but only when the plan is the load-bearing source of truth for behavior the code depends on. Two such cross-references exist: `passkey-e2e/PRF-NON-PORTABLE.md` (a Chromium limitation tests rely on) and `network-test-triage/plan.md` (the skipped network e2e tests).
+2. **Code cites a live doc or a permalink, never a plan path**, because a plan is archived when it closes. A source that code depends on lives outside this tree: the Chromium PRF limitation the passkey e2e tests rely on is `apps/extension/tests/e2e/PRF-NON-PORTABLE.md`. An existing plan path in a comment may stay until the comment is rewritten, as long as it resolves at HEAD or under `archive/`.
 
 New code explains WHY and its invariants inline (see [`CLAUDE.md`](../CLAUDE.md) "Code-comment style").
 
 ## The gate
 
-`bun scripts/ci-cd/plans/check.ts` checks this tree from the git index; it runs inside `test:ci-gating`, so every PR's `quality-status` carries it. On a PR or a local run it fails on a tracked transcript, a missing or negated `.gitignore` line, a nested ignore file, a link to an untracked or missing file, a construct whose URL it cannot judge, a permalink outside the allowlist or off `dev`, an oversize or unlinked `lessons.md` entry, or a home path in the curated files. On push, nightly and release it only reports. `--report` prints every finding and exits 0.
+`bun run check:plans` (`scripts/ci-cd/plans/check.ts`) checks this tree from the git index; it runs inside `test:ci-gating`, so every PR's `quality-status` carries it. On a PR or a local run it fails on a tracked transcript, a missing or negated `.gitignore` line, a nested ignore file, a link to an untracked or missing file, a construct whose URL it cannot judge, a permalink outside the allowlist or off `dev`, a plan path in code or config that resolves neither at HEAD nor under `archive/` and sits in no allowlisted permalink, an oversize or unlinked `lessons.md` entry, or a home path in the curated files. A document's plan path that does not resolve at HEAD only reports until the archive split. On push, nightly and release it only reports. `--report` prints every finding and exits 0.
 
 ## Milestone vocabulary: key
 

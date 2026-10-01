@@ -749,6 +749,10 @@ In order. No `/code-review`: `code_review` is `off`.
 - **Arc J codex loop, round 2 (2026-10-01): changes needed** (high confidence, 5 findings). All 5 adopted (J9-J13, ledger L32-L36), J12 by one tree diff instead of the suggested first-parent merge diffs. It confirmed that an edited text or reordered candidates void a verdict and that nested hosts and carried slices are checked, and found no false positive on real data.
 - **Arc J codex loop, round 3 (2026-10-01): changes needed** (high confidence, 2 medium findings, both blocking). Both adopted (J14-J15, ledger L37-L38). It found that every line shape `entriesOf` and `frameOf` could disagree on fails verification, that drift catches moves between plan dirs, quoted names, deletions, mode and type changes, and that a move out and back leaves no drift. Round 3 is the loop's cap, so the fixes went to the owner before another pass.
 - **Arc J verification pass (2026-10-01, the owner's call at the cap): clean.** Limited to round 3's diff: both bypasses are closed, `mining.jsonl` changed only its 364 subject hashes, and nothing regressed. Arc C's first codex round then found that R100 is not byte identity, which J's drift rule shared (J16, ledger L39).
+- **Arc C codex loop (`/codex high`), round 1 (2026-10-01): changes needed** (high confidence, 3 blocking and 2 non-blocking findings). All 5 adopted (K1-K5, ledger L39-L41). It found all 42 moves byte-identical by blob ID, the freeze pins and the npm-staged crypto inputs unchanged, every added permalink target present, and no unexplained scope across C's 12 commits.
+- **Arc C codex loop, round 2 (2026-10-01): changes needed** (high confidence, 2 blocking and 1 non-blocking finding). All 3 adopted (K6-K8; L40 and L41 restated). It confirmed K1 and K4 closed, the round-1 repros failing, `%2E`, `%252e`, backslash, `;` parameter, fragment and Markdown-title variants rejected, and the 42 moves, freeze pins, crypto inputs and permalink targets unchanged.
+- **Arc C codex loop, round 3 (2026-10-01): changes needed** (high confidence, 1 blocking finding). Adopted (K9; L40 restated): round 2's span left `)**` after a bold link and `)|` after a table cell, so a valid permalink failed. It confirmed K6-K8 closed and no false positive on the tree. Round 3 is the loop's cap, so the fix went to the owner before another pass.
+- **Arc C verification pass (2026-10-01, the owner's call at the cap): clean.** Limited to `9b8e4455`. A URL whose last character is a literal `_`, `*`, `~` or `|` still reads as formatting; none of the tree's 177 permalinks ends with one.
 
 ---
 
@@ -797,6 +801,9 @@ In order. No `/code-review`: `code_review` is `off`.
 | L37 | A subject hashes its fields as one JSON array | Arc J codex J14 | NUL-joined fields: a NUL inside a line's text reads as a field boundary, so moving a candidate id into the text kept the subject | adopted |
 | L38 | Each closed plan's host must exist at `upto`, so a byte-identical move of the host out of the tree is a loss, not a move | Arc J codex J15 | Leaving it to D's `outcome.ts`, which throws on a missing host, but only at D, after J and C have merged | adopted; narrows L34 |
 | L39 | A move is byte-identical only when git's raw diff shows the same blob on both sides | Arc C codex, shared by J's drift rule (J16) | Trusting R100: git scores a rename by its lines, so a file moved with its lines reordered pairs at 100 | adopted; narrows L34 |
+| L40 | An allowlisted permalink hides the plan paths inside it only when the whole URL passes `isAllowedPermalink`: its span keeps inner brackets and drops only the sentence punctuation, emphasis, table pipes and unbalanced closers after it, as GitHub's autolinker does | Arc C codex K2, K6, K9 | Judging a prefix: an allowlisted SHA followed by `%2e%2e` segments, or by `(x)/%2e%2e`, resolved to `blob/dev` and hid its path | adopted |
+| L41 | A path token takes `<` and `>` only as a `<name>` placeholder, so an autolink's `>` ends the path and `<plan>` stays a template | Arc C codex K3, K7 | Stripping only a trailing `>`: `…/a.md>tail` and `<…/a.md><…/b.md>` still read as templates | adopted |
+| L42 | A wallet-crypto path-token hold that a `dev` change ended re-pins, on restack, to the file's blob at the new base | Restack onto `80663b61` (#736 rescoped two files' imports) | Repointing the comments: F15 keeps `packages/wallet-crypto/src` free of non-test edits | adopted |
 
 **Findings**
 
@@ -848,6 +855,15 @@ In order. No `/code-review`: `code_review` is `off`.
 | J14 | A subject's NUL-joined fields are ambiguous | adopted | L37 |
 | J15 | A closed plan's host can leave the tree unnoticed | adopted | L38 |
 | J16 | R100 is not byte identity (found in arc C's review) | adopted | L39 |
+| K1 | `untrack --verify` exempts a move out of the tree on R100 alone | adopted | L39 |
+| K2 | The permalink blanker judges a URL's prefix | adopted | L40 |
+| K3 | An autolinked plan path reads as a template | adopted | L41 |
+| K4 | The fee-cap comment cites a plan path, which the citation rule forbids | adopted | A permalink at `9f11de70` to `plan-v2.md`, which holds the reasoning; the audit provenance dropped |
+| K5 | CI.md's quarantine statements contradict each other | adopted | Both suites' sizes restated from the tree; the network suite's stale quarantine clause dropped |
+| K6 | Brackets inside a permalink cut the span its validator judges | adopted | L40 |
+| K7 | A closing `>` followed by text, or two adjacent autolinks, read as a template | adopted | L41 |
+| K8 | CI.md calls both skipped smoke tests flakes | adopted | It names the navigation flake and the blocked strict-mode test |
+| K9 | A permalink in bold text or a table cell fails after K6 | adopted | L40 |
 
 **Still disputed** (the final pass's sides recorded; the owner decides)
 - **Outcome placement.** Final pass: follow the after-front-matter rule, byte 0 before the H1 without front matter, and resolve the exemplar explicitly. Rev 3's default grandfathers it (A15).
