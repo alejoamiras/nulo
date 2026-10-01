@@ -34,7 +34,7 @@ The `quality-status` aggregator at the end is the required check on `main` / `de
 
 ### `pr-extension-smoke-e2e.yml`
 
-Runs the smoke e2e suite (`vitest.e2e.config.ts`, 18 files / 67 tests, 7 currently quarantined for known flakes). No Aztec sandbox; just puppeteer driving the popup UI.
+Runs the smoke e2e suite (`vitest.e2e.config.ts`, 43 files / 173 tests, 2 quarantined for known flakes). No Aztec sandbox; just puppeteer driving the popup UI.
 
 Triggers:
 - **Always** on PRs to `main`
@@ -45,7 +45,7 @@ Triggers:
 
 ### `pr-extension-network-e2e.yml`
 
-Runs the network e2e suite (anvil + Aztec sandbox + playground + the extension build) as a **5-shard parallel matrix** — each shard owns its own sandbox + ~9 of the 45 test files (deterministic SHA-1-of-filename distribution). Wall time ~10–15 min (vs ~35–45 min unsharded). Same trigger shape as `pr-extension-smoke-e2e`, but with the `extension-network` filter (network-touching wallet code, runtime, `wallet-bridge`, playground, etc.) and the `e2e:extension-network` label. See [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md#ci-sharding-5-way-matrix) for the shard-design rationale + the 2 quarantined slow tests.
+Runs the network e2e suite (anvil + Aztec sandbox + playground + the extension build) as a **5-shard parallel matrix** — each shard owns its own sandbox + about a fifth of the 108 test files (deterministic SHA-1-of-filename distribution). Wall time ~10–15 min (vs ~35–45 min unsharded). Same trigger shape as `pr-extension-smoke-e2e`, but with the `extension-network` filter (network-touching wallet code, runtime, `wallet-bridge`, playground, etc.) and the `e2e:extension-network` label. See [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md#ci-sharding-5-way-matrix) for the shard-design rationale.
 
 #### Presto in CI
 
