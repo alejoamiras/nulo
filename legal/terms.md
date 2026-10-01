@@ -10,7 +10,7 @@ install or use Nulo. If you do not agree, do not install or use it.
 > or custody your assets. Anyone who obtains usable credentials or an effective authorisation may be
 > able to access your assets. Recovery and transaction finality have the limitations described in
 > § 4. Nulo has not been audited by an independent security
-> firm, it connects to Aztec mainnet by default, and the network it connects to is early-stage. You
+> firm, it connects to the Aztec testnet by default, and the network it connects to is early-stage. You
 > can lose everything you put into it. Warranty exclusions and liability limits appear in §§ 16–19
 > and are subject to rights that applicable law does not permit you to waive.
 >
@@ -87,7 +87,7 @@ control and then selecting Continue.** Nulo records that acceptance on your devi
 you accepted and the time; the record is not sent anywhere and is not part of a backup. These Terms
 apply from that acceptance and do not retrospectively change rights or liabilities arising before it.
 
-Before accepting, review the mainnet, security and recovery risks in §§ 4–5. **Recovery options
+Before accepting, review the network, security and recovery risks in §§ 4–5. **Recovery options
 differ between password and passkey profiles** — see § 4.3.
 
 If you do not meet the conditions above, or do not agree, you must not install or use Nulo, and you
@@ -161,9 +161,10 @@ impersonating distributions; responsibility for them remains subject to applicab
 
 ## 5. Experimental software on an early-stage network
 
-**Nulo selects Aztec mainnet by default.** Mainnet transactions may involve assets with real value.
-Selecting a network labelled testnet or local changes the environment. A version number, a store
-listing or a mainnet connection is not a security certification.
+**Nulo selects the Aztec testnet by default.** Testnet assets are for testing and are not meant to
+carry real value. Selecting another network, including one you add, changes the environment, and a
+mainnet network may involve assets with real value. A version number, a store listing or a network
+connection is not a security certification.
 
 **5.1 No independent security audit.** As at the effective date of these Terms, Nulo has **not** been
 reviewed by an independent third-party security firm. It has been reviewed internally and with

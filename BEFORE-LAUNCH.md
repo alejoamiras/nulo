@@ -48,7 +48,10 @@ any placeholder survives, and the date is one. Set it in the three places tests 
 
 The Terms' listing URLs were filled once both first submissions existed (2026-09-23). Their
 effective date waits for § 3, the 1.0 ship day, so `/terms` stays draft a little longer, which the
-stores do not mind — they require a reachable privacy policy, not terms.
+stores do not mind — they require a reachable privacy policy, not terms. Nulo V6 reuses both store
+items, renamed: when the AMO add-on's slug moves from `nulo-v5` to `nulo-v6`, the Firefox URL in
+`legal/terms.md` § 1 moves with it, in place. The Chrome URL resolves by item ID, so its slug can
+stay.
 
 Also before submission, one wording item in the privacy policy that is not a placeholder: § 2
 attributes "loads no remote code" to the content security policy, which only forbids remote
