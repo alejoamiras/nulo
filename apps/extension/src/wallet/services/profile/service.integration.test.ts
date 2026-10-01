@@ -2150,7 +2150,7 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			accountIndex: 0,
 			storedAddress: "0xstored",
 			derivedAddress: "0xderived",
-			regimeId: "nulo-v5",
+			regimeId: "nulo-v6",
 			walletVersion: "0.0.0",
 			detectedAt: 1,
 		})
@@ -2202,7 +2202,7 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			accountIndex: 0,
 			storedAddress: "0xstored",
 			derivedAddress: "0xderived",
-			regimeId: "nulo-v5",
+			regimeId: "nulo-v6",
 			walletVersion: "0.0.0",
 			detectedAt: 1,
 		})
@@ -2231,7 +2231,7 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			accountIndex: 0,
 			storedAddress: "0xstored",
 			derivedAddress: "0xderived",
-			regimeId: "nulo-v5",
+			regimeId: "nulo-v6",
 			walletVersion: "0.0.0",
 			detectedAt: 1,
 		})
@@ -2251,7 +2251,7 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			accountIndex: 0,
 			storedAddress: "0xstored",
 			derivedAddress: "0xderived",
-			regimeId: "nulo-v5",
+			regimeId: "nulo-v6",
 			walletVersion: "0.0.0",
 			detectedAt: 1,
 		}

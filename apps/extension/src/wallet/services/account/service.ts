@@ -20,7 +20,7 @@ import {
 	NuloAccount,
 	parseAccountExport,
 	serializeAccountExport,
-	V5_REGIME,
+	V6_REGIME,
 	type IAccountContract,
 } from "@nulo/aztec-runtime/account"
 import { GrumpkinScalar } from "@aztec-labs/foundation/curves/grumpkin"
@@ -548,7 +548,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			accountIndex,
 			storedAddress,
 			derivedAddress,
-			regimeId: V5_REGIME.id,
+			regimeId: V6_REGIME.id,
 			walletVersion: typeof __VERSION__ === "undefined" ? "unknown" : __VERSION__,
 			detectedAt: Date.now(),
 		}

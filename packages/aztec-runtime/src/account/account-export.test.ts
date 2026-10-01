@@ -15,6 +15,22 @@ const nullLogger: ILogger = { log: () => {} }
 const SIGNING_KEY = GrumpkinScalar.fromString("0x000000000000000000000000000000000000000000000000000000000000002a")
 const L1 = 31337
 
+/** A V5 build's export of the key-model-v2 reference's first signing-chain row on chain 31337,
+ *  checksum included: well-formed in every respect but its regime. */
+const V5_EXPORT = {
+	format: "nulo-account-export",
+	version: 1,
+	regime: "nulo-v5",
+	artifactSha256: "36562cde36667a43cc9c6d8cbfc18bcf0ac13cdc9f816720273350ee59a92a63",
+	classId: "0x0db539838feacc4420c8e33b01ffe733a8bae58bba2c403653691b1ed8d3d0c5",
+	descriptorDigest: "3883065f0d6603d1be25db42348ec25b7a9dc29746d85b925b09efbd2a460605",
+	kdfDigest: "29eca1a04b7acde8bb95905a2ac630b29f1edcf04d584274e90fd9f81736166d",
+	l1ChainId: 31337,
+	address: "0x04d7bb8a4a0239077d7d246279076fdab66f5ed6167bd01882fad6131199457a",
+	signingKey: "0x2aabed87d5340c673eae6dc5faaa57382b8d773fa38247a80bdafbd5277729e3",
+	checksum: "2978e6afcf2e095102f3e1be38a00cae6ed22f8388dc4da0423399a19d7f9736",
+}
+
 describe("NuloAccount.fromSigningKey", () => {
 	test("builds a usable account whose address is a pure function of the signing key", async () => {
 		const a = await NuloAccount.fromSigningKey(SIGNING_KEY, nullLogger)
@@ -52,6 +68,15 @@ describe("account-export envelope (NULO-ACCOUNT-EXPORT v1)", () => {
 		const overModulus = "0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001"
 		const forged = { ...exp, signingKey: overModulus }
 		expect(() => parseAccountExport(JSON.stringify({ ...forged, checksum: "whatever" }))).toThrow()
+	})
+
+	test("refuses a V5 account file, and a V5 file relabelled as this regime", () => {
+		expect(() => parseAccountExport(JSON.stringify(V5_EXPORT))).toThrow(
+			"Account export is for a different Nulo regime (regime mismatch)",
+		)
+		expect(() => parseAccountExport(JSON.stringify({ ...V5_EXPORT, regime: EXPORT_REGIME_DIGESTS.regime }))).toThrow(
+			"Account export is for a different Nulo regime (artifactSha256 mismatch)",
+		)
 	})
 
 	test("encrypted variant: round-trips under the right password, fails closed otherwise", async () => {

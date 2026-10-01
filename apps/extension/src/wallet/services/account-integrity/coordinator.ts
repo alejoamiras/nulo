@@ -5,7 +5,7 @@ import { LogLevel } from "@/wallet/logger"
 import { AccountService, AccountType } from "@/wallet/services/account/service"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { AccountAddressInconsistencyError } from "@nulo/extension-messaging/errors"
-import { NuloAccount, V5_REGIME } from "@nulo/aztec-runtime/account"
+import { NuloAccount, V6_REGIME } from "@nulo/aztec-runtime/account"
 import { deriveAccountSeed, type MasterSecretBytes } from "@nulo/wallet-crypto"
 import type { BrowserApi, StorageArea } from "@nulo/wallet-core/ports"
 import { AccountIntegrityBlockedRepository, AccountIntegrityVerifiedStampRepository } from "./blocked-repository"
@@ -158,7 +158,7 @@ export class AccountIntegrityCoordinator implements IService, AccountIntegrityDe
 					accountIndex: account.index,
 					storedAddress: account.address,
 					derivedAddress,
-					regimeId: V5_REGIME.id,
+					regimeId: V6_REGIME.id,
 					walletVersion: walletVersion(),
 					detectedAt: Date.now(),
 				}
