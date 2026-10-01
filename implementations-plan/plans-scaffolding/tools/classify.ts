@@ -45,8 +45,8 @@ const MECHANICAL_SUBJECTS = [
 	/^docs: point the wallet repo's docs, plans and skills at unleashed \(#692\)$/,
 	/^chore\(plans\): untrack plan transcripts/,
 ]
-/** Live plans whose index line is not a closing one: P1 keeps tools-extraction open (follow-ups.md). */
-const ACTIVE_DIRS: ReadonlySet<string> = new Set(["plans-scaffolding", "tools-extraction"])
+/** Live plans whose index line is not a closing one. */
+const ACTIVE_DIRS: ReadonlySet<string> = new Set(["plans-scaffolding"])
 
 type Answer = { class: RowClass; status: string; followUps?: string[]; ask: string }
 const done = (ask: string, followUps: string[] = []): Answer => ({ class: "closed", status: "completed", followUps, ask })
