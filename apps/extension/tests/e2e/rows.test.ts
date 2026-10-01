@@ -36,13 +36,52 @@ type Probe = {
 	__linkClick?: { modified: boolean; href: string | null; prevented: boolean } | null
 }
 
-/** A priced 1.5 cUSD transfer: the price map quotes it as USDC. */
+const TOKEN_ROWS = `${sel("tokens-card")}, ${sel("token-seed-row")}`
+/** A token row still on its way in: a balance's first sync, an import's row (it leaves when the
+ *  import ends), a default token's placeholder in any status but a terminal one. */
+const TOKEN_LOADING = [
+	sel("token-balance-loading"),
+	sel("token-import-row"),
+	`${sel("token-seed-row")}:not([data-status="failed"]):not([data-status="rejected"])`,
+].join(", ")
+
+/** Home's token card settles after the activity row shows and then pushes the row down: a point
+ *  measured before it lands can miss the row. Settled is its empty state or, where a release
+ *  build's default tokens draw rows instead, rows none of which is still loading. */
+async function waitForSettledTokens(page: Page): Promise<void> {
+	await page
+		.waitForFunction(
+			(empty: string, rows: string, loading: string) =>
+				document.querySelector(empty) !== null ||
+				(document.querySelector(rows) !== null && document.querySelector(loading) === null),
+			{ timeout: 15_000, polling: 100 },
+			sel("tokens-empty-import-link"),
+			TOKEN_ROWS,
+			TOKEN_LOADING,
+		)
+		.catch(async (error: unknown) => {
+			const held = await page.evaluate(
+				(rows: string, loading: string) =>
+					[...document.querySelectorAll(`${rows}, ${loading}`)].map((el) => {
+						const status = el.getAttribute("data-status")
+						return `${el.getAttribute("data-testid")}${status ? `[${status}]` : ""}`
+					}),
+				TOKEN_ROWS,
+				TOKEN_LOADING,
+			)
+			throw new Error(`Home's token card never settled: ${held.join(", ") || "no rows"}; ${String(error)}`)
+		})
+}
+
+/** A priced 1.5 cUSD transfer: the price map quotes it as USDC. Returns once the token card has
+ *  settled, which in a release build waits for its default tokens to land. */
 async function openHomeWithRow(ctx: ExtensionContext): Promise<Page> {
 	const page = await openPopup(ctx)
 	await waitForHash(page, "#/popup/general")
 	await seedTransaction(page, await readActivityScope(page), { hash: TX_HASH, amount: "1500000" })
 	await seedUsdQuoteAndReload(page)
 	await page.waitForSelector(sel("tx-card"), { visible: true, timeout: 15_000 })
+	await waitForSettledTokens(page)
 	await page.bringToFront()
 	return page
 }
@@ -129,13 +168,11 @@ async function waitForHashPrefix(page: Page, prefix: string): Promise<void> {
 	await page.waitForFunction((p: string) => window.location.hash.startsWith(p), { timeout: 10_000, polling: 50 }, prefix)
 }
 
-/** Home's token card settles after the activity row shows, and its empty state then pushes the row
- *  down: a point measured before it lands can miss the row. */
 async function backToHome(page: Page): Promise<void> {
 	await page.evaluate(() => history.back())
 	await waitForHash(page, "#/popup/general", 10_000)
 	await page.waitForSelector(sel("tx-card"), { visible: true, timeout: 15_000 })
-	await page.waitForSelector(sel("tokens-empty-import-link"), { visible: true, timeout: 15_000 })
+	await waitForSettledTokens(page)
 }
 
 /** Records the named control each click lands in, at `window` capture, and how many clicks bubble up
