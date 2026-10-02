@@ -16,7 +16,8 @@ import { PriceServiceClient } from "@/wallet/services/price/client"
 /** Utils */
 import { stringCompare } from "@/utils/string"
 import { parseRawBalance, safeFiatOf } from "@/utils/token-amount"
-import { capTokenRows, forChain, orderTokenRows } from "@/utils/token-order"
+import { forChain, orderTokenRows } from "@/utils/token-order"
+import { capHomeSlots, defaultKey, homeSlots, isDefaultPending } from "./home-slots"
 
 /** Composables */
 import { usePinnedTokens, pinScopeOf } from "@/composables/usePinnedTokens"
@@ -45,9 +46,9 @@ const router = useRouter()
 
 const tasks = ref([])
 
-/** In-flight + recently-failed token-import journal records, rendered as TokenImportRow above the
- *  TokenCard list. Succeeded records are filtered out — the new TokenCard, with its initial-sync
- *  skeleton, takes over once the watchlist entry lands. */
+/** In-flight + recently-failed token-import journal records, rendered as TokenImportRow: above the
+ *  TokenCard list, or in its default's slot (`home-slots.ts`). Succeeded records are filtered out —
+ *  the new TokenCard, with its initial-sync skeleton, takes over once the watchlist entry lands. */
 const FAILED_RETENTION_MS = 30_000
 /** The one journal kind this view scopes to: the filters and the query must not drift apart. */
 const TOKENS_VIEW_KIND = "token_import"
@@ -64,6 +65,8 @@ const visibleTokenImports = computed(() => {
 		// Two profiles can hold the SAME address (one mnemonic imported twice): the profile
 		// compare keeps one profile's import from rendering under the other.
 		if (op.profileId && appStore.profile?.id && op.profileId !== appStore.profile.id) return false
+		// The same address exists on every network, and so can a contract address.
+		if (op.networkId && op.networkId !== appStore.network?.id) return false
 		// In-flight
 		if (op.terminalAt === null) return true
 		// Recently-failed retention window so the user sees the reason.
@@ -89,23 +92,26 @@ const pins = usePinnedTokens({
 })
 void pins.refresh()
 
-const orderedTokenBalances = computed(() => orderTokenRows(tokenBalances.value, { pinnedContracts: pins.pinnedContracts.value, fiatOf }))
-const homeRows = computed(() => capTokenRows(orderedTokenBalances.value))
-const shownTokenBalances = computed(() => homeRows.value.shown)
-const overflowCount = computed(() => homeRows.value.overflow)
-
-/** A default shows as a placeholder only until something real stands for it: its token row, or
- *  the import row its own persist step journals. Matched by contract, never by symbol. */
-const seedPlaceholders = computed(() => {
-	const chainId = appStore.network?.chainId
-	const taken = new Set(tokenBalances.value.map((tb) => tb.token?.contract?.toLowerCase()))
-	for (const op of visibleTokenImports.value) taken.add(op.contractAddress?.toLowerCase())
-	return props.seedEntries.filter((entry) => entry.chainId === chainId && !taken.has(entry.contract.toLowerCase()))
-})
-const hasAnyRow = computed(
-	() => shownTokenBalances.value.length > 0 || visibleTokenImports.value.length > 0 || seedPlaceholders.value.length > 0,
+/** A default still on its way holds the slot its token row will take, so the cap counts it too. */
+const homeLayout = computed(() =>
+	homeSlots({
+		rows: tokenBalances.value,
+		imports: visibleTokenImports.value,
+		seeds: props.seedEntries,
+		chainId: appStore.network?.chainId,
+	}),
 )
-const isSettled = computed(() => balancesState.value === "loaded" && props.seedReady)
+const retriedDefaults = ref(new Set())
+const homeRows = computed(() =>
+	capHomeSlots(orderTokenRows(homeLayout.value.slots, { pinnedContracts: pins.pinnedContracts.value, fiatOf }), retriedDefaults.value),
+)
+const shownSlots = computed(() => homeRows.value.shown)
+const overflowCount = computed(() => homeRows.value.overflow)
+const userImports = computed(() => homeLayout.value.userImports)
+const hasAnyRow = computed(() => homeLayout.value.slots.length > 0 || userImports.value.length > 0)
+/** Waits on every default still on its way, shown or not, since one past the cap shows if it stops.
+ *  Each is a slot, so this never changes the empty state or the anonymous rows. */
+const isSettled = computed(() => balancesState.value === "loaded" && props.seedReady && !homeLayout.value.slots.some(isDefaultPending))
 
 /** Anonymous rows cover a wait with nothing to name yet — but only a wait long enough to notice:
  *  a warm service worker answers first, and a flash of skeletons reads as a glitch. */
@@ -264,6 +270,11 @@ function refreshBalances() {
 	for (const tb of tokenBalances.value) tokenBalanceService.refreshTokenBalance(tb.id)
 }
 
+function retryDefault(entry) {
+	retriedDefaults.value.add(defaultKey(entry))
+	emit("retry-seed", entry)
+}
+
 /** A rejected snapshot is retried once on a timer; after that a reconnect or a scope change retries. */
 const BALANCES_RETRY_MS = 2_000
 let balancesRetryTimer
@@ -351,6 +362,8 @@ watch(
 		// new scope's pins; pins refresh on their own, not behind the task snapshot.
 		tokenBalances.value = []
 		balancesState.value = "loading"
+		// A retry's key names no profile, so it must not outlive the scope it was made in.
+		retriedDefaults.value.clear()
 		void pins.refresh()
 		const gen = scopeGen
 		// Tasks first: fetchTokenBalances derives isUpdating from the snapshot.
@@ -393,7 +406,7 @@ onBeforeUnmount(() => {
 	<Flex direction="column" gap="12" :class="$style.wrapper">
 		<Flex align="end" justify="between" :class="$style.section_header">
 			<Flex align="center" gap="8">
-				<SectionLabel label="Holdings" :count="tokenBalances.length + seedPlaceholders.length || null" countTestid="tokens-count" />
+				<SectionLabel label="Holdings" :count="homeLayout.slots.length || null" countTestid="tokens-count" />
 				<!-- The ONE refresh-activity signal for the whole list (per-row indication is deliberately
 				     silent — batch refreshes would animate every row). Same vocabulary as the gas card's
 				     activity dot: grey pulse = a shown value being re-verified. -->
@@ -447,18 +460,12 @@ onBeforeUnmount(() => {
 		</Flex>
 
 		<Flex direction="column" :class="$style.token_list" data-testid="tokens-list" :data-settled="isSettled">
-			<template v-if="visibleTokenImports.length">
-				<TokenImportRow v-for="op in visibleTokenImports" :key="op.id" :op="op" />
+			<TokenImportRow v-for="op in userImports" :key="op.id" :op="op" />
+			<template v-for="row in shownSlots" :key="row.key">
+				<TokenCard v-if="row.kind === 'token'" :tokenBalance="row.tb" />
+				<TokenImportRow v-else-if="row.kind === 'import'" :op="row.op" />
+				<TokenSeedRow v-else :entry="row.entry" @retry="retryDefault(row.entry)" />
 			</template>
-			<template v-if="shownTokenBalances.length">
-				<TokenCard v-for="tb in shownTokenBalances" :key="tb.id" :tokenBalance="tb" />
-			</template>
-			<TokenSeedRow
-				v-for="entry in seedPlaceholders"
-				:key="entry.contract"
-				:entry="entry"
-				@retry="emit('retry-seed', entry)"
-			/>
 			<template v-if="showGhostRows">
 				<div v-for="n in GHOST_ROWS" :key="n" data-testid="tokens-skeleton-row" aria-hidden="true" :class="$style.ghost_row">
 					<Flex direction="column" gap="5">

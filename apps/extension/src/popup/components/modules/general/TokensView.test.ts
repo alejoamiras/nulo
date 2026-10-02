@@ -304,6 +304,31 @@ describe("TokensView — Home order and cap", () => {
 		expect(rows()).toEqual(["mine", "late-mine"])
 	})
 
+	test("a token_import op from ANOTHER network never shows, not even in a default's slot", async () => {
+		const op = (id: string, networkId: string) => ({
+			id,
+			kind: "token_import",
+			profileId: "p1",
+			networkId,
+			accountAddress: H.store.current.account?.address,
+			contractAddress: TEST_USDC.toLowerCase(),
+			terminalAt: null,
+			progress: { stage: "pending" },
+		})
+		H.getTokenBalances.mockResolvedValue([])
+		H.getOperations.mockResolvedValue([op("there", "net-other")])
+		const entry = { chainId: CHAIN, contract: TEST_USDC, symbol: "USDC", displayName: "Test USDC", status: "seeding" }
+		const wrapper = mount(TokensView, { shallow: true, props: { seedEntries: [entry], seedReady: true } })
+		await flushPromises()
+		expect(wrapper.findAllComponents({ name: "TokenImportRow" })).toHaveLength(0)
+		expect(wrapper.findAllComponents(TokenSeedRow)).toHaveLength(1)
+
+		H.journalAdded.emit(op("here", "net-main"))
+		await nextTick()
+		expect(wrapper.findAllComponents({ name: "TokenImportRow" }).map((c) => (c.props("op") as { id: string }).id)).toEqual(["here"])
+		expect(wrapper.findAllComponents(TokenSeedRow)).toHaveLength(0)
+	})
+
 	test("a same-address row from ANOTHER chain is not rendered (fetch and live add)", async () => {
 		H.getTokenBalances.mockResolvedValue([namedRow(1, "A", { chainId: CHAIN }), namedRow(2, "FOREIGN", { chainId: 1 })])
 		const wrapper = mount(TokensView, { shallow: true })
@@ -490,9 +515,56 @@ describe("TokensView — loading, placeholders and the empty state", () => {
 		await flushPromises()
 		expect(wrapper.findAllComponents(TokenCard)).toHaveLength(1)
 		expect(settled(wrapper)).toBe("false")
-		await wrapper.setProps({ seedEntries: [seedEntry()], seedReady: true })
+		await wrapper.setProps({ seedEntries: [seedEntry("failed")], seedReady: true })
 		expect(seedRows(wrapper)).toEqual([SEED_CONTRACT])
 		expect(settled(wrapper)).toBe("true")
+	})
+
+	/** Four defaults: USDT, last by name, in status `usdt`, the other three seeded. A landed row holds nothing. */
+	const fourDefaults = (usdt: string) =>
+		["USDC", "USDT", "EURC", "GBPC"].map((s) => ({
+			...seedEntry(s === "USDT" ? usdt : "seeded", `0xSeed${s}`),
+			symbol: s,
+			displayName: `Test ${s}`,
+		}))
+	const landed = (symbol: string, id: number) => {
+		const row = namedRow(id, symbol, { contract: `0xseed${symbol.toLowerCase()}`, publicBalance: "0" })
+		return { ...row, token: { ...row.token, name: `Test ${symbol}` } }
+	}
+	const threeLanded = () => ["USDC", "EURC", "GBPC"].map((s, i) => landed(s, i + 1))
+	const viewAll = (w: ReturnType<typeof mount>) => w.find('[data-testid="tokens-view-all"]').exists()
+
+	test("a default past the cap keeps the list unsettled; stopped or retried it shows, landed it goes", async () => {
+		H.getTokenBalances.mockResolvedValue(threeLanded())
+		wrapper = mount(TokensView, { shallow: true, props: { seedEntries: fourDefaults("pending"), seedReady: true } })
+		await flushPromises()
+		expect(cardSymbols(wrapper)).toEqual(["EURC", "GBPC", "USDC"])
+		expect([seedRows(wrapper), viewAll(wrapper), settled(wrapper)]).toEqual([[], true, "false"])
+
+		await wrapper.setProps({ seedEntries: fourDefaults("failed") })
+		expect([seedRows(wrapper), viewAll(wrapper), settled(wrapper)]).toEqual([["0xSeedUSDT"], false, "true"])
+
+		wrapper.findComponent(TokenSeedRow).vm.$emit("retry")
+		await wrapper.setProps({ seedEntries: fourDefaults("seeding") })
+		expect([seedRows(wrapper), viewAll(wrapper), settled(wrapper)]).toEqual([["0xSeedUSDT"], false, "false"])
+
+		H.balanceAdded.emit(landed("USDT", 4))
+		await wrapper.setProps({ seedEntries: fourDefaults("seeded") })
+		expect(cardSymbols(wrapper)).toEqual(["EURC", "GBPC", "USDC"])
+		expect([seedRows(wrapper), viewAll(wrapper), settled(wrapper)]).toEqual([[], true, "true"])
+	})
+
+	test("a retry is forgotten on a profile switch: the next profile's default past the cap stays hidden", async () => {
+		H.getTokenBalances.mockResolvedValue(threeLanded())
+		wrapper = mount(TokensView, { shallow: true, props: { seedEntries: fourDefaults("failed"), seedReady: true } })
+		await flushPromises()
+		wrapper.findComponent(TokenSeedRow).vm.$emit("retry")
+		await wrapper.setProps({ seedEntries: fourDefaults("seeding") })
+		expect(seedRows(wrapper)).toEqual(["0xSeedUSDT"])
+
+		H.store.current.profile = { ...H.store.current.profile, id: "p-other" } as never
+		await flushPromises()
+		expect([cardSymbols(wrapper), seedRows(wrapper), viewAll(wrapper)]).toEqual([["EURC", "GBPC", "USDC"], [], true])
 	})
 
 	test("anonymous rows appear only after 300 ms of a blank wait, and leave when anything real shows", async () => {
@@ -578,7 +650,31 @@ describe("TokensView — loading, placeholders and the empty state", () => {
 		H.balanceAdded.emit(balanceRow(SEED_CONTRACT.toLowerCase()))
 		await nextTick()
 		expect(seedRows(wrapper)).toEqual([])
-		expect(wrapper.find('[data-testid="tokens-count"]').text()).toBe("1")
+		// Each default keeps its one slot from placeholder to import row to token row.
+		expect(wrapper.findAllComponents({ name: "TokenImportRow" }).map((c) => (c.props("op") as { id: string }).id)).toEqual(["op-seed"])
+		expect(wrapper.find('[data-testid="tokens-count"]').text()).toBe("2")
+	})
+
+	test("four defaults on their way fill Home's three slots and link the fourth, as their rows will", async () => {
+		H.getTokenBalances.mockResolvedValue([])
+		const entries = ["USDC", "USDT", "EURC", "GBPC"].map((symbol) => ({
+			...seedEntry("seeding", `0xSeed${symbol}`),
+			symbol,
+			displayName: `Test ${symbol}`,
+		}))
+		wrapper = mount(TokensView, {
+			shallow: true,
+			props: { seedEntries: entries, seedReady: true },
+			global: { stubs: { SectionLabel: false } },
+		})
+		await flushPromises()
+		expect(wrapper.findAllComponents(TokenSeedRow).map((c) => (c.props("entry") as { symbol: string }).symbol)).toEqual([
+			"EURC",
+			"GBPC",
+			"USDC",
+		])
+		expect(wrapper.find('[data-testid="tokens-view-all"]').exists()).toBe(true)
+		expect(wrapper.find('[data-testid="tokens-count"]').text()).toBe("4")
 	})
 
 	test("another chain's seed entries are not shown; a retry bubbles up with its entry", async () => {
