@@ -8,8 +8,32 @@ eli5_mode: none (subagent run; the owner signs off through the coordinator's pag
 harden: not scheduled
 budget: "recon: 1 agent; code-review: off; codex at high, fix loop at most 3 rounds"
 branch: fix/unserved-chain-connect
-base: origin/dev at 18a38265
+base: origin/dev at 18a38265, rebased onto 20dcc8c4 before delivery
 ---
+
+## Outcome
+
+- **Date:** 2026-10-02. **Status:** delivered as #752 from `fix/unserved-chain-connect`, rebased
+  onto `dev` at `20dcc8c4`. The owner signed off the notice that day (§ Owner decisions) and asked
+  for the PR to merge once its checks are green; the coordinator merges it.
+- **Shipped:** a dApp asking for a chain the active profile has no network for gets silence and
+  the network-unavailable notice where the connect window would open, the unlock drain included,
+  and no session. A remembered row for that chain stops auto-approving and is dropped. A session
+  whose network goes away gets the typed 4901 `CHAIN_NOT_SUPPORTED`. `NetworkService.servesChain`
+  counts a profile whose default networks are not written yet as having them. An Allow whose
+  network was removed while its window was up writes no row. Track A proved that a locked connect
+  on a served chain works with a password and with a passkey, refresh included.
+- **Gates at delivery:** after the rebase, `bun run lint`, `typecheck:all`, `test:all`,
+  `test:ci-gating` and `check:plans` exit 0; through `bun run e2e:agent`,
+  `connect-unserved-chain` and `connect-locked-queue` pass 4 of 4 on Chrome and 4 of 4 on Firefox,
+  with no retries. Codex approved in round 3 of 3.
+- **Dropped:** the muted "Requested chain: N" line, by the owner's call, with the chain id the
+  notice payload carried for it.
+- **Open items:** none left here. Two follow-ups are in `follow-ups.md` § Connecting a dApp: the
+  playground's `balance_of_public` utility button, and the session teardown's reach across
+  profiles. No lesson was promoted: the first-activation seeding race is documented at its one
+  consumer, `servesChain`, and `lessons.md` is at its 8 KiB budget with nothing this supersedes.
+- **Seeds retired:** this plan issued no `/goal` or `/loop` seeds; nothing is left to resume.
 
 ## Outcome & Quality Bar
 
@@ -311,6 +335,9 @@ in `finally`, never overlapping under the network lock, gone with a restart), th
 ordering, and the new tests; the empty-profile fallback and the teardown follow-up stay as
 recorded above. The loop converged in three rounds.
 
+**After round 3:** the owner's copy (the body's second sentence) and the dropped chain line, which
+removed one field from the notice payload. Text and a removed field only, so codex was not re-run.
+
 ## Post-implementation
 
 Run the codex fix loop at `high`, adversarial, until clean, with a hard stop at 3 rounds. Record
@@ -320,4 +347,5 @@ each finding and its resolution here.
 
 One PR into `dev` once the owner has signed off the screenshots and codex has converged:
 `fix(dapp): show a notice for an unserved chain instead of a dead connection`. Its body quotes
-the sign-off. Merging is the owner's call.
+the sign-off. The owner asked for it to merge once every check is green (2026-10-02); the
+coordinator merges it.
