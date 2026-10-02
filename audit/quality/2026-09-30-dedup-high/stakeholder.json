@@ -1,0 +1,421 @@
+{
+  "focus": "quality",
+  "summary": [
+    "This review looked for code that is written more than once. A copy is cheap on the day it is made, but every later change to the rule it encodes has to find and update every copy by hand. The review kept 27 findings: 9 High, 16 Medium and 2 Low. Two different AI model families (Claude and Codex) checked the top ten independently against the code. All ten held up; three were trimmed where the reviewers showed a part was not a real copy.",
+    "The strongest evidence is copies that already disagree. In five of the High findings one copy was fixed or extended and its twin was not, and three of those are real bugs confirmed by the separate bug hunt. An edited Local Network is reported as the wrong chain and left out of backups. A saved fee estimate can abort a dApp send on a brief node hiccup that its twin handles. An account rename can bring back an account that no longer signs. The checking also found new mismatches. History shows cancelled operations from other networks. Two of the four new-password forms lack the browser's 'this is a new password' hint. A contact name with a trailing space slips past the duplicate check.",
+    "Most of the cost comes from one habit: a helper exists and some screens or services just do not use it. The recommended order is to fix the High findings that already have mismatched copies first, fixing the bug and removing the copies in the same change. Then come the half-day wins, with the trust screen's phishing check first. Last, add a simple automated check so the bypassed patterns cannot grow back. Anything that changes what a user sees goes to the owner with screenshots first."
+  ],
+  "counts": { "total": 27, "High": 9, "Medium": 16, "Low": 2 },
+  "cheapest": [
+    "Q-07 — the trust-confirmation window switches to the existing useDappHostname helper; under 30 minutes.",
+    "Q-04 — one private statusFor() makes both status checks agree and fixes bug B-09; about an hour for that step.",
+    "Q-19 — one small scope-matching file shared by consent and enforcement; half a day.",
+    "Q-20 — one registry for wallet error types plus a completeness test; half a day.",
+    "Q-24 — two tiny identity helpers in fee-helpers.ts replace six comparisons; half a day.",
+    "Q-25 — move two restore helpers next to the stages and delete four type-check holes; half a day.",
+    "Q-26 — pure deletion of about 1,300 dead lines and 756 KB of duplicate fonts; half a day to a day."
+  ],
+  "shipTogether": [
+    { "ids": ["Q-01", "Q-04"], "why": "Both are network identity rules in network/service.ts and aztec-runtime; one reviewer and one set of chain tests." },
+    { "ids": ["Q-05", "Q-10"], "why": "Same two executors (dapp-send-executor.ts, transfer-executor.ts); the estimate snapshot and transaction recording share call sites." },
+    { "ids": ["Q-03", "Q-18"], "why": "The fenced-save and scoped-clear helpers serve both the row services and the incoming-transfer service." },
+    { "ids": ["Q-06", "Q-12"], "why": "Both reshape the Home module, so one owner screenshot sign-off covers them." },
+    { "ids": ["Q-08", "Q-14"], "why": "The credential components land in the shared composite layer that onboarding and the popup both import." },
+    { "ids": ["Q-11", "Q-19"], "why": "Both split packages/wallet-bridge/src/dispatcher.ts; do the scope-matching leaf first." },
+    { "ids": ["Q-15", "Q-16"], "why": "Both add small primitives to wallet-core/utils; one package review." },
+    { "ids": ["Q-22", "Q-23"], "why": "Visual shells and colour tokens need the same pixel-identical screenshot sign-off." }
+  ],
+  "findings": [
+    {
+      "id": "Q-03", "title": "The 'don't save if the profile was just deleted' routine is pasted into seven places, and one account check has already slipped",
+      "level": "High", "verified": true, "confidence": "high", "foundBy": "Claude + Codex",
+      "mapping": "Duplicate Code / Shotgun Surgery on security invariants", "effort": "days: 2-3 (the high-value part about 1-1.5)", "recurring": "2026-08-16 Q-07, Q-09",
+      "eli5": {
+        "what": "The wallet saves many things per profile: contacts, fee payers, networks, tokens, connected apps. If a user deletes a profile in one window while another window is saving, the wallet must not leave a half-saved row behind for a profile that no longer exists. Each service writes that guard routine by hand. The related check 'does this saved row really belong to this profile, network and account' is also written separately in each place.",
+        "scenario": "Two popup windows are open. One renames an imported account while the other deletes that account's network. The rename code sits outside the guard its siblings use, and it checks profile and network but not the account address. The bug hunt confirmed this brings back an account that can no longer sign (B-12). Every new kind of saved data means copying the routine again and hoping every step survives.",
+        "fix": "Add one 'fenced save' helper next to the existing purge and restore helpers. Add one 'row matches its key' check in the account spec file, used by all five account checks. Locks and network checks stay visible where they are used."
+      },
+      "trace": "Fenced commit ×7: fpc/service.ts:230-238, 293-302; contact/service.ts:116-123; dapp-session/service.ts:203-210; network/service.ts:325-330, 493-499; token/service.ts:412-422. Row identity gate: account/service.ts:180, 339-341, 408-411, imported-keys-repository.ts:28-30; drifted at account/service.ts:322 (patchAccountField checks profileId and chainId, then writes with the row's address at :327). Restore preamble ×3 (token-balance :676, auth-registry :589, transaction :529). Scope-key templates ×7. Bugs B-12(a) importAccount unfenced, B-12(b) patch after chain purge.",
+      "fix": "rowMatchesKey(row, profileId, chainId, address) in account/spec.ts beside accountRowId, used at all five gates. requireRestoreProfileId() in restore-fence.ts. fencedSet beside purge-rows.ts, starting with the two fpc sites. AccountScope plus accountScopeKey(). A private purgeMatchingLocked in auth-registry only. Drop the raw-marker abstraction.",
+      "disagreement": "Claude: partially confirmed, moderate; Codex: confirmed, high. Writer: confirmed with part (e) dropped and confidence split per part."
+    },
+    {
+      "id": "Q-04", "title": "Which server a network uses is looked up by hand in 15 places, and two status checks already disagree",
+      "level": "High", "verified": true, "confidence": "high", "foundBy": "Claude + Codex",
+      "mapping": "Duplicate Code / Feature Envy", "effort": "days: 1-2", "recurring": "2026-08-16 Q-09",
+      "eli5": {
+        "what": "Each network can have several server addresses (endpoints), with one marked as the main one. The rule 'find the main endpoint' is rewritten wherever it is needed instead of being asked of the network module. So are related rules: which server addresses are allowed, and whether a server really is the network it claims to be.",
+        "scenario": "A developer edits the Local Network to use a different localhost port. One status check knows local networks are special and says 'Active'. Its twin forgets and says 'wrong chain', which also quietly leaves that network's contracts out of the user's full backup. That is bug B-09, and it exists only because the rule was copied. Adding automatic failover to a backup server would today take about 15 edits.",
+        "fix": "Add a 'find main endpoint' helper next to the two helpers the network spec already has (networkInfoFrom, primaryEndpointUrl). Route both status checks through one private function. Keep the 'allowed server address' rule in one small shared function in wallet-core, called by both the settings form and the node connector."
+      },
+      "trace": "Primary lookup ×15: network/service.ts:348, 423, 581, 731, 747, 769, 846; network/spec.ts:93, 107; transfer-executor.ts:377; dapp-send-executor.ts:470; operation-estimate-reuse.ts:141; transfer-estimate-reuse.ts:181; incoming-transfer/service.ts:536; EditNetworkPopup.vue:58. getNetworkInfo (:844-851) duplicates networkInfoFrom (spec.ts:92-96). getNodeStatus calls _getChainId without network.kind (:734) while probeNodeStatus passes it (:753), which is bug B-09. Transport allowlist ×2: network/spec.ts:151-178 and aztec-node-factory-adapter.ts:58-73; userinfo rejected only in the schema.",
+      "fix": "findPrimaryEndpoint(network) in network/spec.ts, deriving primaryEndpointUrl and networkInfoFrom. A private statusFor(network, probe). assertSameChainIdentity for add/update. A pure isAllowedRpcTransport in packages/wallet-core/src/utils/, called by RpcUrlSchema and the adapter's isAllowedRpcUrl. A popup-local endpointErrorMessage. Delete the 'Codex Round 2 B-3' tag at spec.ts:172.",
+      "disagreement": "Claude wanted the schema to call aztec-runtime's isAllowedRpcUrl; Codex a wallet-core leaf. Writer chose Codex: that function is not exported and its module imports the node client, which popup code should not pull in."
+    },
+    {
+      "id": "Q-06", "title": "Home and History each have their own copy of which activity to show, and they already disagree",
+      "level": "High", "verified": true, "confidence": "high", "foundBy": "Claude + Codex",
+      "mapping": "Duplicate Code / Shotgun Surgery; Switch Statements", "effort": "days: 1-2", "recurring": null,
+      "eli5": {
+        "what": "The Home screen's recent activity and the History page show the same kinds of records: sent transactions, received transfers, and operations that failed or were cancelled. Each screen has its own copy of the filtering rules (which account, which network, which profile), of the card text, and of where a tap goes.",
+        "scenario": "A user has the same account on testnet and on a local network. While on the local network, History still lists a cancelled testnet operation. History's copy of the rules never learned to filter by network, while Home's did. Adding any new filter or card field means changing two screens and hoping they end up the same.",
+        "fix": "Keep the filtering rules in the shared activity-rows helper and have both screens use it. Put the card text in the existing journal-state helper. Add one small 'where does this row go' function. Any visible change needs an owner screenshot."
+      },
+      "trace": "Row builders: utils/activity-rows.ts:79-88, 104-121 against popup/components/modules/general/recent-activity-rows.ts:54-64, 66-82. Journal network drift: Home filters networkId (RecentActivityView.vue:264-278); History fetches by profile only (popup/pages/activity.vue:78) and journalRows (activity-rows.ts:91-102) ignores networkId. Incoming profile guard only on Home (recent-activity-rows.ts:73). Card fields: RecentActivityView.vue:337-395 against journal-state.ts:358-420; '' renders 0 (utils/amount.ts:103). Dispatch: RecentActivityView.vue:852-865, TransactionsList.vue:62-75.",
+      "fix": "Export txInScope, incomingInScope and incomingSortKey from utils/activity-rows.ts and add the networkId rule to journalRows (user-visible; owner sign-off). buildJournalCardFields(op, ctx) in journal-state.ts. A pure activityRowRoute(row); any shared row component at L4. Chip CSS via composes, keeping the green incoming variant.",
+      "disagreement": "Codex removed four sites that already call shared builders; Claude added the journal network drift. Writer applied both."
+    },
+    {
+      "id": "Q-08", "title": "Every password box carries its own copy of the eye button and the shake effect",
+      "level": "High", "verified": true, "confidence": "high", "foundBy": "Claude + Codex",
+      "mapping": "Duplicate Code / missing Extract Component", "effort": "days: about 1", "recurring": null,
+      "eli5": {
+        "what": "Password fields have an eye button to show or hide what you typed. New-password screens ask for the password twice. A wrong entry makes the field shake. All of this is hand-built on each screen: eight eye buttons, four password pairs and seven shake animations.",
+        "scenario": "Two of the four 'choose a new password' forms (full-backup import and new profile) are missing the hint that tells the browser 'this is a new password'. The browser may fill in a saved old password there, while the other two forms carry the hint. If the owner revisits the accessibility choice for the eye button, that is eight edits on the wallet's most sensitive screens.",
+        "fix": "Build one eye-button component and one new-password pair component in the shared composite folder, with the browser hint on both fields. Put the shake in one CSS module inside the extension. Changing the shake timing or adding reduced motion needs owner sign-off."
+      },
+      "trace": "Toggle ×8 in 5 files: ImportSecretForm.vue:41-55, 77-91; ImportFullBackupForm.vue:112-126, 140-154; NewProfileCredentials.vue:24-42; auth.vue:255-276; change-password.vue:128-145, 170-185. Pairs ×4. autocomplete='new-password' present at ImportSecretForm.vue:76, 106 and change-password.vue:168, 200; absent in ImportFullBackupForm.vue and NewProfileCredentials.vue. @keyframes shakeInput ×7, 0.3s in four files and 0.4s in three, all inside <style module>.",
+      "fix": "L3 components/composite/PasswordVisibilityToggle.vue with v-model:visible and tabindex='-1' inside. NewPasswordFields.vue with autocomplete='new-password' on both fields, reusing newPasswordHint and isNewPasswordValid. .shake and its keyframes in an extension CSS module consumed via composes, not base.css.",
+      "disagreement": "Codex would put the shake in @nulo/design; Claude said no. Writer sided with Claude: the sites are CSS modules with localized keyframe names, and base.css is hash-pinned and ships to the landing."
+    },
+    {
+      "id": "Q-05", "title": "Fee estimation and the 'is this saved estimate still valid' check each recompute the price by hand",
+      "level": "High", "verified": true, "confidence": "high", "foundBy": "Claude + Codex",
+      "mapping": "Duplicate Code / missing Form Template Method; Data Clumps", "effort": "days: 2-3", "recurring": "2026-08-16 Q-10",
+      "eli5": {
+        "what": "Before sending, the wallet estimates the fee, and it may reuse that estimate when the user confirms. The five ways to pay fees each repeat the same estimation steps. Two separate 'can we reuse the saved estimate?' checks each recompute the fee number the estimate was built from.",
+        "scenario": "A user confirms a dApp transaction with a saved estimate while the node has a brief hiccup reading fees. The dApp-side reuse check lets the error end the send. Its twin for normal transfers says 'not reusable, rebuild' and carries on. That is bug B-08. A change to how fees are rounded would today need five matching edits, and a mismatch would silently stop estimates from being reused.",
+        "fix": "Give the 'validated' branch of the existing probedFirstSimOpts helper a name and use it at the six copies. Put the fee-times-multiplier calculation next to predictedWorstMinFees in the runtime. Move the fee fingerprint to the shared reuse file. Only then fold the repeated task and probe steps, running the two structural parity tests after each step."
+      },
+      "trace": "Task wrapper ×5 (fee-juice-with-claim-strategy.ts:25-48, not :79-102). Validated-options literal ×6: fee-juice-strategy.ts:54, fee-juice-with-claim-strategy.ts:39, embedded-strategy.ts:42, fpc-strategy.ts:172, 254, 280; the owner is fee-strategy.ts:170. Fee composition ×5; multiplier ternary ×3 (service.ts:1103). operation-estimate-reuse.ts:159-162 calls getNode/predictedWorstMinFees outside any try, while transfer-estimate-reuse.ts:205-208 catches and rejects softly, which is bug B-08. fingerprintBaseFee lives in the transfer ladder (:44).",
+      "fix": "Export the else-branch of probedFirstSimOpts as validatedSimOpts(built). resolveFeeMultiplier and committedMaxFees beside predictedWorstMinFees in packages/aztec-runtime/src/fee-juice.ts. Move fingerprintBaseFee to estimate-reuse-shared.ts. Then withEstimateTask, then the probe-fold hoist. The B-08 catch is its own bug PR.",
+      "disagreement": "Claude proposed a new options helper; Codex said reuse probedFirstSimOpts. Writer did both: name the existing branch, with no new logic."
+    },
+    {
+      "id": "Q-09", "title": "Ten screens each keep their own 'update the list when something changes' code",
+      "level": "High", "verified": true, "confidence": "high", "foundBy": "Claude + Codex",
+      "mapping": "Duplicate Code / incomplete adoption of useEntityCrud", "effort": "days: about 1", "recurring": "2026-08-16 Q-07",
+      "eli5": {
+        "what": "Many screens show a list (contacts, fee payers, profiles, tokens, connected apps) and listen for 'added', 'updated' and 'deleted' messages from the wallet. A shared helper exists for this (useEntityCrud), but ten screens rewrite the same three small functions by hand. The contact 'already exists' rule is also written three times.",
+        "scenario": "A user types 'Alice ' with a trailing space as a new contact name. The duplicate check compares the untrimmed text and misses the existing Alice. The save then trims it, so the address book now holds two Alices. This bug exists twice because the check was copied twice. Separately, the shared helper treats a repeated 'added' message as an update, while four copies add the row a second time.",
+        "fix": "Pull the three list operations into a tiny pure helper file (entity-list.ts) that useEntityCrud and the screens both use. Add one findConflictingContact check that trims names and returns a clear result instead of the magic text 'Already exist'."
+      },
+      "trace": "Reducers: NewContactPopup.vue:29-51, EditContactPopup.vue:29-62, ImportContactsPopup.vue:30-49, send.vue:192-212, NewFpcPopup.vue:89-99, EditFpcPopup.vue:136-153, SelectProfilePopup.vue:77-91, SelectTokenPopup.vue:77-89, connected-apps/index.vue:54-73; shared at useEntityCrud.ts:104-140 (dedupes adds at :111). Contact name check compares untrimmed input (NewContactPopup.vue:58, EditContactPopup.vue:75) but saves trim() (:111; :142, 151); ContactService.addContact enforces no uniqueness.",
+      "fix": "Pure utils/entity-list.ts (upsertById, replaceById, removeById) used inside useEntityCrud and by the consumers, with explicit append, upsert and replace-only policies. findConflictingContact(contacts, {name, address}, excludeId), which trims, plus canonicalContactAddress(), returning a typed result. The import popup keeps its two-key rule.",
+      "disagreement": "Codex corrected that not every copy adds duplicates (SelectProfile upserts, SelectToken guards); the writer applied it."
+    },
+    {
+      "id": "Q-07", "title": "The 'does this web address look fake' check has a private copy on the trust screen",
+      "level": "High", "verified": true, "confidence": "high", "foundBy": "Claude + Codex",
+      "mapping": "Duplicate Code (a shared helper exists)", "effort": "hours: about half a day", "recurring": null,
+      "eli5": {
+        "what": "When a website connects, the wallet shows its hostname and warns if it contains look-alike characters, a common phishing trick. Three approval windows use a shared helper for this. The verify window, the one that asks 'do you trust this site?', has its own pasted copy. It also has its own copies of 'close this window' and 'wait until the session check finishes'.",
+        "scenario": "The team hardens the phishing check to catch mixed alphabets, such as a Cyrillic 'а' inside a Latin name. The change lands in the shared helper and reaches three windows, but not the trust screen, which is the one that matters most.",
+        "fix": "Have the verify window call the existing useDappHostname helper, which takes under 30 minutes. Add one guarded 'close this window' helper and one 'wait for the session check' helper."
+      },
+      "trace": "Hostname check: popup/windows/verify/index.vue:52-67 against composables/useDappHostname.ts:8-27, identical today. Window close ×4: verify/index.vue:77-83, windows/json/index.vue:16-21 and windows/logger/index.vue:12-17 (no window.id guard), useDappApprovalWindow.ts:88-92. Session wait: verify/index.vue:118-133 against useDappApprovalWindow.ts:102-115. Cancelled-branch classification: discover:110-117, capabilities:328-335, execute:525-533 (execute's else-branch differs).",
+      "fix": "const { hostname, isSuspicious } = useDappHostname(dapp) in verify. A guarded closeCurrentWindow() in utils/. whenSessionChecked(getter) as a C0 helper. Export only isApprovalCancelled(err). Leave useDappInteractionPayload router-free and keep the three getRequestId lambdas.",
+      "disagreement": "Claude wanted a router-based getRequestId default in useDappInteractionPayload; Codex said keep that composable router-free. Writer sided with Codex."
+    },
+    {
+      "id": "Q-01", "title": "The network's identity number is worked out by hand in 15 places",
+      "level": "High", "verified": true, "confidence": "high", "foundBy": "Claude + Codex",
+      "mapping": "Duplicate Code / Shotgun Surgery; Misplaced Function", "effort": "days: about 1", "recurring": null,
+      "eli5": {
+        "what": "Every network the wallet talks to gets an ID number made by combining two numbers the network reports. The wallet uses it to keep each network's data apart, and to refuse to sign when a server suddenly claims to be a different network. The recipe for that ID is typed out by hand in six places, and a related 'network fingerprint' used when signing is typed out in ten more, instead of both coming from one place.",
+        "scenario": "Aztec changes how networks identify themselves, so the recipe needs a tweak. Today that means finding and changing sixteen copies in step. Missing one either makes the wallet refuse to sign on that network, or files a dApp session under the wrong network. Two of the comments that say 'this mirrors that' are already out of date.",
+        "fix": "Keep one recipe in the shared runtime package, next to the safety check that already uses it, and have every place call it. The helper for the signing fingerprint (chainInfoFrom) already exists and just needs to be used."
+      },
+      "trace": "Formula (l1ChainId ^ rollupVersion) >>> 0 is owned by apps/extension/src/utils/chain-ids.ts:12-14 and copied at aztec-node-factory-adapter.ts:101, chain-identity.ts:59, network/service.ts:1010, session-established.ts:16-21, queued-journal.ts:45-56 and scripts/seed-preflight.ts:22. Ten ChainInfo literals under execution/ (authwit-discoverer.ts:119, 174, 225, 239; fast-path.ts:228; service.ts:1021; ...) bypass chainInfoFrom (chain-identity.ts:73). NO_FROM rule ×3. Stale comments at queued-journal.ts:45 and authwit-discoverer.ts:116-117.",
+      "fix": "Move walletChainId into packages/aztec-runtime/src/utils/chain-identity.ts and re-export it from the extension. Add chainIdFromSdkChainInfo. Use chainInfoFrom(nodeInfo) at the ten literals, plus liveChainInfo(node, network) for the five fetch-and-assert sites. Move NO_FROM and requestedSenderOf into wallet-bridge/src/account-resolution.ts. Keep the three session-address sets distinct.",
+      "disagreement": "Claude: aztec-runtime; Codex: wallet-core for walletChainId. Writer chose aztec-runtime: nothing lower computes it, and the assertion there already holds the formula."
+    },
+    {
+      "id": "Q-02", "title": "The 'is this really the function you approved' check is copied six times",
+      "level": "High", "verified": true, "confidence": "high", "foundBy": "Claude + Codex",
+      "mapping": "Duplicate Code / Shotgun Surgery on a security rule", "effort": "days: 1-2", "recurring": null,
+      "eli5": {
+        "what": "When a dApp asks the wallet to run something, the wallet checks that the function actually being called is the one the user approved. It also decodes any 'permission slips' (authwits) the call needs. Each way a request can run (normal send, send without an account, read-only view, fast path, and the authwit paths) has its own hand-written copy of these checks.",
+        "scenario": "Aztec changes how permission slips are encoded, or the team decides a missing function name should always be refused. That means three or six edits across files that look different enough that a text search won't find them all. Forgetting one silently drops a safety check on that path.",
+        "fix": "Write one small checking function for the function-name rule and one for decoding permission slips, both in the execution folder beside the existing lookup helper. Each path keeps its own error wording and fallbacks. The contract fingerprint check should reuse the one the runtime package already has (verifyArtifactClassId)."
+      },
+      "trace": "Authwit decode ×3: authwit-discoverer.ts:110-141, discovery-probe.ts:66-101, dapp-send-executor.ts:1000-1019. Selector/name binding ×6: tx-request-builder.ts:340-348, 587-599; authwit-discoverer.ts:197-205; service.ts:1043-1051; view-executor.ts:367-373; fast-path.ts:135-140 (requires the name, by design). Class-id check ×3: service.ts:834-837, 981-984, plus packages/aztec-runtime/src/pxe/artifact-class-id.ts:52. No accidental drift; error text is caller-owned (contract-resolver.ts:55-58).",
+      "fix": "A synchronous assertSelectorBinding(fn, { name, to, label, requireName }) in execution/contract-resolver.ts. decode-authwit-effects.ts beside discovered-authwit.ts, returning ordered {record, messageHash}, with dedupe kept in the probe. A throwing assertArtifactClassId beside verifyArtifactClassId in aztec-runtime. Pinned error strings stay unchanged.",
+      "disagreement": "Claude rated the class-id part low value; Codex found a third copy in aztec-runtime. It stays in at moderate confidence."
+    },
+    {
+      "id": "Q-11", "title": "The single dApp entry point keeps growing and states some facts three times",
+      "level": "Medium", "verified": false, "confidence": "high", "foundBy": "Claude + Codex",
+      "mapping": "Divergent Change / Large module; Duplicate Code", "effort": "days: 1-2", "recurring": "2026-08-16 Q-01",
+      "eli5": {
+        "what": "Every request a dApp sends to the wallet enters through one file, the dispatcher. It mixes permission planning, routing and popup handling. It has grown 31% in six weeks, and it lists which methods need a popup in three different places.",
+        "scenario": "A new method that needs a popup is added. Someone must remember the routing ladder, the handler scaffold and a hard-coded list of methods banned from batches. That list already misses one popup method (grantPublicAuthwit), which was routed to the security review.",
+        "fix": "Move the pure permission-planning block into its own file. Mark 'needs popup' on each method's registry entry so the ban list is derived automatically. Share one narrow popup-handler routine."
+      },
+      "trace": "packages/wallet-bridge/src/dispatcher.ts (1,794 lines, 29 commits since June): capability planning :185-760; routing ladder :915-975; batch ban :1072-1090, which omits grantPublicAuthwit (bugs D-16, routed to security); popup handlers :1105-1305; unwrapResult :1790-1792; routing facts also in method-descriptors.ts.",
+      "fix": "Move the pure block to packages/wallet-bridge/src/capability-negotiation.ts. Add popupGated to MethodDescriptor and derive the batch refusal set from METHOD_REGISTRY. A narrow runPopupOperation that keeps the sendTx admission hooks and createAuthWit's fenced path. Inline unwrapResult.",
+      "disagreement": null
+    },
+    {
+      "id": "Q-12", "title": "Two Home widgets share a copy-pasted balance loader",
+      "level": "Medium", "verified": false, "confidence": "high", "foundBy": "Claude + Codex",
+      "mapping": "Duplicate Code / Extract Composable", "effort": "days: about 1", "recurring": null,
+      "eli5": {
+        "what": "The balance total at the top of Home and the token list below it each have their own copy of the code that loads balances, retries on failure, and ignores stale results from a previously selected account.",
+        "scenario": "A fix to how balances reload after reconnecting has to be made twice. If it is made only once, the big total and the list can disagree for the same account. One copy already skips a duplicate check the other has.",
+        "fix": "One composable, useScopedTokenBalances, used by both widgets and built on the existing createRunFence helper."
+      },
+      "trace": "TokensView.vue:184-305, 343-388 and BalanceView.vue:177-309, 334-345 (popup/components/modules/general/), each with inActiveScope, fetchDirty, the event triplet, BALANCES_RETRY_MS and a generation counter. A partial copy is at SelectTokenPopup.vue:70-137. BalanceView.vue:235-239 lacks the id dedupe at TokensView.vue:197 (bugs D-09: unreachable today).",
+      "fix": "A C1 useScopedTokenBalances({ client, scope, mapRow? }) in composables/, taking the parent-owned client, using createRunFence and exposing dispose(). Adopt it in SelectTokenPopup only if its show/hide contract is kept.",
+      "disagreement": null
+    },
+    {
+      "id": "Q-10", "title": "Saving a sent transaction means passing 12 details in exact order",
+      "level": "Medium", "verified": true, "confidence": "high", "foundBy": "Claude + Codex",
+      "mapping": "Long Parameter List / Data Clumps", "effort": "days: about 1", "recurring": null,
+      "eli5": {
+        "what": "When a transaction is sent, the wallet records it for the activity list. The recording function takes 12 details in a fixed order, several of them plain text of the same type, and three places each type out that list.",
+        "scenario": "Someone adds a new detail, such as which fee payer was used. Three call sites, two forwarders and some numbered type lookups must all change. Swapping two same-type text details still compiles, so a transaction could be recorded with its details in the wrong fields.",
+        "fix": "Pass one named object instead of 12 ordered arguments, and extend the existing sentTxRecorder helper so the 'send without an account' path stops retyping it."
+      },
+      "trace": "Declaration at transaction/service.ts:155-170. Producers at transfer-executor.ts:182-214 and dapp-send-executor.ts:528-541, 919-932; forwarders at execution/service.ts:350, 419; index projections at dapp-send-executor.ts:125-138. Tails ×2: :677-683/874-880, :736-739/914-917, :754/935. Cancellation closures at :255, 295, 369 and transfer-executor.ts:350-352.",
+      "fix": "A parameter object in transaction/spec.ts, with SentTx as a Pick of it. Extend sentTxRecorder with { nonce?, feePaymentMethod?, recordAuthwits } for NO_FROM. Local tail helpers reusing pickPrimaryMethod and extractOffchainOutput. A lazy checkpoint helper in execution/rpc-cancel.ts.",
+      "disagreement": null
+    },
+    {
+      "id": "Q-14", "title": "Onboarding and the popup each wire up the import screen and the password/passkey switch",
+      "level": "Medium", "verified": false, "confidence": "high", "foundBy": "Claude + Codex",
+      "mapping": "Duplicate Code / Data Clumps", "effort": "days: about 1", "recurring": null,
+      "eli5": {
+        "what": "Importing a backup, and choosing between password and passkey, both exist in first-run onboarding and inside the popup. The logic is shared, but the screen wiring and the keyboard-navigable password/passkey switch are copied. Part of the reason is that the popup's switch sits in a layer onboarding is not allowed to import.",
+        "scenario": "Adding Home and End key support to the switch, or a new restore status, means doing it twice.",
+        "fix": "Move the switch down to the shared composite layer so both shells can use it, and share the import button rules."
+      },
+      "trace": "onboarding/pages/import.vue:65-102, 136-176, 184-256 against popup/pages/import.vue:97-134, 196-237, 246-330, plus popup/pages/import-helpers.ts:20-28. Tablist: onboarding/pages/create.vue:79-88, 115-145 against popup/components/modules/settings/new-profile/NewProfileMethodTabs.vue:13-55 (L4, not importable by onboarding).",
+      "fix": "Shared predicates in utils/full-backup-actions.ts exposed via useProfileImportFlow. An L3 AuthMethodTabs.vue in components/composite/. Optionally an L3 ImportFlowBody.vue, keeping test ids.",
+      "disagreement": null
+    },
+    {
+      "id": "Q-13", "title": "Every popup works out its own stacking position",
+      "level": "Medium", "verified": false, "confidence": "moderate", "foundBy": "Claude",
+      "mapping": "Shotgun Surgery / Primitive Obsession; Large Class", "effort": "days: about 1", "recurring": null,
+      "eli5": {
+        "what": "Popups can stack on top of each other. Each of 24 popups computes its own place in the stack from a text key. The popup manager also hosts an unrelated queue of 'is this incoming transfer trusted?' prompts.",
+        "scenario": "Changing how stacking works takes 24 edits. Mistyping a popup key does not raise an error; the popup just stacks in the wrong place.",
+        "fix": "Let the popup store return each popup's position, and move the trust-prompt queue into its own composable."
+      },
+      "trace": "popupStore.len - popupStore.popups.<key>?.order appears in 24 files under popup/components/popups/ (for example ConfirmPopup.vue:30). The registry is at PopupManager.vue:316-354 and the trust queue at :55-250. Workflow tags at PopupManager.vue:154-155 and :304 break the comment rule. Codex: raw order and reverse depth must both be preserved.",
+      "fix": "popupStore.stackOf(key) returning { order, depth }, or props from the manager. A C1 useIncomingTrustPrompts(client) receiving a connected client, with one isLiveTriple. Strip the tags.",
+      "disagreement": "Codex agreed only partly and narrowed the claims; confidence stays moderate."
+    },
+    {
+      "id": "Q-15", "title": "Basic byte encoding is hand-rolled about 30 times despite a shared helper",
+      "level": "Medium", "verified": false, "confidence": "moderate", "foundBy": "Claude + Codex",
+      "mapping": "Duplicate Code / bypassed shared abstraction", "effort": "days: about 1, plus a decoder PR", "recurring": null,
+      "eli5": {
+        "what": "Converting bytes to and from text (base64, hex), and checking 'is this a plain object', are everyday chores. wallet-core has helpers for the encoding, but about 30 places use Node's Buffer or loops instead. 'Is this a plain object' is written 11 ways with two different meanings.",
+        "scenario": "The team wants to drop the Buffer compatibility layer to shrink the bundle. That is blocked until all 30 sites move. On sealed secrets, some decoders are lenient and others strict, so one error handler that looks protective is actually dead code.",
+        "fix": "Swap the encoders first, which is safe. Then swap the decoders one at a time, each with a test. Add isRecord and isObjectLike to wallet-core."
+      },
+      "trace": "Encoders: profile/service.ts:1718, 1876-1878, 2063; wallet-crypto session-secret-box.ts:91-102; pxe/client.ts:208; account-export.ts:80; passkey-ceremony.ts:139. Lenient Buffer decoders on sealed paths: profile/service.ts:2072, 2310, 2321, 2341; password-secret-box.ts:219, 226, 234. The dead catch at dapp-session/integrity.ts:58-62 (bugs D-20). Record guards: dispatcher.ts:307 (strict) and :767 (permissive) in one file.",
+      "fix": "PR 1: encoders, getRandomHex(32) and PXE byte equality. PR 2: decoders site by site with exception-parity tests, or a fromBase64Lenient. isRecord/isObjectLike in packages/wallet-core/src/utils/guards.ts; legal keeps its stricter guard.",
+      "disagreement": "Codex split on the record guards (one report agreed, another called them tiny)."
+    },
+    {
+      "id": "Q-16", "title": "Timeouts, queues and 'latest answer wins' guards are hand-built about 25 times",
+      "level": "Medium", "verified": false, "confidence": "moderate", "foundBy": "Claude + Codex",
+      "mapping": "Duplicate Code / parallel implementations of Lock and createRunFence", "effort": "days: 1-2", "recurring": "2026-08-16 Q-08 (pattern)",
+      "eli5": {
+        "what": "Async code often needs three small tools: give up after N seconds, run jobs one at a time, and ignore an old answer when a newer request has been made. The codebase has helpers for some of this (createRunFence, Lock, and a sleep function in wallet-core), yet about 25 places build their own.",
+        "scenario": "Creating a profile from the popup waits in a loop until the user is logged in, with no timeout. A bounded waiter that notices failures (awaitProfileActivation) exists right next door. If setup fails, the button spins forever (bug B-21). Some timeout copies also clean up their timers and some do not.",
+        "fix": "Add raceDeadline and createSerialQueue to wallet-core, use its existing sleep, and give createRunFence current() and invalidate()."
+      },
+      "trace": "Deadline race ×8: balances.store.ts:124-139, auth-guard.ts:83-90, Header.vue:34-43, LogsViewer.vue:189-200, importPreflight.ts:41-47, importChainSync.ts:111-117, base-client.ts:284-301, opfs-store.ts:124-135. sleep copies at importPreflight.ts:31, auth-guard.ts:66, app.store.ts:648 and gas-balance-reader.ts:227, although packages/wallet-core/src/utils/sleep.ts exports sleep. Serial queues ×7. B-21: new-profile-helpers.ts:25-27 against unlockWait.ts:32-60.",
+      "fix": "raceDeadline(work, ms, onTimeout) in packages/wallet-core/src/utils/timeout.ts, clearing the timer in finally. createSerialQueue() in utils/serial.ts. Replace the sleep copies with the wallet-core sleep. createRunFence gains current() and invalidate(). useDownloadAction for the two export pages.",
+      "disagreement": null
+    },
+    {
+      "id": "Q-17", "title": "The profile service repeats how a profile record is built six times",
+      "level": "Medium", "verified": false, "confidence": "high", "foundBy": "Claude + Codex",
+      "mapping": "Large Class / Divergent Change containing Duplicate Code", "effort": "days: 1-2", "recurring": "2026-08-16 Q-01",
+      "eli5": {
+        "what": "The profile service is a 2,800-line file. Inside it, the code that builds a saved profile record, including its tamper-check code, appears six times. 'Open the session, then warn if the key is missing' appears four times.",
+        "scenario": "Adding one field to what the tamper check covers means six edits, and a miss shows up only the first time someone unlocks.",
+        "fix": "Two row-builder functions in a small profile-row file, and one 'open and warn' helper."
+      },
+      "trace": "apps/extension/src/wallet/services/profile/service.ts: row constructors at :605-627, 761-775, 2159-2178, 2211-2234, 2393-2434, 2581-2599 (commit 152b1083 edited all six). Degraded-open tail at :702-706, 851-855, 2726-2730, 2787-2791. Pending-restore contexts at :124-239. No complexity acceptance for this file.",
+      "fix": "Password and passkey row builders in profile/profile-row.ts, computing the MAC after the id is final. openAndWarnIfDegradedHoldingLock. Extract Class PendingRestoreContexts. Do not merge the reveal skeleton (part d) without revisiting the prior plan.",
+      "disagreement": "Codex disagreed on part (d), which was already adjudicated in a prior plan and is test-pinned; it is excluded."
+    },
+    {
+      "id": "Q-18", "title": "Private and public incoming transfers run the same pipeline in two copies",
+      "level": "Medium", "verified": false, "confidence": "high", "foundBy": "Claude + Codex",
+      "mapping": "Duplicate Code / Shotgun Surgery", "effort": "days: about 1", "recurring": "2026-08-16 Q-01",
+      "eli5": {
+        "what": "The wallet detects incoming tokens in two ways: private notes and public events. After detection, both go through the same steps (decide whether the sender is trusted, save, tell the screen), written twice in a 2,500-line file.",
+        "scenario": "A new trust state for senders means editing both halves, and the halves already differ in one safety re-check.",
+        "fix": "Extract the shared steps (trust promotion, event building, record fields, scoped clear) and call them from both halves."
+      },
+      "trace": "apps/extension/src/wallet/services/incoming-transfer/service.ts: trust :1433-1453 and :2126-2158; commit :1465-1492 and :2161-2172; record builders :2346-2376 and :2174-2196; dedupe :1383-1415 and :2113-2121; clears :702-757. Store inventory ×2 at repository.ts:221-244.",
+      "fix": "promoteUnknownTrust and a synchronous buildPendingEvent reusing _setTrustStateLocked (:605-615). commonRecordFields, emitAddedIfVisible, stopNoteScheduler, clearScoped(prefix, evict, repoOp). A repository clearScopePrefix. Epoch checks stay at the call sites.",
+      "disagreement": null
+    },
+    {
+      "id": "Q-19", "title": "'Does this permission cover that call' is written twice in the dApp bridge",
+      "level": "Medium", "verified": false, "confidence": "high", "foundBy": "Claude + Codex",
+      "mapping": "Duplicate Code / Shotgun Surgery on an authorization rule", "effort": "hours: about half a day", "recurring": null,
+      "eli5": {
+        "what": "Once a dApp has been granted permissions, the wallet asks the same question at two moments. Before prompting it asks 'is this already covered?', and when enforcing it asks 'is this allowed?'. The matching rule is written separately for each.",
+        "scenario": "Someone adds a new wildcard form to enforcement only. The wallet then skips a prompt for something it will later refuse, or approves a wider permission without asking.",
+        "fix": "One small scope-matching file that both sides import."
+      },
+      "trace": "scopeCovers at packages/wallet-bridge/src/dispatcher.ts:219-230 against matchesPattern at method-scope-checkers.ts:38-43. Address-list coverage at dispatcher.ts:204-217, 263-271 against method-scope-checkers.ts:57-60. grantsOfType ×2. Its comment says it 'deliberately mirrors enforcement'; the empty-function-name guard (method-scope-checkers.ts:45-54) exists only in enforcement.",
+      "fix": "A leaf packages/wallet-bridge/src/scope-matching.ts with matchesPattern, inAddressList and grantsOfType<K>. Coverage and enforcement keep their own iteration semantics.",
+      "disagreement": null
+    },
+    {
+      "id": "Q-20", "title": "Wallet error types are listed three times",
+      "level": "Medium", "verified": false, "confidence": "moderate", "foundBy": "Claude",
+      "mapping": "Shotgun Surgery / Switch Statements", "effort": "hours: about half a day", "recurring": null,
+      "eli5": {
+        "what": "When an error crosses from the wallet's background to the popup, it is turned into plain data and rebuilt on the other side. For that to work, each error type must be listed in three places.",
+        "scenario": "A new error type forgotten in one of the lists still compiles, but arrives as a generic error. A 'retry' screen that checks for the exact type then never triggers.",
+        "fix": "One registry that the three structures are derived from, plus a test that every error class is registered."
+      },
+      "trace": "packages/extension-messaging/src/errors.ts: 21 classes at :50-463, the KnownWalletErrorPayload union at :472-493, and the walletErrorFromPayload switch at :503-558. errors.test.ts:245-253 loops 16 classes; :256-266 pins the TooManyPendingError omission.",
+      "fix": "A registry array keyed by CODE, with static fromPayload overrides for the four irregular classes. Derive the union from it. A test that every exported subclass is registered or explicitly client-local.",
+      "disagreement": "Codex agreed only partly, noting existing test coverage."
+    },
+    {
+      "id": "Q-21", "title": "Deleting old private-state databases is wrapped three times, with one safety rule written twice",
+      "level": "Medium", "verified": false, "confidence": "moderate", "foundBy": "Claude",
+      "mapping": "Duplicate Code with unnamed policies", "effort": "hours: about half a day", "recurring": "2026-08-16 Q-01",
+      "eli5": {
+        "what": "Older versions stored private-state data in the browser's built-in database. Cleanup code deletes those databases, and the rule 'only delete the shared store if no profile still uses it' is written twice.",
+        "scenario": "Tightening that rule for a new kind of database means two edits. Missing one could wipe data a surviving profile still needs.",
+        "fix": "One small legacy-database helper that names each site's waiting policy. Alternatively, retire the old sweep if the owner agrees no install still holds that data."
+      },
+      "trace": "packages/aztec-runtime/src/pxe/service.ts: indexedDB delete wrappers at :285-297, 309-320 and 866-884; the keyval guard at :302-321 and :780-792, each with its own databases() re-list. The blocked policies differ with reasons: boot skips, erasure waits.",
+      "fix": "pxe/legacy-idb.ts exporting deleteIdb(name, { onBlocked: 'skip' | { waitMs } }) and deleteSharedKeyvalIfNoPxeDbs, or retire the rc.2-era sweep (owner call).",
+      "disagreement": "Codex agreed only partly: the blocked-handling differences are deliberate."
+    },
+    {
+      "id": "Q-22", "title": "Rows, cards and buttons are styled by copy-paste across 24 files",
+      "level": "Medium", "verified": false, "confidence": "high", "foundBy": "Claude + Codex",
+      "mapping": "Duplicate Code encoding a shared visual component", "effort": "days: 2-3 as small PRs", "recurring": "2026-08-16 Q-11 (pattern)",
+      "eli5": {
+        "what": "The design-system package holds the basic building blocks. Mid-level visual pieces, such as settings rows, record cards, toolbar icon buttons, empty states and loading shimmers, are restyled on each screen.",
+        "scenario": "The owner approves a visible focus ring for keyboard users on toolbar buttons. None of the five copies has one today, and each must be found and changed. Small differences have already crept in between copies.",
+        "fix": "Shared CSS modules and a few small components, rolled out one pixel-identical step at a time with screenshots."
+      },
+      "trace": "The settings row ContactRow.vue:62-148 equals connected-apps/index.vue:176-258 (jscpd's top clone). Record card: AuthwitCard.vue:65-168 against notes/index.vue:261-392. Toolbar icon button ×5 with no :focus-visible. tx/[id].vue against received/[id].vue (about 115 CSS lines). .wrapper padding ×16 popups. Drift: :last-of-type against :last-child; overflow-wrap only in ListStatusMessage.",
+      "fix": "composes modules (settings-row, record-card) in components/composite/. An L2 ToolbarIconButton in packages/design/src/ui/. Move the detail-page blocks into detail-page.module.css. Skeleton with custom properties. popup-shared .wrapper and .title. Screenshots for each step.",
+      "disagreement": null
+    },
+    {
+      "id": "Q-23", "title": "The dark colour palette is declared twice and divider colours are hard-coded",
+      "level": "Medium", "verified": false, "confidence": "high", "foundBy": "Claude + Codex",
+      "mapping": "Duplicate Code / magic literals", "effort": "days: about 1", "recurring": null,
+      "eli5": {
+        "what": "The design package's stylesheet lists the dark-theme colours twice, and about 19 divider lines use a raw dark colour instead of a named token.",
+        "scenario": "A designer tweaks one dark colour and the other block stays stale. In the light theme, most dividers already render in the dark shade.",
+        "fix": "One dark block, named divider tokens at today's exact values, then light-theme fixes once the owner has signed off."
+      },
+      "trace": "packages/design/src/base.css:72-123 against :194-245 hold 28 identical declarations; theme-contrast.ts:33-40 merges the blocks, so no test sees a mismatch. rgba(74,70,63,.2/.3) hairlines at about 19 sites, 3 with light twins. Scrims use six alphas (Popup.vue:148, GlobalLoader.vue:33, ...). The bugs run routed the light-theme divider back here (D-19).",
+      "fix": "Serve dark values from one :root, [theme='dark'] block and add an equality assertion in theme-contrast.test.ts. Add --hairline-soft and --hairline-strong at today's values (byte-identical). Light-theme and scrim-role corrections need owner sign-off.",
+      "disagreement": null
+    },
+    {
+      "id": "Q-24", "title": "The fee settings card compares 'which account and network' six ways",
+      "level": "Medium", "verified": false, "confidence": "high", "foundBy": "Claude",
+      "mapping": "Data Clumps / Duplicate Code", "effort": "hours: about half a day", "recurring": null,
+      "eli5": {
+        "what": "The fee settings card decides whether a saved fee choice belongs to the current profile, network and account. That comparison is written six different ways in one 980-line component.",
+        "scenario": "Adding one more identity field, such as the fee payer, means six edits in the same file.",
+        "fix": "Two tiny helpers, sameFeeScope and feeScopeKey. A bigger split of the card is an owner decision."
+      },
+      "trace": "apps/extension/src/popup/components/modules/send/FeeSettingsCard.vue: identity predicates and keys at :184-189, 548-554, 726-734, 620, 716, 772. The mode branches on originPrivacy === null at :198-222, 364-400, 525, 569, 582, 590, 755 are low confidence. There is no complexity acceptance for this file.",
+      "fix": "sameFeeScope(a, b) and feeScopeKey(scope) in fee-helpers.ts (mechanical). useSendFeeSelection and useSavedFeeSelection only as an owner-visible plan.",
+      "disagreement": "Codex agreed on the predicates only; the mode split stays low confidence."
+    },
+    {
+      "id": "Q-25", "title": "Backup restore talks to screen code through type-check holes",
+      "level": "Medium", "verified": false, "confidence": "high", "foundBy": "Codex",
+      "mapping": "Inappropriate Intimacy / type-safety erosion", "effort": "hours: about half a day", "recurring": "2026-08-16 Q-02 (related)",
+      "eli5": {
+        "what": "Restoring a full backup is split into stages. Two stages call helper code that belongs to the screen layer, and they do it through 'never' casts that switch type checking off.",
+        "scenario": "Someone changes what one of those helpers takes as input. Nothing flags it when the code is compiled, even though this is the path that recovers a user's wallet.",
+        "fix": "Move the two helpers next to the restore stages and give them a proper minimal type."
+      },
+      "trace": "apps/extension/src/composables/useFullBackupImport.ts:165-171, 239-243, 523-536 and full-backup-restore.ts:129-133, 326-339, 373-388. The stage interface declares an AccountRestoreClient without restore, then calls UI transforms through data: never, accountService: never.",
+      "fix": "Move account filtering and token relinking into a non-reactive restore-support module beside the stages, with a minimal client type that includes restore.",
+      "disagreement": "Claude agreed on the facts and only questioned whether it belongs in a dedup run."
+    },
+    {
+      "id": "Q-26", "title": "About 1,300 lines of dead code, plus duplicate font files",
+      "level": "Low", "verified": false, "confidence": "high", "foundBy": "Claude + Codex",
+      "mapping": "Dead Code / Speculative Generality", "effort": "hours: half a day to a day", "recurring": "2026-08-16 Q-01; 2026-08-14 Q-11",
+      "eli5": {
+        "what": "Code left over from moves and experiments: eight design components nobody has used since the tools app left, an activity subsystem that was never switched on, a popup nothing opens, and five font files duplicated from the design package.",
+        "scenario": "A developer autocompletes AddressDisplay and gets the dead design copy instead of the live one. Or they spend time reasoning about rules that never run. Tests written for the dead code keep it looking alive.",
+        "fix": "Delete it together with its tests and stories, then check the build and the licence notices. Whether to delete the activity subsystem is the owner's call."
+      },
+      "trace": "packages/design/src/ui/Card.vue, Tag.vue, Toast.vue; composite/AddressDisplay.vue, BalanceRow.vue, DisclaimerTag.vue, DripButton.vue, EmojiGrid.vue, plus barrel lines. wallet/services/activity-protocol/ (317 lines, never registered in runtime.ts). SettingValue.vue, Divider.vue, SelectFpcPopup.vue (mounted at PopupManager.vue:342, never opened). Five fonts in apps/extension/src/assets/fonts/ with zero references. The ArtifactRegistry policy surface.",
+      "fix": "Remove the code with its tests, stories and barrel lines, and let components.d.ts regenerate. Keep the extension-local AddressDisplay and EmojiGrid. Verify the fonts removal with a build and the notices generator.",
+      "disagreement": "Codex disputed the fonts only because the repo map excluded font directories; the coordinator verified zero references."
+    },
+    {
+      "id": "Q-27", "title": "Fourteen small local duplicates to fix when nearby",
+      "level": "Low", "verified": false, "confidence": "moderate", "foundBy": "Claude + Codex",
+      "mapping": "Duplicate Code, local", "effort": "hours each", "recurring": null,
+      "eli5": {
+        "what": "Real but minor repeats, each in one or two places. Examples are two identical cases in the execute window, two settings pages that wire their toggles the same way, and two waiters for 'profile is active'.",
+        "scenario": "Each is cheap on its own. Two of them sit where confirmed bugs live: the Developer Mode toggle cascade (B-14) and the profile-creation wait that never gives up (B-21).",
+        "fix": "Fix each one when touching the file anyway. Do the two with bugs alongside their bug fixes."
+      },
+      "trace": "Includes the discovery admission ladder ×2 (wallet-sdk/background.ts:939-949, 1021-1031); identical sendTx cases (execute/index.vue:331-365); config-toggle binding (appearance.vue:105-162, advanced/index.vue:108-157, home of B-14(b)); activation waiters (unlockWait.ts:33-61, waitForProfileActive.ts:30-47, family of B-21); AES-GCM frame ×3 (wallet-crypto); default-token addresses with two owners; artifact catalog keys ×3; token-balance live-token idiom ×11.",
+      "fix": "Fix each opportunistically. useConfigSettings for the toggle binding, without firing side effects on hydration. Share only the watcher and timer between the activation waiters, keeping each failure policy. Stack the two execute case labels.",
+      "disagreement": "Q-27g (vocabulary lists) and Q-27h (USD conversion) are disputed; both stay local."
+    }
+  ],
+  "crossCutting": [
+    {
+      "title": "Copies that already disagree are the real argument",
+      "body": "Line counts understate the problem. What matters is a copy that was fixed on one side only. This run found that in the network status checks (bug B-09), the fee-estimate reuse checks (B-08), the account save guard (B-12), the profile-creation wait (B-21) and the Developer Mode toggles (B-14). It also found new mismatches in History's network filter, the new-password browser hint and the contact-name duplicate check. The separate bug hunt reached the same conclusion from the other side: six of its bugs are 'the guard exists on one twin but not the other'. Whenever a fix lands, search for its twin."
+    },
+    {
+      "title": "The helpers exist; they just are not used",
+      "body": "Fourteen of the 27 findings come down to a shared helper that already exists being skipped: chainInfoFrom, networkInfoFrom, probedFirstSimOpts, useDappHostname, useEntityCrud, awaitProfileActivation, the wallet-core encoders and sleep, among others. The cheapest long-term fix is a small automated test that searches the code for the six most common bypass patterns and fails if new ones appear. The repo already uses the same approach to keep sensitive values out of logs."
+    },
+    {
+      "title": "The duplication percentage is the wrong yardstick, and its baseline is stale",
+      "body": "In production code, the clone detector (jscpd) finds 2.0% of lines duplicated, about half of it CSS. The repo-wide trend command reports 3.90% today, but about three-quarters of that is tests copying other tests, plus licence texts and a template tokenizer the repo already treats as noise. The old untracked tools and bridge folders now hold only installed packages, which the scan skips, so they do not inflate it. The 4.84% baseline recorded in CLAUDE.md was taken before the tools app and bridge packages were removed on 2026-09-24, so most of the drop since then is that removal, not cleanup. The costliest findings here (network identity, security guards, save guards) are small rules retyped in different shapes, which a clone detector cannot see at all."
+    },
+    {
+      "title": "'This mirrors that' comments mark missing shared homes",
+      "body": "Comments like 'mirrors the dispatcher's normalization exactly' or 'byte-mirrors the discoverer' are promises that two copies are kept equal by hand. Two of them are already out of date. Searching the code for 'mirror' turned up a real finding every time in this run. Most fixes are simply moving the function down to the lowest layer both sides may import."
+    },
+    {
+      "title": "Big files keep absorbing the copies",
+      "body": "Five files hold much of the duplication: the profile service (2,800 lines), incoming transfers (2,460), the dApp dispatcher (1,790, up 31% in six weeks), the dApp send executor (1,100) and the fee settings card (980). Four were already named in the August review. Pulling the duplicated pieces out of these files shrinks them more safely than a big restructure."
+    },
+    {
+      "title": "The design system move is half done",
+      "body": "The basic building blocks moved to the shared design package. The mid-level pieces (rows, cards, toolbar buttons, password fields, empty states) and two colour roles (dividers and dimmed backgrounds) did not. Meanwhile the package still ships eight components nobody uses. A check that every exported component has a real user would keep it honest."
+    }
+  ],
+  "notPursued": [
+    "Raw 'fail-closed' marker stores (Q-03e): the three examples did not justify a shared abstraction.",
+    "Router-based default for getRequestId (Q-07): it would add a router dependency to a router-free composable to save three one-liners.",
+    "A generic approval-window runner (Q-07): the windows behave differently after success and on errors; only the cancel check is shared.",
+    "Shake animation in the design package's base.css (Q-08): the screens use scoped CSS modules, and base.css is hash-pinned and ships to the landing.",
+    "Password reveal skeleton ×5 (Q-17d): already decided in a prior plan and pinned by tests.",
+    "Price client setup per screen: the parent-owned client is the documented convention.",
+    "Scope-key text builders ×5: different dimensions, no shared change obligation.",
+    "0x + 64-hex checks ×6: refuted, the sites validate different kinds of values.",
+    "Account init-nullifier check ×2: two sites on a frozen account surface.",
+    "Mnemonic/passkey key reduction tail ×2: frozen by test vectors and rarely changed.",
+    "'Popover is dead': refuted, the log viewer toolbar uses it.",
+    "'Five triple-equality sites' in PopupManager: narrowed to three; the others are availability checks."
+  ]
+}

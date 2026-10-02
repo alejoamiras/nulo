@@ -1,0 +1,500 @@
+{
+  "focus": "bugs",
+  "summary": [
+    "We looked through the Nulo browser extension for bugs that ordinary users can hit: things that give a wrong answer, get stuck, or quietly save the wrong data. Two different AI model families searched each part of the code separately, checked each other's work, and a third pass re-checked the ten most important results. We found 23 real bugs. None of them loses anyone's money or damages the wallet that is running right now.",
+    "Four bugs matter most. Apps that ask Nulo to send a transaction are told it is done the instant it is sent, before it is actually confirmed on the network. Apps that need a special permission slip from the user fail if the user reads the approval screen for more than two minutes. A developer tool for measuring transaction cost is broken for normal private transfers. And in a rare case, a backup file can quietly mix two profiles together, which the user would only discover when they try to restore it.",
+    "Most of the other 19 bugs are small and rare, and most are cheap to fix because the right fix already exists elsewhere in the code. One piece does it correctly and its twin does not. We recommend fixing the cheap twin bugs first (a few hours each), then the two app-sending bugs together, then the backup bug."
+  ],
+  "counts": { "total": 23, "Blocker": 0, "Critical": 0, "Major": 4, "Minor": 19 },
+  "cheapest": [
+    "B-03 — one missing option on one call; the two sibling calls in the same file already pass it.",
+    "B-09 — one missing argument; the sibling status check a few lines below already passes it.",
+    "B-08 — wrap one fee read in a try/catch, exactly as the transfer twin already does.",
+    "B-06 — three one-line guards in one small class, copying an existing idiom.",
+    "B-21 — swap an endless wait loop for the bounded helper the unlock screen already uses.",
+    "B-16 — one expiry check inside a lock that is already taken."
+  ],
+  "shipTogether": [
+    { "ids": ["B-01", "B-02"], "why": "Both are dApp-send lifetimes that must fit inside the same 300 s SDK call limit; one PR, one set of tests." },
+    { "ids": ["B-03", "B-09", "B-08", "B-06", "B-21"], "why": "All are 'copy the guard from the twin' fixes; a single afternoon sweep." },
+    { "ids": ["B-04", "B-05", "B-12", "B-17"], "why": "All need the same 'is this still the same profile?' check before a write; build one shared fence helper." },
+    { "ids": ["B-22", "B-23"], "why": "Both are screens that only read their data once when first shown; fix with the same reactive pattern." },
+    { "ids": ["B-14", "B-18"], "why": "Both change memory before saving to disk; adopt one 'save first, then update' pattern." },
+    { "ids": ["B-10", "B-11"], "why": "Both are what the popup shows when the wallet locks at an awkward moment." }
+  ],
+  "findings": [
+    {
+      "id": "B-01",
+      "title": "dApp sends report 'done' before the transaction is confirmed",
+      "level": "Major",
+      "verified": true,
+      "confidence": "high",
+      "foundBy": "Claude + Codex",
+      "mapping": "wrong result",
+      "effort": "days — both send paths plus tests",
+      "recurring": null,
+      "eli5": {
+        "what": "When a website app (a dApp) asks Nulo to send a transaction, it normally waits until the network confirms it, meaning the transaction is included in a block. The standard Aztec wallet does this waiting. Nulo instead checks once, right after sending, and hands back whatever it sees, which is usually 'still pending'.",
+        "scenario": "A user swaps tokens on a DEX website and approves in Nulo. The DEX immediately shows 'Swap complete' and refreshes balances that have not changed yet. If the transaction later fails or is dropped, the DEX never finds out and keeps showing success.",
+        "fix": "Wait for confirmation the way the standard Aztec wallet does, using Aztec's own waitForTx helper and Nulo's existing retry for lagging nodes, with a time limit shorter than the app's 5 minute call limit."
+      },
+      "trace": "packages/wallet-bridge/src/dispatcher.ts:1133-1149 returns the executor result unchanged. apps/extension/src/wallet/services/execution/dapp-send-executor.ts:754 only checks for NO_WAIT, then :757 calls node.getTxReceipt once right after broadcast (PENDING, or DROPPED on a lagging replica). The NO_FROM arm repeats this at :935-939. Upstream BaseWallet.sendTx calls waitForTx and throws on revert. The single read is pinned by dapp-send-executor.test.ts:436-460 with no (BUG PIN).",
+      "fix": "Add one helper used by both arms that calls upstream waitForTx(node, txHash, opts), passing op.opts.wait through when it is an object and keeping NO_WAIT immediate. Cap the timeout under the SDK's 300 s ceiling and reuse TransactionService.waitForTx's DROPPED debounce (transaction/service.ts:237).",
+      "disagreement": null
+    },
+    {
+      "id": "B-02",
+      "title": "Approval fails if the user reads it for more than two minutes",
+      "level": "Major",
+      "verified": true,
+      "confidence": "high",
+      "foundBy": "Claude",
+      "mapping": "bad retry-or-timeout (lifetime mismatch)",
+      "effort": "days — about one day with tests",
+      "recurring": null,
+      "eli5": {
+        "what": "Some dApp requests need the user to sign a permission slip (an 'authwit') that lets a contract move their tokens. Nulo shows these slips on the approval screen and remembers what it showed so it never signs anything the user did not see. That memory expires after 2 minutes, but the approval screen stays open for up to 10.",
+        "scenario": "A user opens a DEX trade that needs a permission slip, reads the approval card carefully for three minutes, and presses Confirm. The window closes and the DEX reports a failure with the message 'retry the estimate'. There is no window left to retry in. Clicking Confirm very quickly after changing the fee speed can cause the same failure.",
+        "fix": "Keep the 'what the user saw' memory for as long as the approval can stay open, and forget it only when the request finishes. Grey out Confirm while the fee is being recalculated."
+      },
+      "trace": "apps/extension/src/wallet/services/execution/preview-snapshots.ts:30,52 shares the 120 s ESTIMATE_REUSE_TTL_MS. After expiry, dapp-send-executor.ts:704-705 gets 'missing', the rebuild rediscovers the authwit, and :719 assertWithinPreview throws at preview-snapshots.ts:74. NO_FROM: :1031. The interaction lives 10 min (dapp-interaction/service.ts:62). popup/windows/execute/index.vue:689-698 does not disable Confirm while estimatingOps is true.",
+      "fix": "Give PreviewSnapshots its own SingleShotTtlCache of at least INTERACTION_TIMEOUT_MS, drop the builtAt age check in take, and evict on interaction settle. Keep 120 s on the reuse cache. Add estimatingOps[i] || previewingOps[i] to Confirm's disabled state and guard the handler.",
+      "disagreement": "Effort only: Claude S, Codex M; settled at M because the snapshot must survive hand-off and queueing."
+    },
+    {
+      "id": "B-03",
+      "title": "Transaction profiling fails for ordinary private transfers",
+      "level": "Major",
+      "verified": true,
+      "confidence": "high",
+      "foundBy": "Codex",
+      "mapping": "bad error path (feature broken), sibling asymmetry",
+      "effort": "hours — one option plus one test",
+      "recurring": null,
+      "eli5": {
+        "what": "Developers and some dApps ask the wallet to 'profile' a transaction, which measures how expensive it will be to prove without actually sending it. For private transactions, Aztec needs to know who the sender is so it can tag the private messages correctly. Nulo passes the sender when sending and when simulating, but forgets it when profiling.",
+        "scenario": "A dApp developer asks Nulo to profile a normal private token transfer to check its cost. Instead of numbers, the request fails with an error. Normal sending still works.",
+        "fix": "Pass the sender the same way the two sibling functions in the same file already do."
+      },
+      "trace": "packages/aztec-runtime/src/pxe/service.ts:621-623 calls pxe.profileTx with {profileMode, skipProofGeneration, scopes} only. Siblings proveTx (:501) and simulateTx (:584) pass senderForTags: scopes[0], with the reason documented at :481-490. Entry: apps/extension/src/wallet/services/execution/view-executor.ts:403-407. The PXE oracle returns None and the Noir note-delivery code throws when it needs the default sender (Token transfer_to_private).",
+      "fix": "Add senderForTags: scopes[0] to the options at service.ts:621-623, parsed as the siblings do, and add a unit test next to the proveTx/simulateTx pins asserting it is forwarded.",
+      "disagreement": "Codex narrowed the scope: only calls that rely on the default sender fail, not every private-log call. Adopted; still Major."
+    },
+    {
+      "id": "B-05",
+      "title": "A backup export can quietly mix two profiles",
+      "level": "Major",
+      "verified": true,
+      "confidence": "high",
+      "foundBy": "Codex",
+      "mapping": "silent corruption (latent), race",
+      "effort": "hours — a small fence; days for the full server-side fix",
+      "recurring": "2026-08-22 N-01 family",
+      "eli5": {
+        "what": "Nulo can hold several profiles (separate identities, each with its own accounts). A full backup is supposed to contain exactly one profile. The export first grabs the profile's keys, then collects accounts, tokens and history piece by piece. Each piece asks for 'whichever profile is active right now' instead of 'the profile we started with'.",
+        "scenario": "A user starts a full backup of profile A in a detached Nulo window, and while it is collecting data they finish creating profile B in another Nulo window. The backup finishes and says it succeeded, but it holds A's keys with B's accounts. Months later, after losing their laptop, they try to restore it and find accounts missing or the restore failing.",
+        "fix": "Remember which profile activation the export started under and cancel the export if that changes. The stronger fix tells every backup piece which profile to read."
+      },
+      "trace": "apps/extension/src/popup/pages/settings/security/export/full.vue:193 fetches key material for profile A by id, then :295 calls each slice's backup() with no profile (utils/full-backup-helpers.ts:137-142), and slices resolve the active profile (wallet/services/account/service.ts:664,750). SessionManager.open replaces the session directly (profile/session-manager.ts:318-338) and popup/app.vue:198-218 re-bootstraps without unmounting, so the unmount-only fence at full.vue:296 passes. The filename reads the live name at :375.",
+      "fix": "Capture an activation sequence (bumped on every onActiveProfileChanged) at start and make the onSlice probe gen === generation && seq === startSeq; capture the filename at start. Do not compare profile ids, which misses A to B to A. Durable fix: pass the captured id to every backup() and reject a mismatch.",
+      "disagreement": "Codex: Critical (an apparently good backup can be unusable). Claude: Minor (needs rare two-window timing). Settled at Major: the damage is silent until restore, but the trigger is deliberate concurrent multi-window work."
+    },
+    {
+      "id": "B-07",
+      "title": "Closing an approval window looks like a wallet error, not 'user said no'",
+      "level": "Minor",
+      "verified": true,
+      "confidence": "high",
+      "foundBy": "Claude + Codex",
+      "mapping": "wrong result (error classification)",
+      "effort": "hours — one option on the window manager plus tests",
+      "recurring": null,
+      "eli5": {
+        "what": "When a dApp asks for approval, Nulo opens a small window. Pressing Reject sends the dApp a standard 'user rejected' code (4001) so the dApp knows the user simply declined. Closing the window with the X should mean the same thing, but only works if the window finished loading and the wallet was unlocked.",
+        "scenario": "A dApp asks to send while the wallet is locked. The approval window shows the unlock screen, and the user just closes it. The dApp shows 'the wallet could not process the request' and may retry, instead of quietly accepting that the user declined.",
+        "fix": "Have the window manager report a user close as 'user rejected' for dApp windows, while the passkey window keeps its current behaviour."
+      },
+      "trace": "apps/extension/src/wallet/services/window-manager/window-manager.ts:259 rejects with the bare string 'Window closed by user.'; dapp-interaction/service.ts:466-493 passes it on; wallet-sdk/background.ts:1211-1216 → error-envelope.ts:197 maps it to the generic failure. The beforeunload reject is installed only after init and never on the locked path (composables/useDappApprovalWindow.ts:118-121,124).",
+      "fix": "Add optional onUserClose?: () => Error to OpenAndAwaitOpts; dapp-interaction/service.ts:466 passes () => new UserRejectedError('Window closed by user.'). The passkey caller (passkey/service.ts:119) keeps its string. Update the .rejects.toMatch window-manager tests.",
+      "disagreement": null
+    },
+    {
+      "id": "B-22",
+      "title": "Searching the contracts list shows the wrong addresses",
+      "level": "Minor",
+      "verified": false,
+      "confidence": "high",
+      "foundBy": "Codex",
+      "mapping": "wrong result (display)",
+      "effort": "hours — make one component reactive and key two lists",
+      "recurring": null,
+      "eli5": {
+        "what": "Nulo has a small building block that shows a shortened address (and a contact name if it knows one). It works out what to display only once, when it first appears on screen. If the list around it changes, it keeps showing the old address.",
+        "scenario": "In Settings, Advanced, Account state, Contracts, a user with three contracts types part of the third one's address into search. The one result shown carries the first contract's address, not the one they searched for.",
+        "fix": "Make the address display update whenever its address changes, and give list rows a stable identity so they are not reused for a different item."
+      },
+      "trace": "apps/extension/src/components/AddressDisplay.vue:68-90 derives displayedAddress and contactName in onMounted only, with no watch. apps/extension/src/popup/pages/settings/advanced/account-state/contracts/index.vue:77 has a v-for with no :key, so filtering patches row 0 in place with the old text. The same component renders authwit consumers under index keys in popup/windows/execute/OperationCard.vue:240-255 (routed to security).",
+      "fix": "Make displayedAddress a computed over props.address/full/formatter, resolve the contact name in watch(() => props.address, ..., {immediate: true}) with a latest-wins guard, and add :key='contract' (and :key='sender' on the senders list).",
+      "disagreement": null
+    },
+    {
+      "id": "B-23",
+      "title": "Tapping 'View' on a new arrival from a receipt page keeps the old receipt",
+      "level": "Minor",
+      "verified": false,
+      "confidence": "high",
+      "foundBy": "Claude",
+      "mapping": "wrong result (display)",
+      "effort": "hours — load on route change instead of on mount",
+      "recurring": null,
+      "eli5": {
+        "what": "Each received payment has its own detail page. When a new payment arrives, Nulo shows a small 'Received ... View' notice. The detail page only loads its data the first time it is opened, so moving from one receipt to another reuses the page without reloading.",
+        "scenario": "A user is looking at the receipt for 5 USDC when a 20 USDC payment arrives. They tap 'View' on the notice. The page still shows 5 USDC and the first sender, even though they asked for the new one.",
+        "fix": "Reload the page's data whenever the receipt id in the address changes."
+      },
+      "trace": "composables/useArrivals.ts:106-108 announces arrivals on receipt pages; :365 → popup/app.vue:90 pushes /popup/received/B. popup/app.vue:485-487 renders <component :is> without a key, so the instance is reused. popup/pages/received/[id].vue:143-145 loads in onMounted only and nothing watches route.params.id.",
+      "fix": "Move the load into a function run from watch(() => route.params.id, load, {immediate: true}) with a latest-wins token, resetting received, loaded, feeJuiceRaw and deletedIds per id. Alternatively key this route's component by the param.",
+      "disagreement": null
+    },
+    {
+      "id": "B-09",
+      "title": "Moving the Local Network to another port marks it invalid and skips it in backups",
+      "level": "Minor",
+      "verified": true,
+      "confidence": "high",
+      "foundBy": "Claude + Codex",
+      "mapping": "wrong result, sibling asymmetry",
+      "effort": "hours — one argument plus a test",
+      "recurring": null,
+      "eli5": {
+        "what": "Nulo includes a 'Local Network' entry for developers running Aztec on their own computer. It checks each network's identity number to make sure it is talking to the right chain. Local networks get a special rule, but one of the two checking functions forgets it once the address has been edited.",
+        "scenario": "A developer changes Local Network from port 8080 to 18080. The status dot turns to 'invalid chain', and their next full backup silently leaves out that network's contracts and senders.",
+        "fix": "Pass the network type to the check, as the other checking function a few lines below already does."
+      },
+      "trace": "apps/extension/src/wallet/services/network/service.ts:734 calls _getChainId(primary.rpcUrl) with no kind hint, so after an edit the composite at :996-1010 is non-zero and :735 returns InvalidChain. probeNodeStatus applies the local carve-out at :751-753; updateEndpoint passes the hint at :600,647. Consumers: stores/app.store.ts:495-499 and wallet/services/account-state/service.ts:101,221-228.",
+      "fix": "Call _getChainId(primary.rpcUrl, network.kind) at :734, or share probeNodeStatus's effective-chain computation. Test: move Local Network to a custom port and assert both status methods report Active.",
+      "disagreement": null
+    },
+    {
+      "id": "B-10",
+      "title": "Token trust prompts appear on the lock screen and ignore the user's choice",
+      "level": "Minor",
+      "verified": true,
+      "confidence": "high",
+      "foundBy": "Claude + Codex",
+      "mapping": "state invariant violation, lost update",
+      "effort": "hours — gate the queue on login and reset replay on lock",
+      "recurring": "2026-08-16 B-26 family",
+      "eli5": {
+        "what": "When tokens arrive from a contract Nulo has not seen before, it asks 'trust this token?' one prompt at a time. When the wallet locks, it closes all prompts, but closing one makes the next one in line open, even on the lock screen. Decisions made there are refused, because the wallet is locked.",
+        "scenario": "A user has two new tokens waiting when auto-lock kicks in. The second prompt pops up over the password screen. They click Allow, nothing happens, and the prompt disappears. After unlocking, neither prompt comes back until they close and reopen Nulo.",
+        "fix": "Do not open trust prompts while locked, and ask again once the user unlocks."
+      },
+      "trace": "apps/extension/src/popup/locked-state.ts:19-27 closes popups without clearing the profile/network/account triple. PopupManager.vue:293-298 then calls dequeueNextPendingTrust (:76-101) with no login check. IncomingTrustPopup.vue:103-110 closes on the fence's false (incoming-transfer/service.ts:620-638). After unlock the queue is purged (:196-199) and the stale replayedForKey (:177-180) suppresses replay.",
+      "fix": "Gate ingress, dequeue and replay on appStore.isLogined; reset replayedForKey on lock or when the triple becomes incomplete; replay once the unlocked triple is ready. Do not keep false-result prompts open universally (false also means a deleted token, and it is a visible UI change).",
+      "disagreement": null
+    },
+    {
+      "id": "B-21",
+      "title": "Creating a profile can spin on 'Creating...' forever",
+      "level": "Minor",
+      "verified": false,
+      "confidence": "high",
+      "foundBy": "Codex",
+      "mapping": "bad error path (hang), sibling asymmetry",
+      "effort": "hours — swap a loop for an existing helper",
+      "recurring": null,
+      "eli5": {
+        "what": "After creating a new profile from the popup, Nulo waits for it to finish starting up before moving on. It waits with a loop that has no exit if start-up fails. The unlock screen already uses a smarter wait that gives up and shows an error.",
+        "scenario": "A user creates a second profile. During start-up the background part of the extension restarts. They see 'Something went wrong', but the button stays on 'Creating...' and nothing on the page responds until they close the popup.",
+        "fix": "Use the same bounded wait the unlock screen uses (awaitProfileActivation), and on failure reset the button and show the error."
+      },
+      "trace": "apps/extension/src/popup/pages/profile/new-profile-helpers.ts:25-27 loops while (!appStore.isLogined) await sleep(100). popup/app.vue:199-214 → popup/profile-bootstrap.ts:23-26 records bootstrapFailure, which nothing on this path reads. The latch is composables/useProfileCreateFlow.ts:103-104. The unlock path's composables/unlockWait.ts:32-60 is bounded and releases on bootstrapFailure.",
+      "fix": "Replace the loop with await awaitProfileActivation(appStore, profile.id, <bound>); on BootstrapFailedError or UnlockTimeoutError reset isCreating and surface the error.",
+      "disagreement": null
+    },
+    {
+      "id": "B-08",
+      "title": "A brief network hiccup at Confirm fails a send that a retry would have saved",
+      "level": "Minor",
+      "verified": true,
+      "confidence": "high",
+      "foundBy": "Claude + Codex",
+      "mapping": "bad error path, sibling asymmetry",
+      "effort": "hours — one try/catch plus a test",
+      "recurring": null,
+      "eli5": {
+        "what": "To make Confirm fast, Nulo reuses the transaction it prepared while showing the fee. Before reusing it, it re-reads the current network fee. If that read fails for a moment, Nulo gives up on the whole send instead of just rebuilding the transaction from scratch, which its twin for simple transfers already does.",
+        "scenario": "A user confirms a dApp transaction just as the node briefly answers 'block not found'. The send fails after the approval window has closed, even though trying again a second later would have worked.",
+        "fix": "Treat a failed fee re-read as 'cannot reuse' and rebuild, as the transfer version already does."
+      },
+      "trace": "apps/extension/src/wallet/services/execution/operation-estimate-reuse.ts:129 consumes the entry, then :159-161 awaits predictedWorstMinFees with no catch (it deliberately rethrows transient errors, packages/aztec-runtime/src/fee-juice.ts:25-32). The throw escapes dapp-send-executor.ts:794 and skips the rebuild at :833. The twin transfer-estimate-reuse.ts:196-210 catches and rejects softly.",
+      "fix": "Wrap only operation-estimate-reuse.ts:159-166 in try/catch returning this.reject(...). Keep SessionEndedError (:139) and getNetwork/getNode failures as throws.",
+      "disagreement": null
+    },
+    {
+      "id": "B-11",
+      "title": "Locking while the popup starts shows 'startup failed' instead of the unlock form",
+      "level": "Minor",
+      "verified": false,
+      "confidence": "high",
+      "foundBy": "Codex",
+      "mapping": "race, bad error path",
+      "effort": "hours — extend an existing check to one more outcome",
+      "recurring": "2026-08-22 N-08 family",
+      "eli5": {
+        "what": "When the popup opens, it spends about a second loading the active profile. If the wallet locks during that second, the loading step fails because the wallet is locked, and Nulo mistakes that for a real start-up failure.",
+        "scenario": "A user opens Nulo right as auto-lock fires. Instead of the password box, they see a 'startup failed' banner and have to press Retry before they can unlock.",
+        "fix": "Apply the check that already recognises 'a lock happened in the meantime' to failed start-ups too."
+      },
+      "trace": "apps/extension/src/popup/app.vue:311-324 → popup/boot-session.ts:57-60 maps a 'Wallet locked' rejection to failed. popup/reconcile-locked-boot.ts:39-40 checks the event-seq fence only for locked results, so popup/apply-boot-outcome.ts:42-44 installs bootOutcome = failed and popup/pages/auth.vue:63,248 hides the form.",
+      "fix": "Apply the event-seq supersession check to failed outcomes in reconcile-locked-boot.ts, settling retry bookkeeping as the event-superseded branch does.",
+      "disagreement": null
+    },
+    {
+      "id": "B-13",
+      "title": "Leaving the recovery-phrase page early causes a surprise jump five minutes later",
+      "level": "Minor",
+      "verified": false,
+      "confidence": "high",
+      "foundBy": "Codex",
+      "mapping": "resource leak, wrong navigation",
+      "effort": "hours — one unmount check",
+      "recurring": null,
+      "eli5": {
+        "what": "The page that reveals the recovery phrase starts a 5 minute countdown and then sends the user back to the export menu. If the user leaves before the phrase has finished loading, the countdown still starts after they have gone.",
+        "scenario": "A user taps 'Retrieve Recovery Phrase', changes their mind and taps back within a second. Five minutes later, while they are in the Send screen, Nulo suddenly jumps to the export settings page.",
+        "fix": "Ignore the result if the page has already closed, as the full-backup page already does."
+      },
+      "trace": "apps/extension/src/popup/pages/settings/security/export/seed.vue:59 awaits exportMnemonic; unmount at :79 disposes the countdown (composables/useSecretCountdown.ts:50); the continuation calls countdown.start() at seed.vue:63, arming timers (useSecretCountdown.ts:29) that fire handleClose at seed.vue:46. full.vue has the fence at :276,416.",
+      "fix": "Add an unmount-generation check after the RPC in handleUnlock and make useSecretCountdown.start() a no-op after dispose.",
+      "disagreement": null
+    },
+    {
+      "id": "B-04",
+      "title": "Locking at the wrong moment can leave a received amount out of the balance",
+      "level": "Minor",
+      "verified": true,
+      "confidence": "high",
+      "foundBy": "Codex",
+      "mapping": "lost update, race",
+      "effort": "hours — one retryable result instead of 'missing'",
+      "recurring": "2026-08-22 N-10 family",
+      "eli5": {
+        "what": "When a payment arrives, Nulo writes a note to itself saying 'refresh this balance'. A background step reads the note, asks for the refresh, and deletes the note. Locking the wallet empties the list of known tokens for a moment, so if the lock lands during that step, Nulo thinks the token is gone and throws away the note without refreshing.",
+        "scenario": "A user receives 50 USDC, and auto-lock fires at the exact moment Nulo is about to refresh. After unlocking, the balance still shows the old amount until they open that token's page, use Refresh, or send something.",
+        "fix": "When the token list is empty because of a lock or profile switch, answer 'try again later' instead of 'this token is gone', so the note is kept."
+      },
+      "trace": "apps/extension/src/wallet/services/incoming-transfer/service.ts:2230 captures the profile once. token-balance/service.ts:455,461 clears tokens synchronously on a lock, so requestBalanceRefresh (:238-247) returns {missing:true}. isCurrent() is a lock-handoff ticket, not a profile epoch, so the row is deleted at incoming-transfer/service.ts:2274. Unlock only refreshes balances at least 30 min old (utils/core.ts:148-167).",
+      "fix": "Make requestBalanceRefresh return a retryable result (or throw, which requestRefreshOrKeep already keeps) when this.profile is unset or the map is mid-rebuild, capturing profileGeneration. Optionally re-check the active profile before the delete.",
+      "disagreement": "Codex: Major (unlock does not heal it). Claude: Minor (millisecond window, self-heals). Settled at Minor: the trigger is a millisecond coincidence and it heals on token page open, Refresh or the next tx."
+    },
+    {
+      "id": "B-06",
+      "title": "Switching profiles during a send can leave the sent transaction out of history",
+      "level": "Minor",
+      "verified": true,
+      "confidence": "high",
+      "foundBy": "Claude + Codex",
+      "mapping": "bad error path, lost update, sibling asymmetry",
+      "effort": "hours — three one-line guards",
+      "recurring": "2026-08-22 N-16 pattern",
+      "eli5": {
+        "what": "Nulo tracks each send as a 'task' so the popup can show progress. Switching to a different profile wipes the task list. If the switch lands while a send is being transmitted, updating the wiped task throws an error, and Nulo skips writing the transaction into the activity history.",
+        "scenario": "A user sends tokens from profile A, and at that same moment finishes creating profile B in another Nulo window. The tokens are sent and the balance is right, but the transaction never appears in profile A's activity list.",
+        "fix": "Make task updates quietly do nothing when the task is gone, using the same existence check the transaction watcher already uses."
+      },
+      "trace": "apps/extension/src/wallet/services/task/service.ts:241 clears tasks on a switch; :177-181 then throws 'Invalid task id'. In execution-coordinator.ts, task.complete() at :303 throws after node.sendTx (:302), task.fail() at :309 throws again, and recordTransaction at :355 is skipped. The dApp sees nothing: sessions are terminated (wallet-sdk/profile-switch-teardown.ts:121-145) and late responses suppressed (wallet-sdk/background.ts:1235-1246).",
+      "fix": "In apps/extension/src/wallet/services/task/wrapped-task.ts make complete/fail/cancel no-ops when !this.exists (the idiom at transaction/service.ts:250). Keep start/startSubtask and TaskService's strict APIs throwing.",
+      "disagreement": "Codex: Major (a broadcast tx goes unrecorded, no lock needed). Claude: Minor. Settled at Minor with Codex's corrections adopted: the dApp never sees the error, and the window is one send RPC."
+    },
+    {
+      "id": "B-16",
+      "title": "Approving a dApp permission after the connection expired says 'granted' anyway",
+      "level": "Minor",
+      "verified": false,
+      "confidence": "high",
+      "foundBy": "Codex",
+      "mapping": "wrong result",
+      "effort": "hours — one expiry check",
+      "recurring": null,
+      "eli5": {
+        "what": "A dApp connection lasts for a limited time. If a dApp asks for an extra permission (like reading the address book) just before the connection runs out, and the user approves just after, Nulo saves the permission and tells the dApp 'granted' even though the connection is already dead.",
+        "scenario": "A user leaves a dApp's permission request open over the expiry moment and then approves. The dApp is told it can read the address book, then its very next request fails because the connection expired.",
+        "fix": "Check whether the connection has expired before saving the permission."
+      },
+      "trace": "packages/wallet-bridge/src/dispatcher.ts:1355-1371 → apps/extension/src/wallet/services/dapp-interaction/service.ts:228,435 → dapp-session/service.ts:343 (applyCapabilityDecision checks row existence only) and :380 persists; the next call finds it expired at :164,399.",
+      "fix": "Check expiry inside applyCapabilityDecision's existing lock before mutating, without calling the lock-taking isExpired().",
+      "disagreement": null
+    },
+    {
+      "id": "B-12",
+      "title": "Deleting a profile or network during an account import or rename leaves orphan rows",
+      "level": "Minor",
+      "verified": false,
+      "confidence": "high",
+      "foundBy": "Claude + Codex",
+      "mapping": "race, state invariant violation (orphan rows), sibling asymmetry",
+      "effort": "hours — reuse the deletion fence the create path has",
+      "recurring": "2026-08-22 N-03 family",
+      "eli5": {
+        "what": "Importing an account takes about a second of key encryption. Deleting a profile is supposed to erase everything in it. Creating an account already checks 'is this profile being deleted?' before saving, but importing does not. A similar gap lets a rename bring back an account that a network deletion just removed.",
+        "scenario": "In one window a user imports an account into profile P; in another they delete P at the same moment. The import still saves an encrypted key and account row for a profile that no longer exists. Or: renaming an imported account while deleting its network brings the account back, and after re-adding the network it shows up but cannot sign.",
+        "fix": "Use the deletion check that account creation already uses, and lock rows during network deletion the same way edits do."
+      },
+      "trace": "apps/extension/src/wallet/services/account/service.ts:469-519: importAccount awaits key encryption at :493 with no lock or deletion epoch, then writes at :499 and :513, while profile deletion runs at profile/service.ts:1486,1512. createAccountInternal has the fence at :249-284. patchAccountField (:320-327) writes back a row that clearChainState deleted without the row lock (:154-156, via network/service.ts:538).",
+      "fix": "(a) deletion.capture(profileId) before the first await, assertCurrent inside the tuple lock before both writes, committed together. (b) take the per-row lock in clearChainState/purgeForProfile, or re-read inside the lock in patchAccountField and treat a missing row as gone.",
+      "disagreement": null
+    },
+    {
+      "id": "B-17",
+      "title": "Stale popup callbacks can select an account under the wrong profile",
+      "level": "Minor",
+      "verified": false,
+      "confidence": "moderate",
+      "foundBy": "Codex",
+      "mapping": "race, state invariant violation, sibling asymmetry",
+      "effort": "hours — add the epoch check its sibling already has",
+      "recurring": "2026-08-22 N-08 family",
+      "eli5": {
+        "what": "Some popup actions start, wait for the background, and then finish. If another Nulo window switches profiles during that wait, the first window finishes its old action on the new profile. One sibling action already checks for this; the others do not.",
+        "scenario": "In profile A a user picks account A2. Meanwhile another window locks and unlocks profile B. The first window's pick lands afterwards and saves A2 as the chosen account for profile B, so B briefly shows the wrong account.",
+        "fix": "Check 'is this still the same profile and network?' before finishing, as commitAccountTarget already does."
+      },
+      "trace": "(a) apps/extension/src/popup/pages/auth.vue:200-209 assigns the remembered profile after awaiting getProfiles(); popup/route-guard.ts:47-52 checks !appStore.profile only before its awaits. (b) popup/components/popups/AccountsPopup.vue:37 → stores/app.store.ts:252-258,295 (commitScopeChange) → :376-380 runs the captured selectAccount after the refresh; commitAccountTarget checks superseded() at :439.",
+      "fix": "Drop the redundant preference assignment in auth.vue (boot owns it), fence lateDecision across its awaits, and give commitScopeChange a captured scope epoch checked before invoking the callback.",
+      "disagreement": null
+    },
+    {
+      "id": "B-15",
+      "title": "Changing a custom fee sponsor's address can undo a rename or bring back a deleted one",
+      "level": "Minor",
+      "verified": false,
+      "confidence": "high",
+      "foundBy": "Codex",
+      "mapping": "lost update, race",
+      "effort": "hours — re-read the row inside the lock",
+      "recurring": null,
+      "eli5": {
+        "what": "An FPC is a fee sponsor, a contract that pays network fees for you. When the user changes a custom FPC's address, Nulo copies the old entry, spends a moment checking the new address, then saves the copy. Changes made in another window during that moment are overwritten.",
+        "scenario": "A user edits a custom FPC's address in one window and renames it in another. The rename silently reverts to the old name. If they deleted it instead, it comes back.",
+        "fix": "Re-read the current entry just before saving, reject if it was deleted, and change only the address."
+      },
+      "trace": "apps/extension/src/popup/components/popups/EditFpcPopup.vue:118 → apps/extension/src/wallet/services/fpc/service.ts:330 snapshots the row, :350-364 awaits PXE validation, :375-377 upserts {...existing, address} from the stale snapshot. updateFpc and deleteFpc re-read inside the lock.",
+      "fix": "Re-read the row inside the final lock in updateFpcAddress, reject if missing, and merge only address.",
+      "disagreement": null
+    },
+    {
+      "id": "B-19",
+      "title": "Picking a second backup file quickly can reset a restore in progress",
+      "level": "Minor",
+      "verified": false,
+      "confidence": "high",
+      "foundBy": "Codex",
+      "mapping": "race",
+      "effort": "hours — a pick-generation token",
+      "recurring": null,
+      "eli5": {
+        "what": "When restoring from a backup, Nulo reads the chosen file in the background. If the user picks a different file before the first one is read, the late result from the first file can overwrite the second choice.",
+        "scenario": "A user picks the wrong backup, immediately picks the right one, types its password and starts the restore. The first file's late read then swaps the selection back and clears the password boxes while the restore is running. This needs everything to happen within a few milliseconds, so it is rare.",
+        "fix": "Ignore results from any file that is no longer the latest pick, and block picking while a file is being read."
+      },
+      "trace": "apps/extension/src/components/composite/import/ImportFullBackupForm.vue:58,64 → apps/extension/src/composables/useFullBackupImport.ts:621-624,636-637,659-662 publish the read result with no generation check, resetting restoreStatus and reopening the re-entry guard at :717.",
+      "fix": "Add a pick-generation token checked after each await and before every publication in useFullBackupImport.ts; disable picking and submitting while a read is pending.",
+      "disagreement": null
+    },
+    {
+      "id": "B-14",
+      "title": "A failed settings save can look successful, and can leave hidden debug logging on",
+      "level": "Minor",
+      "verified": false,
+      "confidence": "high",
+      "foundBy": "Codex",
+      "mapping": "wrong result, state invariant violation",
+      "effort": "hours — save first, then update memory",
+      "recurring": null,
+      "eli5": {
+        "what": "When the user changes a setting, Nulo updates it in memory first and saves to disk second. If the save fails, trying again with the same value looks like 'nothing changed' and reports success without saving. Turning Developer Mode off also turns Debug Mode off in a second save that nobody waits for.",
+        "scenario": "A user switches to dark theme during a moment when browser storage refuses writes. It looks applied, but after the browser restarts it is back to light. Or they turn off Developer Mode, the second save fails, and after a restart the wallet keeps detailed debug logs with the Debug Mode switch hidden.",
+        "fix": "Save to disk first and only then update memory, and save the Developer Mode group of switches together in one write."
+      },
+      "trace": "(a) apps/extension/src/wallet/services/config/service.ts:50-51 → wallet/config/store.ts:61-66 (and apply() :93-98) mutate and emit before storage.set; a same-value retry hits the equality shortcut at :61. (b) popup/pages/settings/advanced/index.vue:108-127 fires updateSetting('debugMode', false) un-awaited; wallet/logger/store.ts:27 reads it after restart.",
+      "fix": "In ConfigStore.set/apply, persist a staged copy, then swap memory and emit. In the popup, await the cascade or write {developerMode, indicateFailures, debugMode} in one setValues call.",
+      "disagreement": null
+    },
+    {
+      "id": "B-18",
+      "title": "A failed history save can leave a transaction stuck as 'Pending'",
+      "level": "Minor",
+      "verified": false,
+      "confidence": "high",
+      "foundBy": "Codex",
+      "mapping": "state invariant violation",
+      "effort": "hours — build, save, then swap",
+      "recurring": null,
+      "eli5": {
+        "what": "Nulo regularly checks whether sent transactions have been confirmed. When the status changes, it updates its in-memory copy before saving. If that one save fails, every later check sees 'no change' and never tries to save again.",
+        "scenario": "A user's transaction is dropped by the network at the moment browser storage has a hiccup. The activity list keeps saying 'Pending' until the browser or extension restarts.",
+        "fix": "Build the new status, save it, and only then update memory."
+      },
+      "trace": "apps/extension/src/wallet/services/transaction/service.ts:375 → :478-479 sets tx.status on the object in the pending map → :486 txs.set rejects → every later poll returns early at :463 because the status already matches.",
+      "fix": "In updateTx, build a next-state object, persist it, then swap the pending and watch maps and emit.",
+      "disagreement": null
+    },
+    {
+      "id": "B-20",
+      "title": "A failed storage read can bring back tokens the user deleted",
+      "level": "Minor",
+      "verified": false,
+      "confidence": "low",
+      "foundBy": "Codex",
+      "mapping": "silent corruption (conditional)",
+      "effort": "hours — separate read errors from bad data",
+      "recurring": null,
+      "eli5": {
+        "what": "Nulo pre-installs some common tokens and keeps a list of which ones the user deleted, so they are not added back. If reading that list fails once, Nulo treats it as empty and saves it back, wiping the record of earlier deletions.",
+        "scenario": "A user long ago deleted 'Clean USDC'. Today they delete 'USD Coin' while browser storage briefly fails a read. The next time Nulo sets up default tokens, Clean USDC is back.",
+        "fix": "If the list cannot be read, stop instead of saving an empty list; only reset it when the stored data is actually malformed."
+      },
+      "trace": "apps/extension/src/wallet/services/token/service.ts:604 → token/seeder.ts:301,337 (updateMarker) → :683-686 readMarkerState swallows a read error as {} → :342 writes the whole blob back with only the new tombstone.",
+      "fix": "Let updateMarker, retry and commitSeedResult see read errors from readMarkerState; keep the reset-to-empty only for malformed shape.",
+      "disagreement": "Claude: a defensible trade-off. Coordinator kept it at Minor/low: the doc justifies not throwing on bad shape, not overwriting after a read error."
+    }
+  ],
+  "crossCutting": [
+    {
+      "title": "Checking 'same profile?' before saving",
+      "body": "The most common family of bugs: a piece of code notes which profile or item it is working on, waits for something slow, and then saves without checking whether the user switched profiles or changed that item in the meantime (B-04, B-05, B-12, B-15, B-17). Nulo already protects against the page being closed during the wait, but not against the profile changing underneath it. One shared helper that checks 'is this still the same activation?' right before every save would close these at once. It must compare an activation counter, not just a profile id, because switching A to B and back to A would fool an id check."
+    },
+    {
+      "title": "Fix the twin, not just the bug",
+      "body": "Seven bugs are a safety check that exists on one of two sibling functions and is missing on the other: send and simulate versus profile (B-03), two network status checks (B-09), two estimate caches (B-08), account create versus import (B-12), two popup commit helpers (B-17), the transaction watcher versus task updates (B-06), and unlock versus profile creation (B-21). These are the cheapest bugs to fix and the cheapest to prevent: whenever a fix lands, search for its twin in the same change."
+    },
+    {
+      "title": "Save first, then update memory",
+      "body": "Two bugs change the in-memory value before saving it to disk and then skip saving when the value 'has not changed' (B-14, B-18). One failed save becomes permanent until a restart. The safe order is: prepare the new value, save it, and only then update memory and tell listeners."
+    },
+    {
+      "title": "Screens that read their data only once",
+      "body": "The popup reuses page and list components when only part of the address or list changes. Components that load their data only when first shown then display stale data (B-22, B-23, and the same shape on the transaction detail page). Loading from the current address or props whenever they change, and giving list rows stable identities, fixes the whole family."
+    },
+    {
+      "title": "Timers that must agree",
+      "body": "Several features have two timers that must fit together. The authwit preview lasts 2 minutes while the approval lasts 10 and the dApp call 5 (B-02), and B-01's new confirmation wait must also fit inside those 5 minutes. When one timer is set, the other side should be checked in the same change."
+    }
+  ],
+  "notPursued": [
+    "The 'too many pending requests' error code never reaches dApps: deliberate and pinned by a test; the docs that promise it should be corrected instead.",
+    "The approval window's 10 minute timeout: the dApp's own 5 minute limit always fires first, so it never matters.",
+    "Imported notes with negative or hex amounts: amounts always come from a valid 128-bit number, so this cannot happen.",
+    "Switching to a network with no main endpoint: nothing in normal use creates such a network, and the next call fails loudly.",
+    "Duplicate balance rows on the home screen: the event that could duplicate them carries zero balances, so totals are unaffected.",
+    "Backup filename with slashes in the profile name: every way to set a name already strips them.",
+    "Error types lose their class when crossing to the popup: nothing checks the class there, and the messages survive.",
+    "Log viewer quirks (never pruning, a leaked timer, listeners after close): Developer-Mode-only window whose page is thrown away when closed; no wrong data.",
+    "Renaming a profile that is half-deleted: already pinned as known, and such a profile is hidden everywhere in the UI.",
+    "Event listeners skipped when one removes itself mid-dispatch: the only place this happens has a single listener, so nothing is skipped today.",
+    "Onboarding briefly uses the system theme: a one-frame colour flash on the next popup open, cosmetic only.",
+    "Stale entry in the third-party notices during watch builds: only a developer watch mode is affected; shipped builds start clean."
+  ]
+}
