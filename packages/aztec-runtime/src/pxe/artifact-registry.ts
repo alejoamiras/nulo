@@ -7,40 +7,15 @@ import { LogLevel } from "@nulo/wallet-core/logger"
 import { type ArtifactClassIdVerifier, type ClassIdVerifyLogger, DefaultArtifactClassIdVerifier } from "./artifact-class-id"
 import type { KnownArtifacts, KnownArtifactsLoader } from "./known-artifacts"
 
-/**
- * Minimal structural shape for the network-info argument; declared inline
- * so this file stays decoupled from the extension types.
- */
-export interface ArtifactNetworkContext {
-	/** CAIP-like chain identifier; kept on the API for future per-chain
-	 *  policy hooks even though the current resolver doesn't read it. */
-	chainId: number
-}
-
 export type ArtifactSource = "pxe-local" | "known"
 
-/** Resolution policy. Callers get the sensible default via
- *  `defaultPolicy()`. Pinning goes via `byClassId`. */
-export type ArtifactPolicy = {
-	/** Resolution order. Default: `["pxe-local", "known"]`. */
-	order: ArtifactSource[]
-	/** Per-class pin. If `byClassId[classId]` is set, resolution SKIPS
-	 *  all sources except the named one. Use "known" to force the
-	 *  compiled-in version for a protocol contract. */
-	byClassId?: Record<string, ArtifactSource>
-}
-
-export function defaultPolicy(): ArtifactPolicy {
-	return { order: ["pxe-local", "known"] }
-}
+const RESOLUTION_ORDER: readonly ArtifactSource[] = ["pxe-local", "known"]
 
 /**
- * Artifact resolution with explicit policy + pinning.
+ * Artifact resolution: this PXE first, then the compiled-in bundle.
  *
  * Holds the compiled-in "known" artifacts + the SponsoredFPC instance,
- * loaded lazily via the injected `KnownArtifactsLoader`. Resolution
- * walks the policy order; a `byClassId` pin overrides the order for a
- * specific class.
+ * loaded lazily via the injected `KnownArtifactsLoader`.
  *
  * Resolution sources are bounded to what the wallet ships with or has
  * already registered for this profile — `pxe-local` (already in this
@@ -52,20 +27,16 @@ export class ArtifactRegistry {
 	private known: KnownArtifacts | null = null
 	// `known` stays the synchronous resolved-value store (read directly by
 	// getKnownInstance and friends); the memo only guards the one-shot load.
-	// Pre-existing and unchanged: an old still-in-flight loader that SUCCEEDS
-	// after a concurrent clear() repopulates `known` — the memo's identity
-	// guard covers rejections only.
 	private readonly knownMemo = memoizeAsync<void>(() =>
 		this.loader().then((known) => {
 			this.known = known
 		}),
 	)
-	private policy: ArtifactPolicy
 	/**
 	 * Cache of class-ids whose artifact has been recomputed and verified
 	 * at least once during the current registry lifetime. Skips the
 	 * ~10–50ms Poseidon recompute for repeat resolves of the same
-	 * artifact. `clear()` empties this cache too.
+	 * artifact.
 	 *
 	 * Cache key: `Fr.toString()` of the verified class-id.
 	 */
@@ -87,20 +58,9 @@ export class ArtifactRegistry {
 			verifier?: ArtifactClassIdVerifier
 		},
 	) {
-		this.policy = defaultPolicy()
 		this.verifier = opts?.verifier ?? new DefaultArtifactClassIdVerifier()
 		this.logger = opts?.logger
 		this.logSource = opts?.logSource ?? "artifact-registry"
-	}
-
-	/** Apply a new policy. Callers should only use this for per-class
-	 *  pinning or custom orders. */
-	public setPolicy(policy: ArtifactPolicy): void {
-		this.policy = policy
-	}
-
-	public getPolicy(): ArtifactPolicy {
-		return this.policy
 	}
 
 	/** Lazy-load the compiled-in known artifacts + instances. First
@@ -115,28 +75,9 @@ export class ArtifactRegistry {
 		return this.known?.instances.get(address)
 	}
 
-	/** True if `classId` is in the compiled-in `known` bundle. Loads the
-	 *  bundle lazily on first call. Used by callers that need to decide
-	 *  whether the wallet can resolve an artifact without help (e.g.
-	 *  `aztec_registerContract` smart-tighten check). */
-	public async hasKnownClassId(classId: Fr): Promise<boolean> {
-		await this.ensureKnown()
-		return this.known?.artifacts.has(classId.toString()) ?? false
-	}
-
-	/** Drop everything loaded. Called during onProfileDeleted so a
-	 *  stale class-id set doesn't linger if contracts change
-	 *  between profiles. */
-	public clear(): void {
-		this.known = null
-		this.knownMemo.reset()
-		this.verifiedClassIds.clear()
-	}
-
-	/** Resolve an artifact by class id using the policy order. The
-	 *  `pxeLookup` callback is invoked exactly once if "pxe-local"
-	 *  appears in the order — callers pass the chain's PXE so the
-	 *  registry stays PXE-agnostic.
+	/** Resolve an artifact by class id: "pxe-local", then "known" unless
+	 *  `pxeOnly`. The `pxeLookup` callback is invoked exactly once —
+	 *  callers pass the chain's PXE so the registry stays PXE-agnostic.
 	 *
 	 *  ## Trust enforcement
 	 *
@@ -155,18 +96,15 @@ export class ArtifactRegistry {
 	 *    be the same Poseidon hash twice.
 	 *
 	 *  Cache: `verifiedClassIds: Set<string>` skips repeat recomputes
-	 *  for the same `(classId, artifact)` pair. Cleared by `clear()`. */
+	 *  for the same `(classId, artifact)` pair. */
 	public async resolve(
 		classId: Fr,
 		pxeLookup: (id: Fr) => Promise<ContractArtifact | undefined>,
-		_network: ArtifactNetworkContext,
 		opts?: { pxeOnly?: boolean },
 	): Promise<ContractArtifact | undefined> {
-		const pin = this.policy.byClassId?.[classId.toString()]
-		const order = pin ? [pin] : this.policy.order
 		const pxeOnly = opts?.pxeOnly === true
 
-		for (const source of order) {
+		for (const source of RESOLUTION_ORDER) {
 			if (pxeOnly && source !== "pxe-local") continue
 			const found = await this.resolveFromSource(source, classId, pxeLookup)
 			if (found) return found
@@ -175,7 +113,7 @@ export class ArtifactRegistry {
 	}
 
 	private async resolveFromSource(
-		source: "pxe-local" | "known",
+		source: ArtifactSource,
 		classId: Fr,
 		pxeLookup: (id: Fr) => Promise<ContractArtifact | undefined>,
 	): Promise<ContractArtifact | undefined> {

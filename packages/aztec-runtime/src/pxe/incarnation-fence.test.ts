@@ -24,8 +24,6 @@ const noopLogger: ILogger = { log: () => {} }
 const noopProfiles: IProfileReader = {
 	connect: async () => {},
 	getProfiles: async () => [],
-	onProfileDeleted: { add: () => {} },
-	onActiveProfileChanged: { add: () => {} },
 }
 
 const KEY_B64 = btoa(String.fromCharCode(...new Uint8Array(32)))

@@ -69,8 +69,6 @@ export * from "./spec"
 export interface IProfileReader {
 	connect(): Promise<void>
 	getProfiles(): Promise<Array<{ id: string }>>
-	onProfileDeleted: { add(handler: (profile: { id: string }) => void): void }
-	onActiveProfileChanged: { add(handler: (profile: unknown) => void): void }
 }
 
 export class PxeService extends Service<Methods, PxeEvents> implements ServiceSpec<Methods, PxeEvents> {
@@ -218,7 +216,8 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 		// `onProfileDeleted` subscriber (it raced the cascade + unconditionally
 		// deleted the shared keyval-store = cross-profile corruption, finding D).
 		// The deletion coordinator now calls the awaited `clearProfileState`.
-		this.profiles.onActiveProfileChanged.add(this.onActiveProfileChanged)
+		// Runtimes deliberately survive a profile switch, so an in-flight prove on the prior
+		// profile finishes and journals its result; they go on profile delete or chain purge.
 		await this.profiles.connect()
 	}
 
@@ -368,7 +367,7 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 	public async getContractArtifact(network: NetworkInfo, id: Fr, opts?: { pxeOnly?: boolean }): Promise<ContractArtifact | undefined> {
 		id = await Fr.schema.parseAsync(id)
 		return this.withPxeRead("getContractArtifact", network, async (pxe) => {
-			return this.artifacts.resolve(id, (classId) => pxe.getContractArtifact(classId), network, opts)
+			return this.artifacts.resolve(id, (classId) => pxe.getContractArtifact(classId), opts)
 		})
 	}
 
@@ -1017,15 +1016,5 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 			this.logOpFailure("WRITE", label, start, err)
 			throw err
 		}
-	}
-
-	private readonly onActiveProfileChanged = async (): Promise<void> => {
-		// Phase 2 Week 3 deliberately drops the pre-W3 behavior of clearing
-		// all runtimes on profile switch. The durable-jobs design requires
-		// the prior profile's PXE to keep running so an in-flight prove
-		// finishes and journals its result; clearing here would abort that
-		// work and surface as a `failed` job to the user. Other profiles'
-		// PXEs stay warm until profile delete (or chain purge); memory
-		// bounds are a Week 4 concern.
 	}
 }

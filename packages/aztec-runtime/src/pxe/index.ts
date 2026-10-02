@@ -11,7 +11,7 @@ export {
 } from "./chain-runtime"
 export { createProvePhaseSink, type ProvePhaseSink } from "./prove-phase-sink"
 export { type KnownArtifacts, type KnownArtifactsLoader, loadProductionKnownArtifacts } from "./known-artifacts"
-export { ArtifactRegistry, defaultPolicy, type ArtifactPolicy, type ArtifactSource } from "./artifact-registry"
+export { ArtifactRegistry, type ArtifactSource } from "./artifact-registry"
 export {
 	loadProductionNoteSchemas,
 	canonicalSlotHex,

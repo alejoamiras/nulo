@@ -1,8 +1,7 @@
 import { describe, test, expect, vi } from "vitest"
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
-import type { NetworkInfo } from "@nulo/aztec-runtime/pxe"
-import { ArtifactRegistry, defaultPolicy } from "@nulo/aztec-runtime/pxe"
+import { ArtifactRegistry } from "@nulo/aztec-runtime/pxe"
 import type { ArtifactClassIdVerifier, KnownArtifactsLoader } from "@nulo/aztec-runtime/pxe"
 
 const emptyLoader: KnownArtifactsLoader = async () => ({ artifacts: new Map(), instances: new Map() })
@@ -40,14 +39,12 @@ const makeRecordingVerifier = () => {
 	return { verifier, calls }
 }
 
-const makeNetwork = (chainId: number): NetworkInfo => ({ profileId: "p1", chainId, rpcUrl: "https://rpc" })
-
 describe("ArtifactRegistry.resolve", () => {
 	test("default order: pxe-local → known, first hit wins", async () => {
 		const reg = new ArtifactRegistry(emptyLoader, { verifier: passthroughVerifier })
 		const pxeLookup = vi.fn().mockResolvedValue(makeArtifact("pxe-hit"))
 		const classId = new Fr(42)
-		const got = await reg.resolve(classId, pxeLookup, makeNetwork(1))
+		const got = await reg.resolve(classId, pxeLookup)
 		expect((got as { name: string }).name).toBe("pxe-hit")
 		expect(pxeLookup).toHaveBeenCalledTimes(1)
 	})
@@ -60,7 +57,7 @@ describe("ArtifactRegistry.resolve", () => {
 		})
 		const reg = new ArtifactRegistry(loader, { verifier: passthroughVerifier })
 		const pxeLookup = vi.fn().mockResolvedValue(undefined)
-		const got = await reg.resolve(new Fr(1), pxeLookup, makeNetwork(1), { pxeOnly: true })
+		const got = await reg.resolve(new Fr(1), pxeLookup, { pxeOnly: true })
 		// known has it, but pxeOnly forced the registry to skip the known branch.
 		expect(got).toBeUndefined()
 		expect(pxeLookup).toHaveBeenCalledTimes(1)
@@ -73,7 +70,7 @@ describe("ArtifactRegistry.resolve", () => {
 		// the caller throws a tightening error.
 		const reg = new ArtifactRegistry(emptyLoader, { verifier: passthroughVerifier })
 		const pxeLookup = vi.fn().mockResolvedValue(undefined)
-		const got = await reg.resolve(new Fr(99), pxeLookup, makeNetwork(1))
+		const got = await reg.resolve(new Fr(99), pxeLookup)
 		expect(got).toBeUndefined()
 		expect(pxeLookup).toHaveBeenCalledTimes(1)
 	})
@@ -89,56 +86,8 @@ describe("ArtifactRegistry.resolve", () => {
 		})
 		const reg = new ArtifactRegistry(loader, { verifier: passthroughVerifier })
 		const pxeLookup = vi.fn().mockResolvedValue(undefined)
-		const got = await reg.resolve(classId, pxeLookup, makeNetwork(1))
+		const got = await reg.resolve(classId, pxeLookup)
 		expect(got).toBe(knownArtifact)
-	})
-
-	test("byClassId pin bypasses order", async () => {
-		const classId = new Fr(7)
-		const knownArtifact = makeArtifact("known-hit")
-		const loader: KnownArtifactsLoader = async () => ({
-			artifacts: new Map([[classId.toString(), knownArtifact]]),
-			instances: new Map(),
-		})
-		const reg = new ArtifactRegistry(loader, { verifier: passthroughVerifier })
-		reg.setPolicy({
-			...defaultPolicy(),
-			byClassId: { [classId.toString()]: "known" },
-		})
-		const pxeLookup = vi.fn().mockResolvedValue(makeArtifact("pxe-hit"))
-		const got = await reg.resolve(classId, pxeLookup, makeNetwork(1))
-		// pxe-local would win normally, but pin forces known
-		expect(got).toBe(knownArtifact)
-		expect(pxeLookup).not.toHaveBeenCalled()
-	})
-
-	test("custom order is respected", async () => {
-		const classId = new Fr(1)
-		const knownArtifact = makeArtifact("from-known")
-		const loader: KnownArtifactsLoader = async () => ({
-			artifacts: new Map([[classId.toString(), knownArtifact]]),
-			instances: new Map(),
-		})
-		const reg = new ArtifactRegistry(loader, { verifier: passthroughVerifier })
-		reg.setPolicy({ order: ["known", "pxe-local"] })
-		const pxeLookup = vi.fn().mockResolvedValue(makeArtifact("from-pxe"))
-		const got = await reg.resolve(classId, pxeLookup, makeNetwork(1))
-		expect(got).toBe(knownArtifact)
-		expect(pxeLookup).not.toHaveBeenCalled()
-	})
-
-	test("clear() resets known-init state so ensureKnown reloads", async () => {
-		let loadCount = 0
-		const loader = async () => {
-			loadCount++
-			return { artifacts: new Map(), instances: new Map() }
-		}
-		const reg = new ArtifactRegistry(loader, { verifier: passthroughVerifier })
-		await reg.ensureKnown()
-		expect(loadCount).toBe(1)
-		reg.clear()
-		await reg.ensureKnown()
-		expect(loadCount).toBe(2)
 	})
 
 	test("ensureKnown dedupes concurrent calls", async () => {
@@ -168,51 +117,6 @@ describe("ArtifactRegistry.resolve", () => {
 	})
 })
 
-describe("ArtifactRegistry.hasKnownClassId — smart-tighten support", () => {
-	test("returns true for class-id in the bundle", async () => {
-		const classId = new Fr(1234)
-		const loader: KnownArtifactsLoader = async () => ({
-			artifacts: new Map([[classId.toString(), makeArtifact("bundled")]]),
-			instances: new Map(),
-		})
-		const reg = new ArtifactRegistry(loader, { verifier: passthroughVerifier })
-		expect(await reg.hasKnownClassId(classId)).toBe(true)
-	})
-
-	test("returns false for class-id not in the bundle", async () => {
-		const known = new Fr(1)
-		const unknown = new Fr(2)
-		const loader: KnownArtifactsLoader = async () => ({
-			artifacts: new Map([[known.toString(), makeArtifact("only-this")]]),
-			instances: new Map(),
-		})
-		const reg = new ArtifactRegistry(loader, { verifier: passthroughVerifier })
-		expect(await reg.hasKnownClassId(unknown)).toBe(false)
-		expect(await reg.hasKnownClassId(known)).toBe(true)
-	})
-
-	test("returns false on empty bundle", async () => {
-		const reg = new ArtifactRegistry(emptyLoader, { verifier: passthroughVerifier })
-		expect(await reg.hasKnownClassId(new Fr(99))).toBe(false)
-	})
-
-	test("triggers lazy load of the bundle on first call", async () => {
-		let loadCount = 0
-		const classId = new Fr(7)
-		const loader: KnownArtifactsLoader = async () => {
-			loadCount++
-			return { artifacts: new Map([[classId.toString(), makeArtifact("v")]]), instances: new Map() }
-		}
-		const reg = new ArtifactRegistry(loader, { verifier: passthroughVerifier })
-		expect(loadCount).toBe(0)
-		expect(await reg.hasKnownClassId(classId)).toBe(true)
-		expect(loadCount).toBe(1)
-		// second call uses the cached bundle
-		expect(await reg.hasKnownClassId(classId)).toBe(true)
-		expect(loadCount).toBe(1)
-	})
-})
-
 /**
  * Trust-enforcement contract: every artifact returned to the caller
  * has had its class id verified. Mismatches fall through to the next
@@ -226,7 +130,7 @@ describe("ArtifactRegistry.resolve — class-id trust enforcement", () => {
 		// pxe-local returns a tampered artifact; verifier rejects.
 		const pxeLookup = vi.fn().mockResolvedValue(makeArtifact("pxe-tampered"))
 
-		const got = await reg.resolve(classId, pxeLookup, makeNetwork(1))
+		const got = await reg.resolve(classId, pxeLookup)
 
 		// pxe-local mismatch → fall through to known (no entry) → undefined.
 		expect(got).toBeUndefined()
@@ -238,7 +142,7 @@ describe("ArtifactRegistry.resolve — class-id trust enforcement", () => {
 		const reg = new ArtifactRegistry(emptyLoader, { verifier })
 		const pxeLookup = vi.fn().mockResolvedValue(makeArtifact("pxe-tampered"))
 
-		const got = await reg.resolve(classId, pxeLookup, makeNetwork(1), { pxeOnly: true })
+		const got = await reg.resolve(classId, pxeLookup, { pxeOnly: true })
 
 		expect(got).toBeUndefined()
 	})
@@ -249,8 +153,8 @@ describe("ArtifactRegistry.resolve — class-id trust enforcement", () => {
 		const reg = new ArtifactRegistry(emptyLoader, { verifier })
 		const pxeLookup = vi.fn().mockResolvedValue(makeArtifact("pxe-hit"))
 
-		const first = await reg.resolve(classId, pxeLookup, makeNetwork(1))
-		const second = await reg.resolve(classId, pxeLookup, makeNetwork(1))
+		const first = await reg.resolve(classId, pxeLookup)
+		const second = await reg.resolve(classId, pxeLookup)
 
 		expect((first as { name: string }).name).toBe("pxe-hit")
 		expect((second as { name: string }).name).toBe("pxe-hit")
@@ -258,21 +162,6 @@ describe("ArtifactRegistry.resolve — class-id trust enforcement", () => {
 		// `verifiedClassIds` cache.
 		expect(calls).toHaveLength(1)
 		expect(calls[0].expected).toBe(classId.toString())
-	})
-
-	test("clear() empties verifiedClassIds cache", async () => {
-		const classId = new Fr(45)
-		const { verifier, calls } = makeRecordingVerifier()
-		const reg = new ArtifactRegistry(emptyLoader, { verifier })
-		const pxeLookup = vi.fn().mockResolvedValue(makeArtifact("pxe-hit"))
-
-		await reg.resolve(classId, pxeLookup, makeNetwork(1))
-		expect(calls).toHaveLength(1)
-
-		reg.clear()
-		await reg.resolve(classId, pxeLookup, makeNetwork(1))
-		// Cache cleared → verifier called again.
-		expect(calls).toHaveLength(2)
 	})
 
 	test("known branch does NOT recompute (already keyed by load-time class id)", async () => {
@@ -286,7 +175,7 @@ describe("ArtifactRegistry.resolve — class-id trust enforcement", () => {
 		const reg = new ArtifactRegistry(loader, { verifier })
 		const pxeLookup = vi.fn().mockResolvedValue(undefined)
 
-		const got = await reg.resolve(classId, pxeLookup, makeNetwork(1))
+		const got = await reg.resolve(classId, pxeLookup)
 
 		expect(got).toBe(knownArtifact)
 		// Known branch returned the artifact WITHOUT calling the
