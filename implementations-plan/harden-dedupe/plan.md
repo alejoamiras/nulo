@@ -232,6 +232,11 @@ Every deferred item becomes a follow-up when the program closes.
   - Codex: run visual and mechanical work earlier.
   - **The shell arcs move up to 3 and 4, right after the tokens.** The pxe-idb deletion moves later.
 
+### Process
+
+- **No per-batch ELI5 pages.** The blueprint protocol gives every plan an ELI5 page. With 23 batches, that would be 23 throwaway pages nobody reads during a driverless run. The program's single Artifact explains each batch instead, and every batch plan records `eli5_mode: none`.
+- **The approval gate is the panel's.** A batch plan's own Codex audit, plus an Opus pass on MID batches, stands in for the owner's approval of the plan. Only the behaviour-alignment arc waits on the owner.
+
 ## Batch plans
 
 Each LIGHT or MID batch gets `batches/<batch>/plan.md`; this index names each batch by its slug and links it once that batch's arc has landed.
