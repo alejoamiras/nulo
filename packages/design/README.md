@@ -10,7 +10,7 @@ never import app utilities, stores, service clients, or `chrome.*`.
   (+ `src/base.css` in round-1 Phase 2).
 - **L1 core** — `src/core/**` primitives: `Flex`, `Icon`, `Text`, `MaterialIcon` _(round-1 Phase 3)_.
 - **L2 ui** — `src/ui/**` ui primitives.
-- **L3 composite** — `src/composite/**`.
+- **L3 composite** — `src/composite/**` (empty today; the biome layer rule stays in place).
 
 A lower layer cannot import a higher one (biome enforces `core ⊄ ui`). The package **floor** bans any
 `@nulo/*` import and `chrome.*` — via biome `noRestrictedImports` / `noRestrictedGlobals` (see
@@ -70,4 +70,4 @@ A missing root means the teleported content silently fails to mount (it is NOT a
 
 ## Exports
 
-`.` (barrel) · `./tokens` · `./base.css` · `./core/*` · `./ui/*` · `./composite/*` · `./composables/*`.
+`.` (barrel) · `./tokens` · `./base.css` · `./core/*` · `./ui/*` · `./composables/*`.

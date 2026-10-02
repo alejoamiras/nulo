@@ -4,8 +4,8 @@ import { NULO_DESIGN_COMPONENTS, nuloDesignResolver } from "./design-resolver"
 /**
  * Resolver-inventory pin (design-system round-2, D-SEAM). `NULO_DESIGN_COMPONENTS` must equal EXACTLY
  * the set of names the extension routes to `@nulo/design` — NOT "every package export" (the package
- * also exports names the extension keeps LOCAL + service-bound, e.g. `AddressDisplay`/`EmojiGrid`,
- * which must never enter the resolver). Wrapper-backed names (`Button`/`SubPageHeader`/`ToastManager`)
+ * also exports names the extension never routes, e.g. the wrapper bases `SubPageHeaderBase`/
+ * `ToastManagerBase`, which must never enter the resolver). Wrapper-backed names (`Button`/`SubPageHeader`/`ToastManager`)
  * stay local and must be ABSENT (else the bare tag resolves to the package base instead of the wrapper).
  *
  * All 15 names are genuinely DELETED-and-migrated: round 2's 6 (Spinner/Banner/LoadingState/Tooltip/
