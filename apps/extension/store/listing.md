@@ -201,6 +201,9 @@ Testing without funds: install, choose "Create profile", set a password. The wal
 Aztec testnet, its only public network, with a zero balance. Every screen is reachable without a
 transaction.
 
+Testing with funds: open https://testnet.app.unleashed.systems/, go to Faucet and choose
+"Get SIGNAL". The faucet needs no gas, so a new wallet can use it.
+
 Build: the add-on is bundled (Vite). Source is attached to this version as a `git archive` of the
 tagged commit. `apps/extension/store/SOURCE-BUILD.md` inside it names the exact Bun version and the
 one script to run; the output must match `dist/firefox` byte for byte.
