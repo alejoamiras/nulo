@@ -342,7 +342,7 @@ describe("publish flow", () => {
 		expect(h.output()).toContain(RECOVERY)
 	})
 
-	test("a 400 on the version request created nothing: it says to fix and re-run, never the recovery", async () => {
+	test("a 400 on the version request created nothing: it says why a re-run of the tag fails, never the recovery", async () => {
 		const h = harness([ok({ uuid: "u-1" }), VALID, ok({ approval_notes: ["Ensure this field has no more than 3000 characters."] }, 400)])
 		expect((await runPublishFirefoxAmo(env(), h.io)).exit).toBe(1)
 		expect(h.output()).toContain(REJECTED)

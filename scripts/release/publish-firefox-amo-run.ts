@@ -12,6 +12,7 @@ import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { existsSync, readFileSync, statSync } from "node:fs"
 import {
+	amoChars,
 	type ApiRequest,
 	apiError,
 	checkFirefoxManifest,
@@ -143,7 +144,7 @@ async function runPublish(env: Record<string, string | undefined>, io: RunIO): P
 	if (!inputs.ok) return fail(io, inputs.reason)
 	const { version, storeVersion, zipPath, sourcePath, notes } = inputs.value
 	io.log(`zip ok: ${zipPath} — manifest version ${storeVersion} (version_name ${version}), gecko id ${GECKO_ID}, settled data declaration`)
-	io.log(`source ok: ${sourcePath}; reviewer notes: ${notes.length} chars`)
+	io.log(`source ok: ${sourcePath}; reviewer notes: ${amoChars(notes)} chars`)
 
 	if (dryRun === "true") {
 		io.log(`dry run: would upload, validate, create version ${storeVersion} on the listed channel and attach the source; no request was made`)

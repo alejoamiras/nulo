@@ -176,8 +176,9 @@ describe("reviewerNotes", () => {
 		expect(reviewerNotes(`${NOTES_END}\n${NOTES_START}`).ok).toBe(false)
 	})
 
-	test("refuses notes over AMO's cap and accepts them at the cap", () => {
-		const block = (n: number) => `${NOTES_START}\n${"x".repeat(n)}\n${NOTES_END}`
+	test("refuses notes over AMO's cap and accepts them at the cap, in code points", () => {
+		// The emoji is two UTF-16 units, so counting `.length` would refuse the block at the cap.
+		const block = (n: number) => `${NOTES_START}\n🦊${"x".repeat(n - 1)}\n${NOTES_END}`
 		expect(reviewerNotes(block(NOTES_MAX)).ok).toBe(true)
 		const over = reviewerNotes(block(NOTES_MAX + 1))
 		expect(over.ok).toBe(false)

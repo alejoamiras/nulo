@@ -97,8 +97,10 @@ describe("store listing", () => {
 		expect(start).toBeGreaterThan(0)
 		expect(end).toBeGreaterThan(start)
 		const notes = listing.slice(start + "<!-- reviewer-notes:start -->".length, end).trim()
-		expect(notes.length).toBeGreaterThan(200)
-		expect(notes.length).toBeLessThanOrEqual(3000)
+		// AMO counts code points; `.length` would count an emoji as two.
+		const chars = [...notes].length
+		expect(chars).toBeGreaterThan(200)
+		expect(chars).toBeLessThanOrEqual(3000)
 	})
 })
 
