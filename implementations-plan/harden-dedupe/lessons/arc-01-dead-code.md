@@ -18,3 +18,7 @@
 ## Noted for the final report (out of scope, not changed)
 
 - `ArtifactRegistry.verifiedClassIds` is keyed by class id alone, so once one artifact verifies for a class id, a later different artifact claimed for the same class id skips the recompute. Pre-existing; a security lead, not a dedup item.
+
+## Merge gate
+
+- At head 382f822b, every job in the five required workflows passed, none skipped: Quality, plus smoke, the five network shards, both heavy jobs and the real-proving canary on Chrome and on Firefox. The red rollup rows came from runs that the label events cancelled.
