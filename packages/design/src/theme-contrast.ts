@@ -17,23 +17,21 @@ export type Theme = "light" | "dark"
 
 const BASE_CSS_PATH = join(process.cwd(), "src/base.css")
 
-/** Extract the flat `--name: value;` declarations inside a single top-level CSS block. */
-function parseBlock(css: string, header: string): Record<string, string> {
-	// Blocks in base.css are flat (no nested braces), so a non-greedy `[^}]*` body is safe.
-	const re = new RegExp(`${header.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`)
-	const body = css.match(re)?.[1] ?? ""
+/**
+ * The token map of a root element carrying `theme` (or none): every flat block whose selector list
+ * names `:root` or that theme selector exactly, applied in source order, as the cascade does for
+ * equal-specificity rules.
+ */
+export function themeMap(theme: Theme | null, css = readFileSync(BASE_CSS_PATH, "utf8")): Record<string, string> {
+	const matching = new Set([":root", ...(theme ? [`[theme="${theme}"]`] : [])])
 	const out: Record<string, string> = {}
-	for (const m of body.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/gi)) {
-		out[m[1]] = m[2].trim()
+	const flat = css.replace(/\/\*[\s\S]*?\*\//g, "")
+	for (const block of flat.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+		const selectors = block[1].split(",").map((s) => s.trim())
+		if (!selectors.some((s) => matching.has(s))) continue
+		for (const m of block[2].matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/gi)) out[m[1]] = m[2].trim()
 	}
 	return out
-}
-
-/** Build the effective token map for a theme: `:root` defaults overridden by the theme block. */
-export function themeMap(theme: Theme, css = readFileSync(BASE_CSS_PATH, "utf8")): Record<string, string> {
-	const root = parseBlock(css, ":root")
-	const themed = parseBlock(css, `[theme="${theme}"]`)
-	return { ...root, ...themed }
 }
 
 const HEX = /^#([0-9a-f]{3,8})$/i

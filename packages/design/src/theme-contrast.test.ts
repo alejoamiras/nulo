@@ -98,6 +98,14 @@ describe("resolveColor rgb() parsing", () => {
 	})
 })
 
+// The landing renders an unthemed root and the wallet sets theme="dark": the two must read the same palette.
+test("an explicit dark root resolves every unthemed token to the same value", () => {
+	const unthemed = themeMap(null)
+	const dark = themeMap("dark")
+	const drifted = Object.keys(unthemed).filter((name) => dark[name] !== unthemed[name])
+	expect(drifted).toEqual([])
+})
+
 // Phase-2 sanity: the formerly-broken tokens now resolve to their LIGHT values, not the dark fallthrough.
 describe("light palette landed (was the root cause)", () => {
 	test("nulo-surface is now the light value, not the dark fallthrough", () => {

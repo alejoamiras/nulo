@@ -70,24 +70,12 @@
 }
 
 :root {
-	color-scheme: dark;
-
-	--base-width: 360px;
-	--base-height: 600px;
-
 	/* nav clearance: 24px default (no nav), 96px when bottom nav is present */
 	--nav-clearance: 24px;
 
 	--font-headline: "Space Grotesk", system-ui, sans-serif;
 	--font-body: "InterVariable", system-ui, sans-serif;
 	--font-mono: "JetBrains Mono", monospace;
-
-	--app-bg: #0a0908;
-	--card-bg: #141312;
-	--tooltip-bg: #0f0e0d;
-	--dropdown-bg: #1d1b1a;
-	--border: rgba(74, 70, 63, 0.5);
-	--border-hovered: rgba(74, 70, 63, 0.8);
 
 	--nulo-surface: #141312;
 	--nulo-surface-low: #1d1b1a;
@@ -97,6 +85,32 @@
 	--nulo-outline: #4a463f;
 	--nulo-border: #231f1c;
 	--nulo-secondary: #999187;
+}
+
+/* The dark palette, declared once: an unthemed root (the landing) and an explicit dark theme share
+ * it. It precedes [theme="light"], which overrides it on a light root by source order. */
+:root,
+[theme="dark"] {
+	color-scheme: dark;
+
+	--base-width: 360px;
+	--base-height: 600px;
+
+	--app-bg: #0a0908;
+	--card-bg: #141312;
+	--tooltip-bg: #0f0e0d;
+	--dropdown-bg: #1d1b1a;
+	--border: rgba(74, 70, 63, 0.5);
+	--border-hovered: rgba(74, 70, 63, 0.8);
+
+	/* The light theme inherits both hairlines and every scrim unchanged. */
+	--hairline-soft: rgba(74, 70, 63, 0.2);
+	--hairline-strong: rgba(74, 70, 63, 0.3);
+
+	--scrim-popup: rgba(10, 9, 8, 0.8);
+	--scrim-sheet: rgba(10, 9, 8, 0.82);
+	--scrim-loader: rgba(10, 9, 8, 0.85);
+	--scrim-barrier: rgba(10, 9, 8, 0.92);
 
 	--txt-primary: #f5f0e6;
 	--txt-secondary: #999187;
@@ -192,39 +206,6 @@
 }
 
 [theme="dark"] {
-	color-scheme: dark;
-
-	--base-width: 360px;
-	--base-height: 600px;
-
-	--white: #fff;
-	--black: #000;
-	--app-bg: #0a0908;
-	--card-bg: #141312;
-	--tooltip-bg: #0f0e0d;
-	--dropdown-bg: #1d1b1a;
-	--border: rgba(74, 70, 63, 0.5);
-	--border-hovered: rgba(74, 70, 63, 0.8);
-
-	--txt-primary: #f5f0e6;
-	--txt-secondary: #999187;
-	--txt-body: rgba(245, 240, 230, 60%);
-	--txt-tertiary: rgba(245, 240, 230, 56%);
-	--txt-support: rgba(245, 240, 230, 54%);
-	--txt-white: rgba(255, 255, 255, 95%);
-	--txt-inverse: rgba(0, 0, 0, 90%);
-
-	--blue: #027cfc;
-	--green: #14ae5c;
-	--mint: #18d2a5;
-	--neutral-mint: #109373;
-	--orange: #ff5500;
-	--yellow: #e6c525;
-	--red: #f03c3c;
-	--purple: #5856de;
-	--gray: #8e8e93;
-	--sand: #b88555;
-
 	--json-property-name: #a99d5e;
 	--json-string: #bd8276;
 	--json-number: #4c9a91;
@@ -236,8 +217,6 @@
 	--log-error-color: #c34f38;
 	--log-error-background: #3a1f1e;
 	--log-inactive-filter: 0.8;
-
-	--bezier: cubic-bezier(0.19, 1, 0.22, 1);
 }
 
 *,
