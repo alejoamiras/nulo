@@ -181,8 +181,8 @@ describe("TokenList — fold", () => {
 			],
 		})
 		await flushPromises()
-		// unsynced first, then the two unknown rows by name ("BAD Token" < "HUGE Token").
-		expect(symbols(w)).toEqual(["NEW", "BAD", "HUGE"])
+		// The two malformed rows by name ("BAD Token" < "HUGE Token"), then the never-synced one.
+		expect(symbols(w)).toEqual(["BAD", "HUGE", "NEW"])
 		expect(w.find('[data-testid="holdings-fold"]').exists()).toBe(false)
 		expect(w.findAll('[data-malformed="true"]')).toHaveLength(2)
 	})

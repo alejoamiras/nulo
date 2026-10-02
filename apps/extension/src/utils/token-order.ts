@@ -1,9 +1,9 @@
 /**
  * One ordering for every token list in the popup (Home, Holdings, the Send picker):
- * pinned → held and priced (fiat desc) → held and unpriced → never synced → empty, names inside
- * a class. Emptiness is decided before price so a priced token with nothing in it never outranks
- * a funded token the price feed does not know. Pin membership is decided before the row's numbers
- * are parsed, so a malformed pinned row keeps its slot.
+ * pinned → held and priced (fiat desc) → held and unpriced → malformed → nothing held (never
+ * synced or empty), names inside a class. Emptiness is decided before price so a priced token with
+ * nothing in it never outranks a funded token the price feed does not know. Pin membership is
+ * decided before the row's numbers are parsed, so a malformed pinned row keeps its slot.
  */
 import { stringCompare } from "@/utils/string"
 import { type FiatOf, isValidDecimals, parseRawBalance } from "@/utils/token-amount"
@@ -26,13 +26,15 @@ export type OrderCtx<T extends OrderableRow = OrderableRow> = {
 
 export type RowClass = "pinned" | "held-priced" | "held-unpriced" | "unsynced" | "unknown" | "empty"
 
+/** A never-synced row ranks with the empty ones: ranked above them, every first sync reshuffles the
+ *  list as each row drops below the rows still unchecked. */
 const CLASS_RANK: Record<RowClass, number> = {
 	pinned: 0,
 	"held-priced": 1,
 	"held-unpriced": 2,
-	unsynced: 3,
-	unknown: 4,
-	empty: 5,
+	unknown: 3,
+	unsynced: 4,
+	empty: 4,
 }
 
 /** A row whose numbers cannot be trusted: a malformed side or a `decimals` outside 0..77. */
@@ -61,7 +63,7 @@ function compareByFiat<T extends OrderableRow>(a: T, b: T, ctx: OrderCtx<T>): nu
 export function compareTokenRows<T extends OrderableRow>(a: T, b: T, ctx: OrderCtx<T>): number {
 	const ca = classifyRow(a, ctx)
 	const cb = classifyRow(b, ctx)
-	if (ca !== cb) return CLASS_RANK[ca] - CLASS_RANK[cb]
+	if (CLASS_RANK[ca] !== CLASS_RANK[cb]) return CLASS_RANK[ca] - CLASS_RANK[cb]
 	if (ca === "pinned") {
 		// A malformed pin keeps its slot but sits behind every readable pin, priced or not.
 		const ua = isUnknownRow(a)

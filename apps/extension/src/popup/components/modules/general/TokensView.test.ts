@@ -578,7 +578,31 @@ describe("TokensView — loading, placeholders and the empty state", () => {
 		H.balanceAdded.emit(balanceRow(SEED_CONTRACT.toLowerCase()))
 		await nextTick()
 		expect(seedRows(wrapper)).toEqual([])
-		expect(wrapper.find('[data-testid="tokens-count"]').text()).toBe("1")
+		// Each default keeps its one slot from placeholder to import row to token row.
+		expect(wrapper.findAllComponents({ name: "TokenImportRow" }).map((c) => (c.props("op") as { id: string }).id)).toEqual(["op-seed"])
+		expect(wrapper.find('[data-testid="tokens-count"]').text()).toBe("2")
+	})
+
+	test("four defaults on their way fill Home's three slots and link the fourth, as their rows will", async () => {
+		H.getTokenBalances.mockResolvedValue([])
+		const entries = ["USDC", "USDT", "EURC", "GBPC"].map((symbol) => ({
+			...seedEntry("seeding", `0xSeed${symbol}`),
+			symbol,
+			displayName: `Test ${symbol}`,
+		}))
+		wrapper = mount(TokensView, {
+			shallow: true,
+			props: { seedEntries: entries, seedReady: true },
+			global: { stubs: { SectionLabel: false } },
+		})
+		await flushPromises()
+		expect(wrapper.findAllComponents(TokenSeedRow).map((c) => (c.props("entry") as { symbol: string }).symbol)).toEqual([
+			"EURC",
+			"GBPC",
+			"USDC",
+		])
+		expect(wrapper.find('[data-testid="tokens-view-all"]').exists()).toBe(true)
+		expect(wrapper.find('[data-testid="tokens-count"]').text()).toBe("4")
 	})
 
 	test("another chain's seed entries are not shown; a retry bubbles up with its entry", async () => {

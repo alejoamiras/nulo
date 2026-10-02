@@ -41,7 +41,7 @@ describe("classifyRow", () => {
 })
 
 describe("orderTokenRows", () => {
-	test("priced by fiat desc, then unpriced-held by name, then unsynced, unknown, empty", () => {
+	test("priced by fiat desc, then unpriced-held by name, then malformed, then nothing held by name", () => {
 		const rows = [
 			row("EMPTY"),
 			row("ZED", { privateBalance: "1", name: "Zed" }),
@@ -52,7 +52,19 @@ describe("orderTokenRows", () => {
 			row("USDC", { publicBalance: "1" }),
 		]
 		const out = orderTokenRows(rows, ctx({ ETH: 3_000n, USDC: 10n }))
-		expect(out.map((r) => r.token.symbol)).toEqual(["ETH", "USDC", "ALPHA", "ZED", "NEW", "BAD", "EMPTY"])
+		expect(out.map((r) => r.token.symbol)).toEqual(["ETH", "USDC", "ALPHA", "ZED", "BAD", "EMPTY", "NEW"])
+	})
+
+	test("a first sync that finds nothing never reorders the list", () => {
+		const names = ["Test USDC", "Test USDT", "Test EURC", "Test GBPC"]
+		const before = names.map((name) => row(name.slice(5), { name, updatedAt: 0 }))
+		// Each row's sync lands at its own moment; halfway, two rows are empty and two unchecked.
+		const halfway = before.map((r, i) => (i % 2 === 0 ? { ...r, updatedAt: 1 } : r))
+		const after = before.map((r) => ({ ...r, updatedAt: 1 }))
+		const order = (rows: OrderableRow[]) => orderTokenRows(rows, ctx({ USDC: 1n, USDT: 1n, EURC: 1n })).map((r) => r.token.symbol)
+		expect(order(before)).toEqual(["EURC", "GBPC", "USDC", "USDT"])
+		expect(order(halfway)).toEqual(order(before))
+		expect(order(after)).toEqual(order(before))
 	})
 
 	test("pinned first, priced pins before unpriced pins, a malformed pin stays in the top three", () => {
