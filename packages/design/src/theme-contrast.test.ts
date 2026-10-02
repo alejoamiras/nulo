@@ -117,7 +117,7 @@ function resolveValue(value: string | undefined, map: Record<string, string>, de
 function paletteDrift(css?: string): string[] {
 	const unthemed = themeMap(null, css)
 	const dark = themeMap("dark", css)
-	const drifted = VALUE_TOKENS.filter((name) => {
+	const drifted: string[] = VALUE_TOKENS.filter((name) => {
 		const value = resolveValue(unthemed[name], unthemed)
 		return value === undefined || value !== resolveValue(dark[name], dark)
 	})
