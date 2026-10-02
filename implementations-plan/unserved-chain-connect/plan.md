@@ -65,13 +65,18 @@ Firefox (lessons/phase-1.md).
   `CHAIN_NOT_SUPPORTED` error.
 - **Copy** (no em dash):
   - Title: "Network not available".
-  - Body: "This app asks for a network your wallet doesn't have. Switch the app to a network your
-    wallet uses."
+  - Body: "This app asks for a network your wallet doesn't have. The app and your wallet need to
+    be on the same network."
   - One button: "Close".
   - The app's origin is shown the way the connect window shows it. Every element has a
     `data-testid`. The window reuses the connect window's layout and components.
-- **Pending: the owner's sign-off** on the screenshots, including whether to keep a muted
-  "Requested chain: N" line. No PR before it.
+- **Signed off by the owner, 2026-10-02.** In chat: "Signed-off details." The coordinator's
+  sign-off page (https://claude.ai/artifact/MV1LVGp2urYWAXaE1PwY8m) records three answers:
+  - The body's second sentence: "same" (10:05:05Z), the line above. It replaced "Switch the app to
+    a network your wallet uses."
+  - The muted "Requested chain: N" line: "drop" (10:05:18Z). The payload no longer carries the
+    chain id.
+  - The notice as pictured, both themes, and when it shows: approved, no note (10:05:30Z).
 
 ## Architecture & Implementation
 
@@ -117,8 +122,8 @@ Firefox (lessons/phase-1.md).
    up. The read comes before the profile check, which stays the last await ahead of the write. A
    refusal there gives the window's reservation back like the other refusals in that function.
 8. **`DappInteractionService.notifyNetworkUnavailable(params)`**:
-   - A new interaction type, `network-unavailable`, with a `{ notice, params: { dappMetadata,
-     chainId } }` payload.
+   - A new interaction type, `network-unavailable`, with a `{ notice, params: { dappMetadata } }`
+     payload.
    - `resolveInteraction` refuses it ("Invalid id", non-disclosing), so a page cannot turn it into
      a discovery approval. `isDiscoveryPayload` excludes it.
    - `rejectInteraction` dismisses it.
@@ -126,15 +131,14 @@ Firefox (lessons/phase-1.md).
    - It reuses `DappStatusStrip`, `DappIdentityBlock` (the connect window's origin rendering) and
      the verify window's single-button footer.
    - Close and Escape reject the interaction and close the window.
-   - testids: `network-unavailable-title`, `-body`, `-chain`, `-close-btn`, `-hostname`,
-     `-dapp-name`.
+   - testids: `network-unavailable-title`, `-body`, `-close-btn`, `-hostname`, `-dapp-name`.
 
-**UI impact** (owner sign-off pending):
+**UI impact** (signed off by the owner, 2026-10-02, § Owner decisions):
 - Before: a wrong-chain app opens the connect window (Deny/Allow), and Allow leads to a dead
   connection.
 - After: the same request opens the notice above, with no Allow. A served chain is unchanged.
-- Screenshots: `before-dark.png`, `after-dark.png`, `after-light.png`, `after-dark-chain.png`. They
-  are local and uncommitted; the coordinator builds the sign-off page from them.
+- Screenshots: `before-dark.png` and, with the signed-off copy, `final/after-dark.png` and
+  `final/after-light.png`. They stay local and uncommitted; the PR body links the sign-off page.
 
 ## Security & Adversarial Considerations
 

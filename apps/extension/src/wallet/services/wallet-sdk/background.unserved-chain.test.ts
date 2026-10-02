@@ -52,7 +52,7 @@ import { FAKE_DAPP_ORIGIN as ORIGIN, fakeSdkServices } from "./test-services"
 
 const noopLogger = { log: () => {} } as never
 
-type NoticeParams = { dappMetadata: { name: string; url: string }; chainId: number }
+type NoticeParams = { dappMetadata: { name: string; url: string } }
 
 function held() {
 	let release!: () => void
@@ -117,7 +117,7 @@ describe("discovery for a chain the profile has no network for", () => {
 		expect(approved()).toEqual([])
 		expect(popup).not.toHaveBeenCalled()
 		expect(notice).toHaveBeenCalledTimes(1)
-		expect(notice.mock.calls[0]?.[0]).toEqual({ dappMetadata: { name: "App", url: ORIGIN }, chainId: 1816023401 })
+		expect(notice.mock.calls[0]?.[0]).toEqual({ dappMetadata: { name: "App", url: ORIGIN } })
 		expect(rows.size).toBe(0)
 	})
 

@@ -831,7 +831,7 @@ describe("DappInteractionService — an approved connect window is handed to the
 })
 
 describe("DappInteractionService — the network-unavailable notice only informs", () => {
-	const PARAMS = { dappMetadata: { name: "dapp.example", url: "https://dapp.example" }, chainId: 1816023401 }
+	const PARAMS = { dappMetadata: { name: "dapp.example", url: "https://dapp.example" } }
 
 	function noticeHarness() {
 		const api = new FakeBrowserApi()

@@ -115,8 +115,6 @@ export type NetworkUnavailablePayload = {
 
 export type NetworkUnavailableParams = {
 	dappMetadata: DappMetadata
-	/** The chain the dApp asked for, as the wallet derives it from the dApp's chain info. */
-	chainId: number
 }
 
 export type InteractionPayload = ExecutionPayload | CapabilityPayload | DiscoveryPayload | NetworkUnavailablePayload

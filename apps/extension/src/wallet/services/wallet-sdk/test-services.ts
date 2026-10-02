@@ -24,7 +24,7 @@ export function fakeSdkServices(
 		remembered?: { trusted: boolean }
 		popup?: (params: unknown, requestId: string) => Promise<{ approved: boolean; windowId?: number }>
 		/** The network-unavailable notice; settles at once by default. */
-		notice?: (params: { dappMetadata: { name: string; url: string }; chainId: number }) => Promise<void>
+		notice?: (params: { dappMetadata: { name: string; url: string } }) => Promise<void>
 		/** Whether the profile has a network for a chain; every chain by default. */
 		served?: (chainId: number) => boolean | Promise<boolean>
 		legal?: () => Promise<void>

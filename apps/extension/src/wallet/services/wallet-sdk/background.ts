@@ -1106,10 +1106,7 @@ async function runNetworkUnavailableNotice(
 			`Discovery for a chain with no network, showing the notice: request ${describeExternalId(discovery.requestId)} chain=${chainId}`,
 		)
 		if (stale.staleSession) await dropStaleSession(stale.staleSession, stale.entryEpoch, deps)
-		await deps.dappInteractionService.notifyNetworkUnavailable({
-			dappMetadata: discoveryDappMetadata(discovery),
-			chainId: Number(chainId),
-		})
+		await deps.dappInteractionService.notifyNetworkUnavailable({ dappMetadata: discoveryDappMetadata(discovery) })
 	} finally {
 		resolveNotice()
 		deps.pendingDiscoveryPromises.delete(dedupeKey)

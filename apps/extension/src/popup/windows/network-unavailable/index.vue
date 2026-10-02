@@ -38,7 +38,6 @@ const isLoading = ref(false)
 const interactionService = new DappInteractionServiceClient()
 
 const {
-	payload,
 	dapp,
 	isCancelled: isInteractionCancelled,
 	load: loadInteractionPayload,
@@ -50,8 +49,6 @@ const {
 })
 
 const { hostname: dappHostname, isSuspicious: hostnameHasNonAscii } = useDappHostname(dapp)
-
-const requestedChain = computed(() => payload.value?.params.chainId)
 
 // init/dismiss are referenced lazily (thunks): they are declared below and only run from
 // start()/dispose()/the guard at runtime.
@@ -133,10 +130,7 @@ onUnmounted(() => {
 			<Flex direction="column" gap="8" :class="$style.body">
 				<Text data-testid="network-unavailable-title" size="13" weight="600" color="primary">Network not available</Text>
 				<Text data-testid="network-unavailable-body" size="12" color="secondary" :style="{ lineHeight: '1.5' }">
-					This app asks for a network your wallet doesn't have. Switch the app to a network your wallet uses.
-				</Text>
-				<Text v-if="requestedChain !== undefined" data-testid="network-unavailable-chain" size="12" color="tertiary">
-					Requested chain: {{ requestedChain }}
+					This app asks for a network your wallet doesn't have. The app and your wallet need to be on the same network.
 				</Text>
 			</Flex>
 		</Flex>

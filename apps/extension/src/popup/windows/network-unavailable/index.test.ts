@@ -10,7 +10,7 @@ import { reactive, ref, type Ref } from "vue"
 const payloadMock: Ref<unknown> = ref(null)
 const dappMock = ref<{ name: string; url: string } | null>(null)
 const loadMock = vi.fn(async () => {
-	payloadMock.value = { notice: "network-unavailable", params: { dappMetadata: dappMock.value, chainId: 1816023401 } }
+	payloadMock.value = { notice: "network-unavailable", params: { dappMetadata: dappMock.value } }
 })
 const rejectMock = vi.fn()
 const resolveInteractionMock = vi.fn(async () => undefined)
@@ -107,14 +107,13 @@ afterEach(() => {
 })
 
 describe("network-unavailable window", () => {
-	test("shows the owner's copy, the requested chain and one Close button", async () => {
+	test("shows the owner's copy and one Close button", async () => {
 		const w = await factory()
 
 		expect(text(w, "network-unavailable-title")).toBe("Network not available")
 		expect(text(w, "network-unavailable-body")).toBe(
-			"This app asks for a network your wallet doesn't have. Switch the app to a network your wallet uses.",
+			"This app asks for a network your wallet doesn't have. The app and your wallet need to be on the same network.",
 		)
-		expect(text(w, "network-unavailable-chain")).toBe("Requested chain: 1816023401")
 		expect(w.findAll("button").map((b) => b.attributes("data-testid"))).toEqual(["network-unavailable-close-btn"])
 		expect(text(w, "network-unavailable-close-btn")).toBe("Close")
 	})
