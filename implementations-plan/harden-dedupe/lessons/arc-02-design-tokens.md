@@ -15,3 +15,4 @@
 - **Code round 2:** NOT CONVERGED, two should-fix findings.
   1. **Rejected: quoted brackets, commas or semicolons inside a selector misparse.** The helper reads only the hand-written `base.css`, which has no such selector, so hardening it is churn the no-over-engineering rule excludes. The comment now states that limit instead.
   2. **Adopted: a non-color token aliasing a theme-only variable compared equal as raw strings.** Non-color tokens now resolve their `var()` chain, and the width case is a regression test.
+- **Code round 3:** NOT CONVERGED, one should-fix finding, adopted. **A nested `var()` fallback came back as an unresolved string, so a dark-only variable inside it went unseen.** The resolver now follows fallbacks too and returns undefined once it is past the depth limit. The nested case is a regression test.

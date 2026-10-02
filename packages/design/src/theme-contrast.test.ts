@@ -105,12 +105,12 @@ describe("resolveColor rgb() parsing", () => {
 const COLOR_TOKENS = [surfaces, brand, text, borders, scrims, colors].flatMap((group) => Object.values(group))
 const VALUE_TOKENS = [fonts, easings, layout].flatMap((group) => Object.values(group))
 
-/** A non-color token's value with its `var(--x, fallback)` chain followed; undefined when unresolvable. */
-function resolveValue(name: string, map: Record<string, string>, depth = 0): string | undefined {
-	const value = map[name]
+/** A non-color value with its `var(--x, fallback)` chain followed, fallbacks included; undefined when unresolvable. */
+function resolveValue(value: string | undefined, map: Record<string, string>, depth = 0): string | undefined {
 	const alias = value?.match(/^var\(\s*(--[a-z0-9-]+)\s*(?:,\s*(.+))?\)$/i)
-	if (!alias || depth > 8) return value
-	return map[alias[1]] != null ? resolveValue(alias[1], map, depth + 1) : alias[2]?.trim()
+	if (!alias) return value
+	if (depth > 8) return undefined
+	return resolveValue(map[alias[1]] ?? alias[2]?.trim(), map, depth + 1)
 }
 
 /** Contract tokens an unthemed root and a dark root resolve differently, or that one of them lacks. */
@@ -118,8 +118,8 @@ function paletteDrift(css?: string): string[] {
 	const unthemed = themeMap(null, css)
 	const dark = themeMap("dark", css)
 	const drifted = VALUE_TOKENS.filter((name) => {
-		const value = resolveValue(name, unthemed)
-		return value === undefined || value !== resolveValue(name, dark)
+		const value = resolveValue(unthemed[name], unthemed)
+		return value === undefined || value !== resolveValue(dark[name], dark)
 	})
 	for (const name of COLOR_TOKENS) {
 		try {
@@ -148,6 +148,10 @@ describe("dark palette, unthemed vs explicit", () => {
 	test("a size resolving through a theme-only variable is drift", () => {
 		const viaDark = `${css.replace("--base-width: 360px;", "--base-width: var(--dark-width, 360px);")}\n[theme="dark"] { --dark-width: 400px; }`
 		expect(paletteDrift(viaDark)).toContain("--base-width")
+	})
+	test("a size resolving through a nested fallback is drift", () => {
+		const nested = css.replace("--base-width: 360px;", "--base-width: var(--preferred-width, var(--dark-width, 360px));")
+		expect(paletteDrift(`${nested}\n[theme="dark"] { --dark-width: 400px; }`)).toContain("--base-width")
 	})
 	test("a token rule nested in an at-rule is refused", () => {
 		expect(() => themeMap("dark", `${css}\n@media not all { :root { --app-bg: #333; } }`)).toThrow(/at-rule/)
