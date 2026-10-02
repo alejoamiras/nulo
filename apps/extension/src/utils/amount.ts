@@ -198,23 +198,6 @@ export const parseAmountToBaseUnits = (value: string, decimals: number): bigint 
 	return BigInt(stripped)
 }
 
-/**
- * Validate a typed-input string is a positive numeric amount (regardless of
- * token decimals — for that, use `parseAmountToBaseUnits`).
- *
- * Returns `true` for anything that `parseAmountToBaseUnits(value, 18)` would
- * parse successfully into a non-zero bigint.
- */
-export const isValidAmount = (value: unknown): boolean => {
-	if (typeof value !== "string") return false
-	try {
-		const units = parseAmountToBaseUnits(value, 18)
-		return units > 0n
-	} catch {
-		return false
-	}
-}
-
 export interface FormatBaseUnitsOpts {
 	/** Truncate (round down) to N digits after the decimal point. Default:
 	 *  full precision. **TRUNCATES** — never rounds up — so a balance display

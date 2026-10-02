@@ -4,9 +4,7 @@ import { describe, expect, test } from "vitest"
 import { OriginType } from "@/wallet/services/transaction/spec"
 import {
 	FEE_METHODS,
-	formatCallSummary,
 	formatTransferType,
-	getCallCountLabel,
 	getMethodLabel,
 	getOriginLabel,
 	getPrimaryCall,
@@ -152,41 +150,6 @@ describe("getTxTitle — display title by category", () => {
 	})
 })
 
-describe("getCallCountLabel — excludes fee/entrypoint calls", () => {
-	test("single user call → null", () => {
-		expect(getCallCountLabel([{ contract: "0x1", method: "transfer" }])).toBeNull()
-	})
-	test("fee + single user call → null (still 1 user call)", () => {
-		expect(
-			getCallCountLabel([
-				{ contract: "0x1", method: "sponsor_unconditionally" },
-				{ contract: "0x2", method: "transfer" },
-			]),
-		).toBeNull()
-	})
-	test("2 user calls → '2 calls'", () => {
-		expect(
-			getCallCountLabel([
-				{ contract: "0x1", method: "transfer" },
-				{ contract: "0x2", method: "shield" },
-			]),
-		).toBe("2 calls")
-	})
-	test("fee + 2 user calls → '2 calls'", () => {
-		expect(
-			getCallCountLabel([
-				{ contract: "0x1", method: "sponsor_unconditionally" },
-				{ contract: "0x2", method: "transfer" },
-				{ contract: "0x3", method: "shield" },
-			]),
-		).toBe("2 calls")
-	})
-	test("null / undefined input → null", () => {
-		// biome-ignore lint/suspicious/noExplicitAny: pinning defensive guard for the runtime-null case
-		expect(getCallCountLabel(null as any)).toBeNull()
-	})
-})
-
 describe("getOriginLabel — dApp identity for DAPP origin only", () => {
 	test("DAPP origin with name → name", () => {
 		expect(getOriginLabel({ type: OriginType.DAPP, name: "Faucet" })).toBe("Faucet")
@@ -216,14 +179,5 @@ describe("formatTransferType — enum and string keys", () => {
 	test("unknown → stringified input", () => {
 		expect(formatTransferType(999)).toBe("999")
 		expect(formatTransferType("bogus")).toBe("bogus")
-	})
-})
-
-describe("formatCallSummary — compact 'Method on 0xabcd..ef' format", () => {
-	test("known method + long contract → humanized + trimmed", () => {
-		expect(formatCallSummary("transfer", "0x1234567890abcdef1234567890abcdef12345678")).toBe("Transfer (private) on 0x1234..5678")
-	})
-	test("unknown method → title-cased + trimmed contract", () => {
-		expect(formatCallSummary("drip_to_private", "0x1234567890abcdef1234567890abcdef12345678")).toBe("Drip To Private on 0x1234..5678")
 	})
 })

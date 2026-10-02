@@ -1,6 +1,6 @@
 /**
  * Combined tests for the Settings family — ItemsContainer, SettingItem,
- * SettingField, SettingValue. Each component gets ≥5 cases.
+ * SettingField. Each component gets ≥5 cases.
  */
 import { describe, expect, test, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
@@ -11,7 +11,6 @@ import { RowAction } from "@nulo/design"
 import ItemsContainer from "./ItemsContainer.vue"
 import SettingItem from "./SettingItem.vue"
 import SettingField from "./SettingField.vue"
-import SettingValue from "./SettingValue.vue"
 
 const STUBS = {
 	Flex: { template: '<div :class="$attrs.class" v-bind="$attrs"><slot /></div>', inheritAttrs: false },
@@ -249,50 +248,5 @@ describe("ui/Settings — SettingField", () => {
 			global: { stubs: STUBS },
 		})
 		expect(w.html()).not.toMatch(/disabled/)
-	})
-})
-
-describe("ui/Settings — SettingValue", () => {
-	test("renders label and value props", () => {
-		const w = mount(SettingValue, {
-			props: { label: "Name", value: "Alice" },
-			global: { stubs: STUBS },
-		})
-		expect(w.text()).toContain("Name")
-		expect(w.text()).toContain("Alice")
-	})
-
-	test("value slot replaces the value text", () => {
-		const w = mount(SettingValue, {
-			props: { label: "Name", value: "fallback" },
-			slots: { value: "<span>slot value</span>" },
-			global: { stubs: STUBS },
-		})
-		expect(w.text()).toContain("slot value")
-		expect(w.text()).not.toContain("fallback")
-	})
-
-	test("icon prop renders an Icon stub", () => {
-		const w = mount(SettingValue, {
-			props: { label: "X", value: "Y", icon: "copy" },
-			global: { stubs: STUBS },
-		})
-		expect(w.find('[data-name="copy"]').exists()).toBe(true)
-	})
-
-	test("disabled prop applies the disabled class", () => {
-		const w = mount(SettingValue, {
-			props: { label: "X", value: "Y", disabled: true },
-			global: { stubs: STUBS },
-		})
-		expect(w.html()).toMatch(/disabled/)
-	})
-
-	test("wrapper carries the wrapper CSS-module class", () => {
-		const w = mount(SettingValue, {
-			props: { label: "X", value: "Y" },
-			global: { stubs: STUBS },
-		})
-		expect(w.html()).toMatch(/wrapper/)
 	})
 })

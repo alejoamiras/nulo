@@ -2,8 +2,7 @@ import { FEE_JUICE_ADDRESS } from "@aztec-labs/constants"
 import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { OriginType } from "@/wallet/services/transaction/spec"
 import type { TxOrigin } from "@/wallet/services/transaction/spec"
-import { trimAddress } from "@/utils/string"
-import { FEE_METHODS, pickPrimaryIndex, pickPrimaryMethod, userMethodsOf } from "./primary-method"
+import { FEE_METHODS, pickPrimaryIndex, pickPrimaryMethod } from "./primary-method"
 import { transferLabel } from "./token-transfer-vocabulary"
 
 export { FEE_METHODS, pickPrimaryMethod }
@@ -121,31 +120,11 @@ export function getTxTitle(calls: TxCall[]): string {
 }
 
 /**
- * Returns "N calls" label for multi-call transactions, null for single.
- * Excludes fee/entrypoint infrastructure calls from the count.
- */
-export function getCallCountLabel(calls: TxCall[]): string | null {
-	if (!calls) return null
-	// Same infra rule as the primary picker (incl. the paired-claim case) so the count never says
-	// "2 calls" for a claim whose second call is just its own fee payload.
-	const userCalls = userMethodsOf(calls.map((c) => c.method))
-	if (userCalls.length <= 1) return null
-	return `${userCalls.length} calls`
-}
-
-/**
  * Returns dApp name for DAPP origin, null for UI/other.
  */
 export function getOriginLabel(origin?: TxOrigin): string | null {
 	if (!origin || origin.type !== OriginType.DAPP) return null
 	return origin.name || "dApp"
-}
-
-/**
- * Formats a call for compact display: "Method on 0x1234..ab"
- */
-export function formatCallSummary(method: string, contract: string): string {
-	return `${humanizeMethodName(method)} on ${trimAddress(contract, 6, 4)}`
 }
 
 // TransferType enum values: Private=0, PrivateToPublic=1, Public=2, PublicToPrivate=3

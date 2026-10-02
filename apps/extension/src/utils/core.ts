@@ -42,10 +42,9 @@ export const isBackgroundConnected = ref(false)
  * `.ts` CONSUMERS. (`vue-tsc` does NOT strict-null-check `.vue` `<script setup>`,
  * so `.vue` reads are NOT compiler-guarded today — use the accessors there by
  * convention; closing that `.vue` gap is a separate infra task.) Use
- * {@link requireNetwork}/{@link requireTransaction}/{@link requireAccount} (throw
- * if unset) for method calls in unlock-guarded code, or {@link getNetwork}/
- * {@link getTransaction}/{@link getAccount} (`| null`) where the unset case is
- * tolerated. Runtime is unchanged: the slots hold `null` before assignment exactly
+ * {@link requireNetwork}/{@link requireAccount} (throw if unset) for method calls
+ * in unlock-guarded code, or {@link getNetwork}/{@link getTransaction}/
+ * {@link getAccount} (`| null`) where the unset case is tolerated. Runtime is unchanged: the slots hold `null` before assignment exactly
  * as the prior `null as unknown as Client` lie did.
  */
 export interface AppServices {
@@ -126,11 +125,6 @@ export const managers: AppServices = new Proxy({} as AppServices, {
 export function requireNetwork(): NetworkServiceClient {
 	const client = managers.network
 	if (!client) throw new Error("network service not initialized (read before unlock)")
-	return client
-}
-export function requireTransaction(): TransactionServiceClient {
-	const client = managers.transaction
-	if (!client) throw new Error("transaction service not initialized (read before unlock)")
 	return client
 }
 export function requireAccount(): AccountServiceClient {

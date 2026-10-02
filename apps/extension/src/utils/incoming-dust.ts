@@ -41,6 +41,3 @@ export function isAmountAboveDustThreshold(params: {
 		return true
 	}
 }
-
-/** The incoming feed's name for the same predicate — a receipt is an amount. */
-export const isReceiptAboveDustThreshold = isAmountAboveDustThreshold

@@ -3,7 +3,6 @@ import {
 	balanceFormatted,
 	clampDecimals,
 	formatBaseUnits,
-	isValidAmount,
 	normalizeAmount,
 	parseAmountToBaseUnits,
 	purgeNumber,
@@ -145,39 +144,6 @@ describe("amount/parseAmountToBaseUnits", () => {
 		expect(() => parseAmountToBaseUnits(123, 6)).toThrow(/empty/)
 		// @ts-expect-error testing runtime guard
 		expect(() => parseAmountToBaseUnits(null, 6)).toThrow(/empty/)
-	})
-})
-
-describe("amount/isValidAmount", () => {
-	test("accepts a positive integer string", () => {
-		expect(isValidAmount("1")).toBe(true)
-	})
-
-	test("accepts a positive fractional string under 18 decimals", () => {
-		expect(isValidAmount("1.5")).toBe(true)
-	})
-
-	test("rejects zero", () => {
-		expect(isValidAmount("0")).toBe(false)
-	})
-
-	test("rejects empty string", () => {
-		expect(isValidAmount("")).toBe(false)
-	})
-
-	test("rejects negative", () => {
-		expect(isValidAmount("-1")).toBe(false)
-	})
-
-	test("rejects non-string", () => {
-		expect(isValidAmount(1)).toBe(false)
-		expect(isValidAmount(null)).toBe(false)
-		expect(isValidAmount(undefined)).toBe(false)
-		expect(isValidAmount({})).toBe(false)
-	})
-
-	test("rejects > 18 fractional digits (which can never round-trip into FJ either)", () => {
-		expect(isValidAmount("0.0000000000000000001")).toBe(false)
 	})
 })
 

@@ -22,7 +22,6 @@ import NewSenderPopup from "./NewSenderPopup.vue"
 import NewTokenPopup from "./NewTokenPopup.vue"
 import ReceivePopup from "./ReceivePopup.vue"
 import RevokeAuthwitsPopup from "./RevokeAuthwitsPopup.vue"
-import SelectFpcPopup from "./SelectFpcPopup.vue"
 import SelectNetworksPopup from "./SelectNetworksPopup.vue"
 import SelectProfilePopup from "./SelectProfilePopup.vue"
 import SelectTokenPopup from "./SelectTokenPopup.vue"
@@ -339,7 +338,6 @@ onBeforeUnmount(() => {
 
 	<NewFpcPopup :show="popupStore.isOpened('new_fpc')" @onClose="popupStore.close('new_fpc')" />
 	<EditFpcPopup :show="popupStore.isOpened('edit_fpc')" @onClose="popupStore.close('edit_fpc')" />
-	<SelectFpcPopup :show="popupStore.isOpened('select_fpc')" :payload="popupStore.getPayload('select_fpc')" @onClose="popupStore.close('select_fpc')" />
 
 	<NewSenderPopup :show="popupStore.isOpened('new_sender')" @onClose="popupStore.close('new_sender')" />
 	<ChangeAuthwitsRegistryPopup :show="popupStore.isOpened('change_authwits_registry')" @onClose="popupStore.close('change_authwits_registry')" />

@@ -18,7 +18,7 @@ import { TaskService } from "@/wallet/services/task/service"
 import { TaskStatus } from "@/wallet/services/task/spec"
 import { PriceService } from "@/wallet/services/price/service"
 import { getPriceMapEntry } from "@/wallet/services/price/price-map"
-import { isReceiptAboveDustThreshold, usdThresholdToMicro } from "@/utils/incoming-dust"
+import { isAmountAboveDustThreshold, usdThresholdToMicro } from "@/utils/incoming-dust"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { TxHash } from "@aztec-labs/stdlib/tx"
 import type { PublicEventCursor, PublicScanTips, PublicTokenClassStatus, PublicTransferEvent } from "@nulo/aztec-runtime/pxe/public-events"
@@ -590,7 +590,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			if (!token) return true
 			const entry = getPriceMapEntry(chainId, token.contract)
 			const usdRate = entry ? quotes[entry.coingeckoId]?.usd : undefined // `getQuotes` returns FRESH quotes only
-			return isReceiptAboveDustThreshold({ amountRaw: r.amountRaw, decimals: token.decimals, usdRate, thresholdMicro })
+			return isAmountAboveDustThreshold({ amountRaw: r.amountRaw, decimals: token.decimals, usdRate, thresholdMicro })
 		})
 	}
 

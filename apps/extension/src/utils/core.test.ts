@@ -2,16 +2,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 import type { AccountServiceClient } from "@/wallet/services/account/client"
 import type { NetworkServiceClient } from "@/wallet/services/network/client"
 import type { TransactionServiceClient } from "@/wallet/services/transaction/client"
-import {
-	getAccount,
-	getNetwork,
-	getTransaction,
-	managers,
-	refreshBalances,
-	requireAccount,
-	requireNetwork,
-	requireTransaction,
-} from "@/utils/core"
+import { getAccount, getNetwork, getTransaction, managers, refreshBalances, requireAccount, requireNetwork } from "@/utils/core"
 
 const tbMock = vi.hoisted(() => ({
 	getTokenBalances: vi.fn(),
@@ -41,7 +32,6 @@ describe("AppServices lazy-client accessors (Q-16)", () => {
 
 	test("(BUG-PIN) require*() throws a clear error when the client is unset", () => {
 		expect(() => requireNetwork()).toThrow("network service not initialized")
-		expect(() => requireTransaction()).toThrow("transaction service not initialized")
 		expect(() => requireAccount()).toThrow("account service not initialized")
 	})
 
@@ -60,7 +50,6 @@ describe("AppServices lazy-client accessors (Q-16)", () => {
 		managers.account = acc
 		expect(requireNetwork()).toBe(net)
 		expect(getNetwork()).toBe(net)
-		expect(requireTransaction()).toBe(txn)
 		expect(getTransaction()).toBe(txn)
 		expect(requireAccount()).toBe(acc)
 		expect(getAccount()).toBe(acc)

@@ -72,7 +72,6 @@ declare global {
   const balanceFormatted: typeof import('../utils/amount').balanceFormatted
   const browser: typeof import('webextension-polyfill')
   const buildActivityRows: typeof import('../utils/activity-rows').buildActivityRows
-  const buildFeeEstimate: typeof import('../utils/fee-estimation').buildFeeEstimate
   const buildIncomingCardProps: typeof import('../utils/received-display').buildIncomingCardProps
   const buildJournalTerminalCardProps: typeof import('../utils/journal-state').buildJournalTerminalCardProps
   const buildRestoreSecret: typeof import('../composables/full-backup-restore').buildRestoreSecret
@@ -115,14 +114,12 @@ declare global {
   const foldLabel: typeof import('../utils/token-fold').foldLabel
   const forChain: typeof import('../utils/token-order').forChain
   const formatBaseUnits: typeof import('../utils/amount').formatBaseUnits
-  const formatCallSummary: typeof import('../utils/tx-enrichment').formatCallSummary
   const formatFeeJuice: typeof import('../utils/fee-estimation').formatFeeJuice
   const formatGas: typeof import('../utils/fee-estimation').formatGas
   const formatGasBalance: typeof import('../utils/fee-estimation').formatGasBalance
   const formatSnackAmount: typeof import('../utils/snack-amount').formatSnackAmount
   const formatTransferType: typeof import('../utils/tx-enrichment').formatTransferType
   const getAccount: typeof import('../utils/core').getAccount
-  const getCallCountLabel: typeof import('../utils/tx-enrichment').getCallCountLabel
   const getCurrentInstance: typeof import('vue').getCurrentInstance
   const getCurrentScope: typeof import('vue').getCurrentScope
   const getCurrentWatcher: typeof import('vue').getCurrentWatcher
@@ -161,12 +158,10 @@ declare global {
   const isProxy: typeof import('vue').isProxy
   const isReactive: typeof import('vue').isReactive
   const isReadonly: typeof import('vue').isReadonly
-  const isReceiptAboveDustThreshold: typeof import('../utils/incoming-dust').isReceiptAboveDustThreshold
   const isRef: typeof import('vue').isRef
   const isRepeatOrComposing: typeof import('../composables/usePopupEntity').isRepeatOrComposing
   const isShallow: typeof import('vue').isShallow
   const isUnknownRow: typeof import('../utils/token-order').isUnknownRow
-  const isValidAmount: typeof import('../utils/amount').isValidAmount
   const isValidDecimals: typeof import('../utils/token-amount').isValidDecimals
   const isValidHex: typeof import('../utils/string').isValidHex
   const journalTerminalDisplay: typeof import('../utils/journal-state').journalTerminalDisplay
@@ -231,7 +226,6 @@ declare global {
   const remapNetworkIdByChain: typeof import('../utils/full-backup-helpers').remapNetworkIdByChain
   const requireAccount: typeof import('../utils/core').requireAccount
   const requireNetwork: typeof import('../utils/core').requireNetwork
-  const requireTransaction: typeof import('../utils/core').requireTransaction
   const reseedNetworksStage: typeof import('../composables/full-backup-restore').reseedNetworksStage
   const resolveComponent: typeof import('vue').resolveComponent
   const resolveFromDisplay: typeof import('../utils/received-display').resolveFromDisplay
@@ -340,7 +334,6 @@ declare global {
   const useTemplateRef: typeof import('vue').useTemplateRef
   const useTicker: typeof import('../composables/ticker').useTicker
   const useToast: typeof import('../composables/toast.js').useToast
-  const userMethodsOf: typeof import('../utils/primary-method').userMethodsOf
   const vSnackFooter: typeof import('../composables/snackInset').vSnackFooter
   const vSnackSheet: typeof import('../composables/snackInset').vSnackSheet
   const validateAndMigrateBackup: typeof import('../composables/useFullBackupImport').validateAndMigrateBackup
@@ -479,7 +472,7 @@ declare global {
   export type { AppServices } from '../utils/core'
   import('../utils/core')
   // @ts-ignore
-  export type { AssetPricing, FeeEstimate } from '../utils/fee-estimation'
+  export type { AssetPricing } from '../utils/fee-estimation'
   import('../utils/fee-estimation')
   // @ts-ignore
   export type { FileTooLargeError } from '../utils/files'
@@ -606,7 +599,6 @@ declare module 'vue' {
     readonly balanceFormatted: UnwrapRef<typeof import('../utils/amount')['balanceFormatted']>
     readonly browser: UnwrapRef<typeof import('webextension-polyfill')>
     readonly buildActivityRows: UnwrapRef<typeof import('../utils/activity-rows')['buildActivityRows']>
-    readonly buildFeeEstimate: UnwrapRef<typeof import('../utils/fee-estimation')['buildFeeEstimate']>
     readonly buildIncomingCardProps: UnwrapRef<typeof import('../utils/received-display')['buildIncomingCardProps']>
     readonly buildJournalTerminalCardProps: UnwrapRef<typeof import('../utils/journal-state')['buildJournalTerminalCardProps']>
     readonly buildRestoreSecret: UnwrapRef<typeof import('../composables/full-backup-restore')['buildRestoreSecret']>
@@ -649,14 +641,12 @@ declare module 'vue' {
     readonly foldLabel: UnwrapRef<typeof import('../utils/token-fold')['foldLabel']>
     readonly forChain: UnwrapRef<typeof import('../utils/token-order')['forChain']>
     readonly formatBaseUnits: UnwrapRef<typeof import('../utils/amount')['formatBaseUnits']>
-    readonly formatCallSummary: UnwrapRef<typeof import('../utils/tx-enrichment')['formatCallSummary']>
     readonly formatFeeJuice: UnwrapRef<typeof import('../utils/fee-estimation')['formatFeeJuice']>
     readonly formatGas: UnwrapRef<typeof import('../utils/fee-estimation')['formatGas']>
     readonly formatGasBalance: UnwrapRef<typeof import('../utils/fee-estimation')['formatGasBalance']>
     readonly formatSnackAmount: UnwrapRef<typeof import('../utils/snack-amount')['formatSnackAmount']>
     readonly formatTransferType: UnwrapRef<typeof import('../utils/tx-enrichment')['formatTransferType']>
     readonly getAccount: UnwrapRef<typeof import('../utils/core')['getAccount']>
-    readonly getCallCountLabel: UnwrapRef<typeof import('../utils/tx-enrichment')['getCallCountLabel']>
     readonly getCurrentInstance: UnwrapRef<typeof import('vue')['getCurrentInstance']>
     readonly getCurrentScope: UnwrapRef<typeof import('vue')['getCurrentScope']>
     readonly getCurrentWatcher: UnwrapRef<typeof import('vue')['getCurrentWatcher']>
@@ -695,12 +685,10 @@ declare module 'vue' {
     readonly isProxy: UnwrapRef<typeof import('vue')['isProxy']>
     readonly isReactive: UnwrapRef<typeof import('vue')['isReactive']>
     readonly isReadonly: UnwrapRef<typeof import('vue')['isReadonly']>
-    readonly isReceiptAboveDustThreshold: UnwrapRef<typeof import('../utils/incoming-dust')['isReceiptAboveDustThreshold']>
     readonly isRef: UnwrapRef<typeof import('vue')['isRef']>
     readonly isRepeatOrComposing: UnwrapRef<typeof import('../composables/usePopupEntity')['isRepeatOrComposing']>
     readonly isShallow: UnwrapRef<typeof import('vue')['isShallow']>
     readonly isUnknownRow: UnwrapRef<typeof import('../utils/token-order')['isUnknownRow']>
-    readonly isValidAmount: UnwrapRef<typeof import('../utils/amount')['isValidAmount']>
     readonly isValidDecimals: UnwrapRef<typeof import('../utils/token-amount')['isValidDecimals']>
     readonly isValidHex: UnwrapRef<typeof import('../utils/string')['isValidHex']>
     readonly journalTerminalDisplay: UnwrapRef<typeof import('../utils/journal-state')['journalTerminalDisplay']>
@@ -765,7 +753,6 @@ declare module 'vue' {
     readonly remapNetworkIdByChain: UnwrapRef<typeof import('../utils/full-backup-helpers')['remapNetworkIdByChain']>
     readonly requireAccount: UnwrapRef<typeof import('../utils/core')['requireAccount']>
     readonly requireNetwork: UnwrapRef<typeof import('../utils/core')['requireNetwork']>
-    readonly requireTransaction: UnwrapRef<typeof import('../utils/core')['requireTransaction']>
     readonly reseedNetworksStage: UnwrapRef<typeof import('../composables/full-backup-restore')['reseedNetworksStage']>
     readonly resolveComponent: UnwrapRef<typeof import('vue')['resolveComponent']>
     readonly resolveFromDisplay: UnwrapRef<typeof import('../utils/received-display')['resolveFromDisplay']>
@@ -872,7 +859,6 @@ declare module 'vue' {
     readonly useTemplateRef: UnwrapRef<typeof import('vue')['useTemplateRef']>
     readonly useTicker: UnwrapRef<typeof import('../composables/ticker')['useTicker']>
     readonly useToast: UnwrapRef<typeof import('../composables/toast.js')['useToast']>
-    readonly userMethodsOf: UnwrapRef<typeof import('../utils/primary-method')['userMethodsOf']>
     readonly vSnackFooter: UnwrapRef<typeof import('../composables/snackInset')['vSnackFooter']>
     readonly vSnackSheet: UnwrapRef<typeof import('../composables/snackInset')['vSnackSheet']>
     readonly validateAndMigrateBackup: UnwrapRef<typeof import('../composables/useFullBackupImport')['validateAndMigrateBackup']>

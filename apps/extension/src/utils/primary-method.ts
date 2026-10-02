@@ -33,17 +33,12 @@ export type MethodCarrier = { method?: string; name?: string }
 const methodOf = (c: MethodCarrier | undefined): string | undefined => c?.method ?? c?.name
 
 /**
- * The user-facing methods of a call list. Beyond the static FEE_METHODS set, the embedded private-FPC
- * fee payload emits a FeeJuice `claim` IMMEDIATELY followed by `mint_and_pay_fee` (one ExecutionPayload,
+ * Indexes of the user-facing methods of a call list. Beyond the static FEE_METHODS set, the embedded
+ * private-FPC fee payload emits a FeeJuice `claim` IMMEDIATELY followed by `mint_and_pay_fee` (one ExecutionPayload,
  * fixed order) — that ADJACENT pair is fee infra. Only the adjacent claim is filtered: a `claim`
  * elsewhere in the same tx (an airdrop-style app call riding a private-FPC-paid tx) stays user-facing,
  * and a lone `claim` is always user intent.
  */
-export function userMethodsOf(named: readonly string[]): string[] {
-	return userIndexesOf(named).map((i) => named[i])
-}
-
-/** Indexes into `named` that survive the fee-infra filter (the index twin of {@link userMethodsOf}). */
 function userIndexesOf(named: readonly string[]): number[] {
 	const out: number[] = []
 	for (let i = 0; i < named.length; i++) {
