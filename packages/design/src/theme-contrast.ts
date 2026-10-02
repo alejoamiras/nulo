@@ -21,7 +21,8 @@ const TOKEN_SELECTORS = new Set([":root", '[theme="light"]', '[theme="dark"]'])
 
 const NESTING: Record<string, number> = { "[": 1, "(": 1, "]": -1, ")": -1 }
 
-/** Split a selector list at its top-level commas; a selector's quoted values sit inside brackets. */
+/** Split a selector list at its top-level commas. A quoted value holding a bracket, comma or semicolon
+ *  would misparse; base.css has none, and this reads base.css only. */
 function splitSelectors(prelude: string): string[] {
 	const parts = [""]
 	let depth = 0

@@ -105,11 +105,22 @@ describe("resolveColor rgb() parsing", () => {
 const COLOR_TOKENS = [surfaces, brand, text, borders, scrims, colors].flatMap((group) => Object.values(group))
 const VALUE_TOKENS = [fonts, easings, layout].flatMap((group) => Object.values(group))
 
+/** A non-color token's value with its `var(--x, fallback)` chain followed; undefined when unresolvable. */
+function resolveValue(name: string, map: Record<string, string>, depth = 0): string | undefined {
+	const value = map[name]
+	const alias = value?.match(/^var\(\s*(--[a-z0-9-]+)\s*(?:,\s*(.+))?\)$/i)
+	if (!alias || depth > 8) return value
+	return map[alias[1]] != null ? resolveValue(alias[1], map, depth + 1) : alias[2]?.trim()
+}
+
 /** Contract tokens an unthemed root and a dark root resolve differently, or that one of them lacks. */
 function paletteDrift(css?: string): string[] {
 	const unthemed = themeMap(null, css)
 	const dark = themeMap("dark", css)
-	const drifted = VALUE_TOKENS.filter((name) => !(name in unthemed) || unthemed[name] !== dark[name])
+	const drifted = VALUE_TOKENS.filter((name) => {
+		const value = resolveValue(name, unthemed)
+		return value === undefined || value !== resolveValue(name, dark)
+	})
 	for (const name of COLOR_TOKENS) {
 		try {
 			if (JSON.stringify(resolveColor(name, unthemed)) !== JSON.stringify(resolveColor(name, dark))) drifted.push(name)
@@ -133,6 +144,10 @@ describe("dark palette, unthemed vs explicit", () => {
 	test("a token resolving through a theme-only variable is drift", () => {
 		const viaLog = css.replace("--nulo-surface: #141312;", "--nulo-surface: var(--log-background, #141312);")
 		expect(paletteDrift(viaLog)).toContain("--nulo-surface")
+	})
+	test("a size resolving through a theme-only variable is drift", () => {
+		const viaDark = `${css.replace("--base-width: 360px;", "--base-width: var(--dark-width, 360px);")}\n[theme="dark"] { --dark-width: 400px; }`
+		expect(paletteDrift(viaDark)).toContain("--base-width")
 	})
 	test("a token rule nested in an at-rule is refused", () => {
 		expect(() => themeMap("dark", `${css}\n@media not all { :root { --app-bg: #333; } }`)).toThrow(/at-rule/)
