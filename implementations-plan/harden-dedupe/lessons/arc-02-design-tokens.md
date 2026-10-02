@@ -16,3 +16,9 @@
   1. **Rejected: quoted brackets, commas or semicolons inside a selector misparse.** The helper reads only the hand-written `base.css`, which has no such selector, so hardening it is churn the no-over-engineering rule excludes. The comment now states that limit instead.
   2. **Adopted: a non-color token aliasing a theme-only variable compared equal as raw strings.** Non-color tokens now resolve their `var()` chain, and the width case is a regression test.
 - **Code round 3:** NOT CONVERGED, one should-fix finding, adopted. **A nested `var()` fallback came back as an unresolved string, so a dark-only variable inside it went unseen.** The resolver now follows fallbacks too and returns undefined once it is past the depth limit. The nested case is a regression test.
+- **Code round 4:** CONVERGED, no findings.
+
+## Screenshots
+
+- Base 382f822b against head 1e94a9ea, Chrome and Firefox, dark and light: 40 of 40 identical. The surfaces are Home, Settings, Change password, Reset, the Receive popup over its scrim, onboarding Presto (whose banner carries its own `theme` attribute) and the landing. The two builds' CSS hashes differ, so the run compared changed CSS. A same-SHA stability run on 179777e5 was also 40 of 40. The later commits change tests and docs only.
+- Harness fix: Firefox first showed a 333 px diff from an icon animating inside the banner's shadow root. The freeze CSS now reaches every open shadow root, and running animations are stopped before each shot.
