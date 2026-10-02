@@ -1,4 +1,4 @@
-# ADVISORY Firefox twin of pr-extension-network-e2e.yml: its aggregator is in no branch's required set (promotion:
+# Firefox twin of pr-extension-network-e2e.yml: its aggregator is required on dev (advisory on main; promotion:
 # CLAUDE.md, "Staged-rollout switches"). scripts/ci-cd/behavior-gating.test.ts pins the parity.
 name: Extension network e2e (Firefox)
 
@@ -96,7 +96,7 @@ jobs:
           NETWORK: ${{ needs.changes.outputs.extension-network }}
           LABEL_HIT: ${{ contains(github.event.pull_request.labels.*.name, 'e2e:extension-network') || contains(github.event.pull_request.labels.*.name, 'e2e:network') }}
         run: |
-          # An advisory lane has nothing to say about a draft; `ready_for_review` re-runs it.
+          # A draft has nothing to say to this lane, and its aggregator passes when skipped; `ready_for_review` re-runs it.
           if [ "$DRAFT" = "true" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
           elif [ "$EVENT" = "workflow_dispatch" ] \

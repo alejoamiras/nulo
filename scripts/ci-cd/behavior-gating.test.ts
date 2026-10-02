@@ -216,7 +216,7 @@ describe("CI behavior-gating guard", () => {
 })
 
 /**
- * The Firefox lanes are twins of the Chrome ones and ADVISORY. Two ways that can rot silently: a
+ * The Firefox lanes are twins of the Chrome ones (PR aggregators required on dev, nightly and release jobs advisory). Two ways that can rot silently: a
  * twin drifts from the lane it mirrors (a file stops running on Firefox and nothing says so), or
  * a Firefox job slips into an aggregator a branch requires and starts blocking merges.
  */
