@@ -140,6 +140,17 @@ release everytime we add a token, but obviously that's a follow-up".
   Network, and the testnet domain is wrong for neither; the gas-link follow-up keeps the mainnet
   case.
 
+## Step 4 · The owner's hands-on run
+
+- 2026-10-02, the owner: "#751, #752 both work fine!" Asked whether the run covered sending Test
+  USDC and paying once with Private Fee Juice, in both browsers: "Yes, it worked perfectly." No tx
+  hashes were recorded.
+- Funds come from unleashed's faucet ("Get SIGNAL"), which needs no gas; the Firefox reviewer
+  notes now say so.
+- One bug: on the first open after onboarding, Home showed four token rows, then three. Home's
+  three-row cap counted finished rows only, so the seed placeholders sat on top of it until the
+  last one landed. The fix went to its own PR.
+
 ## Step 5 · The token rows and their prices, for the owner
 
 - Screenshots for the sign-off page, not committed: a fresh V6 testnet profile, dark, 360×600 at

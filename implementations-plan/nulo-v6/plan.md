@@ -58,7 +58,8 @@ base: origin/dev at 910a4def
   minute per unlocked wallet at four seeds, from the incoming-transfer pollers' 30 s timer), went
   to `follow-ups.md` § Incoming transfers. Codex converged in three rounds, and a fourth after the
   rebase onto #750 found nothing. The owner signed off the rows, their cost and the pricing on
-  2026-10-02 (step 5). Step 4, the owner's hands-on run, stays in `follow-ups.md`
+  2026-10-02 (step 5). Step 4, the owner's hands-on run, passed on both browsers on 2026-10-02
+  ("Yes, it worked perfectly") and found one bug in Home's token rows, fixed in its own PR
   (`lessons/phase-8.md`).
 - **Lessons:** the two `lessons.md` entries tagged 5.2.0 (the node client's retries, the fee-juice
   import's weight) hold on 6.0.0-rc.1 and are re-dated, and the `bun test` entry's scope is
