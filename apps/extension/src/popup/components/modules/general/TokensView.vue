@@ -446,7 +446,7 @@ onBeforeUnmount(() => {
 			</Flex>
 		</Flex>
 
-		<Flex direction="column" :class="$style.token_list">
+		<Flex direction="column" :class="$style.token_list" data-testid="tokens-list" :data-settled="isSettled">
 			<template v-if="visibleTokenImports.length">
 				<TokenImportRow v-for="op in visibleTokenImports" :key="op.id" :op="op" />
 			</template>
