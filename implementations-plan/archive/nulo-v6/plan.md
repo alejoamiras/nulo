@@ -15,8 +15,9 @@ base: origin/dev at 910a4def
 
 ## Outcome
 
-- **Date:** 2026-10-01. **Status:** closed. Arc A merged in #736 and shipped as 0.29.0, and the
-  npm packages are at 0.2.0. Arc C (P8) and the store upload (P9) moved to follow-ups.
+- **Date:** 2026-10-01, archived 2026-10-02. **Status:** closed. Arc A merged in #736 and shipped
+  as 0.29.0, and the npm packages are at 0.2.0. Arc C (P8) and the store upload (P9) moved to
+  follow-ups, and both then ran from there: arc C in #751, the store upload as 0.30.0.
 - **Shipped:**
   - **Arc A, #736** (squash `80663b61`, P1 to P5). The wallet runs on Aztec 6.0.0-rc.1: the
     `@aztec-labs/*` and `@aztec-foundation/*` scopes, exact-pinned, with Presto's SDK, Aztec
@@ -40,11 +41,12 @@ base: origin/dev at 910a4def
   amount of tests we have"); the driver dispatched the npm real run, compared its digests and
   merged #737, #738 and #739 on the owner's word, and the owner approved `npm-publish`. Each is
   quoted in `lessons/phase-6.md` and `lessons/phase-7.md`.
-- **Codex:** arc A converged after three fix rounds and a fourth verification round on `12cf1fac`
-  ("No material findings"), logged in `lessons/phase-5.md`. No later arc ran, so there was no
-  cross-arc pass.
-- **Moved to follow-ups:** P8, because unleashed's testnet manifest still names the V5 generation
-  (`walletChainId 1816023401`); P9, because the owner did not call the store upload. Each keeps
+- **Codex, at the 2026-10-01 close-out:** arc A converged after three fix rounds and a fourth
+  verification round on `12cf1fac` ("No material findings"), logged in `lessons/phase-5.md`. No
+  later arc had run, so there was no cross-arc pass then.
+- **Moved to follow-ups at the 2026-10-01 close-out:** P8, because unleashed's testnet manifest
+  then still named the V5 generation (`walletChainId 1816023401`); P9, because the owner had not
+  called the store upload. Each keeps
   its steps here as the spec, in `follow-ups.md` § Aztec V6, with the plan's other follow-ups.
   The e2e mint guard among them was fixed in arc A (`10aa5acc`). The V5 dRPC key's retirement
   (P7 step 6) was not confirmed by close-out, and the owner dropped it from the follow-ups:
@@ -59,12 +61,48 @@ base: origin/dev at 910a4def
   to `follow-ups.md` § Incoming transfers. Codex converged in three rounds, and a fourth after the
   rebase onto #750 found nothing. The owner signed off the rows, their cost and the pricing on
   2026-10-02 (step 5). Step 4, the owner's hands-on run, passed on both browsers on 2026-10-02
-  ("Yes, it worked perfectly") and found one bug in Home's token rows, fixed in its own PR
-  (`lessons/phase-8.md`).
+  ("Yes, it worked perfectly") and found one bug in Home's token rows, fixed in #754
+  (`lessons/phase-8.md`). That pass rests on the owner's word, so P8's gate is not met as written:
+  it asked for the run's transaction hashes, and none were recorded. Step 2's pins leave the name
+  out: it stays an uncompared label, as `lessons/phase-8.md` records.
+- **The store upload (P9), run from follow-ups on 2026-10-02**, on the owner's call
+  (`lessons/phase-9.md`):
+  - The listing, the art, the remote-code notes and the Terms' store links shipped in #749 and the
+    reviewer notes' faucet in #753, signed off by the owner on 2026-10-01; § 1 links AMO by add-on
+    id, not by slug, on the owner's call.
+  - Release 0.30.0: promote #755, release PR #756, tag `v0.30.0` with both zips and
+    `SHASUMS256.txt` (publish run `37055688605`), sync #757; nulo.sh links `v0.30.0` and serves
+    every `_headers` header. Beside the store copy it ships arc C (#751), its hands-on fix
+    (#754), and #752, the notice for a chain the wallet does not serve, from the owner's report
+    on 0.29.0.
+  - The in-place update from 0.28.0 (step 4) found that a V5 profile cannot be deleted after a
+    failed unlock. Step 4 offered a fix before the upload or a release note; the owner shipped
+    with a follow-up instead: "Ship now, add as a follow-up.", then "Ship now regardless".
+  - Two follow-ups opened (`follow-ups.md` § Aztec V6): that lock-out, and Privacy § 5, which
+    never names the get-gas link's site. The privacy edit waits because a legal document change
+    is the owner's call.
+  - Live checks and `store-check` (run `37059450225`) green; the owner's Mac session edited both
+    listings, and AMO's became "Nulo V6" at `nulo-v6`.
+  - The store run `37062096394` submitted 0.30.0 to the Chrome Web Store, where it is in review as
+    a staged publish. Its Firefox job failed: #753 had taken the reviewer notes past AMO's
+    3,000-character cap, which nothing checked. The Mac session then submitted the same zip to AMO
+    by hand, with the faucet paragraph cut on the owner's call, and AMO approved 0.30.0.0 the same
+    day. #758 makes the publish refuse over-cap notes before the upload.
+- **Cross-arc pass:** Post-implementation asked for one before #749 or #751 opened, and it did not
+  run then. It ran at the archive on 2026-10-02 (`lessons/phase-9.md`): round 1 found the V5
+  lock-out and Privacy § 5's gap (both now follow-ups) and P8's unrecorded hashes (corrected
+  above), and three findings were rejected with reasons; round 2 corrected this close-out's
+  records; round 3, the last, found nothing material, corrected one line of that log and the
+  runbook's advice on re-running after a 400, and raised two low points in #758's code, which
+  #758 fixed before it merged, on the owner's call.
 - **Lessons:** the two `lessons.md` entries tagged 5.2.0 (the node client's retries, the fee-juice
   import's weight) hold on 6.0.0-rc.1 and are re-dated, and the `bun test` entry's scope is
   renamed after reproducing it on `@aztec-labs/foundation` 6.0.0-rc.1. The new gotchas went to
   the `aztec-update` skill (§ Gotchas), since `lessons.md` is at its budget (`lessons/phase-10.md`).
+  P9 adds none there: an in-page click reaching a control an overlay covers is already the
+  `e2e-testing` skill's `pointerClick` rule, and its two store gotchas (an AMO 400 that created no
+  version; a Chrome dashboard locked by an approved, staged submission) went to CLAUDE.md's release
+  runbook.
 - **Seeds retired:** the `/goal` and `/loop` seeds below are spent; nothing to resume.
 
 ## Phase 0 (answered by the owner, 2026-09-30)
@@ -1204,6 +1242,8 @@ as its spec.
 - Layers: unit, smoke e2e, live.
 
 ### P9 · Store upload (optional, on the owner's call), moved to follow-ups
+
+Ran from follow-ups on 2026-10-02; the record is `lessons/phase-9.md`.
 
 Entry: the owner calls it, after 0.29.0 or a later release (D27). If it is not called by P10, this
 phase moves to follow-ups with these steps as its spec. A6's dashboard steps stand either way.
