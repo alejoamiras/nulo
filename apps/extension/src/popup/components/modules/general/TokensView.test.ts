@@ -304,6 +304,31 @@ describe("TokensView — Home order and cap", () => {
 		expect(rows()).toEqual(["mine", "late-mine"])
 	})
 
+	test("a token_import op from ANOTHER network never shows, not even in a default's slot", async () => {
+		const op = (id: string, networkId: string) => ({
+			id,
+			kind: "token_import",
+			profileId: "p1",
+			networkId,
+			accountAddress: H.store.current.account?.address,
+			contractAddress: TEST_USDC.toLowerCase(),
+			terminalAt: null,
+			progress: { stage: "pending" },
+		})
+		H.getTokenBalances.mockResolvedValue([])
+		H.getOperations.mockResolvedValue([op("there", "net-other")])
+		const entry = { chainId: CHAIN, contract: TEST_USDC, symbol: "USDC", displayName: "Test USDC", status: "seeding" }
+		const wrapper = mount(TokensView, { shallow: true, props: { seedEntries: [entry], seedReady: true } })
+		await flushPromises()
+		expect(wrapper.findAllComponents({ name: "TokenImportRow" })).toHaveLength(0)
+		expect(wrapper.findAllComponents(TokenSeedRow)).toHaveLength(1)
+
+		H.journalAdded.emit(op("here", "net-main"))
+		await nextTick()
+		expect(wrapper.findAllComponents({ name: "TokenImportRow" }).map((c) => (c.props("op") as { id: string }).id)).toEqual(["here"])
+		expect(wrapper.findAllComponents(TokenSeedRow)).toHaveLength(0)
+	})
+
 	test("a same-address row from ANOTHER chain is not rendered (fetch and live add)", async () => {
 		H.getTokenBalances.mockResolvedValue([namedRow(1, "A", { chainId: CHAIN }), namedRow(2, "FOREIGN", { chainId: 1 })])
 		const wrapper = mount(TokensView, { shallow: true })

@@ -5,13 +5,13 @@
  * its token row sorts: adding the defaults never shows a row and then takes it away. Matched by
  * contract, never by symbol.
  */
-import type { OrderableRow } from "@/utils/token-order"
+import { HOME_TOKEN_ROWS, type OrderableRow, capTokenRows } from "@/utils/token-order"
 import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
-import type { SeedStatusEntry } from "@/wallet/services/token/spec"
+import type { SeedStatus, SeedStatusEntry } from "@/wallet/services/token/spec"
 
 export type SlotTokenRow = OrderableRow & { id: number | string }
 export type SlotImportOp = Pick<OperationRecord, "id" | "contractAddress" | "terminalAt">
-export type SlotSeed = Pick<SeedStatusEntry, "chainId" | "contract" | "symbol" | "displayName">
+export type SlotSeed = Pick<SeedStatusEntry, "chainId" | "contract" | "symbol" | "displayName" | "status">
 
 export type HomeSlot<R extends SlotTokenRow, O extends SlotImportOp, S extends SlotSeed> = OrderableRow & {
 	key: string
@@ -24,6 +24,9 @@ export type HomeSlots<R extends SlotTokenRow, O extends SlotImportOp, S extends 
 }
 
 const contractOf = (address: string | undefined) => address?.toLowerCase() ?? ""
+
+/** `seeded` stays working until its balance row lands; `failed` and `rejected` have stopped. */
+export const isSeedWorking = (status: SeedStatus) => status === "pending" || status === "seeding" || status === "seeded"
 
 function pendingRow(seed: SlotSeed): OrderableRow {
 	return {
@@ -75,4 +78,15 @@ export function homeSlots<R extends SlotTokenRow, O extends SlotImportOp, S exte
 		else slots.push({ ...pendingRow(seed), key: `seed:${contract}`, kind: "seed", entry: seed })
 	}
 	return { slots, userImports }
+}
+
+const hasStopped = (slot: { kind: string; entry?: SlotSeed }) =>
+	slot.kind === "seed" && slot.entry !== undefined && !isSeedWorking(slot.entry.status)
+
+/** Home's cap, except that a default which stopped is never hidden: Home is the only place that
+ *  shows it, with its reason and its Retry, so past the cap it follows the capped rows. */
+export function capHomeSlots<T extends { kind: string; entry?: SlotSeed }>(ordered: readonly T[], budget = HOME_TOKEN_ROWS) {
+	const { shown, overflow } = capTokenRows(ordered, budget)
+	const stopped = ordered.slice(shown.length).filter(hasStopped)
+	return { shown: [...shown, ...stopped], overflow: overflow - stopped.length }
 }

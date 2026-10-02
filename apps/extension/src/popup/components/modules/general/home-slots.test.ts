@@ -1,9 +1,16 @@
 import { describe, expect, test } from "vitest"
-import { capTokenRows, orderTokenRows } from "@/utils/token-order"
-import { type SlotImportOp, homeSlots } from "./home-slots"
+import { orderTokenRows } from "@/utils/token-order"
+import type { SeedStatus } from "@/wallet/services/token/spec"
+import { type SlotImportOp, capHomeSlots, homeSlots } from "./home-slots"
 
 const CHAIN = 7
-const seed = (symbol: string, chainId = CHAIN) => ({ chainId, contract: `0xSeed${symbol}`, symbol, displayName: `Test ${symbol}` })
+const seed = (symbol: string, chainId = CHAIN, status: SeedStatus = "pending") => ({
+	chainId,
+	contract: `0xSeed${symbol}`,
+	symbol,
+	displayName: `Test ${symbol}`,
+	status,
+})
 const SEEDS = ["USDC", "USDT", "EURC", "GBPC"].map((symbol) => seed(symbol))
 /** Lowercase on purpose: the seed list's contracts are mixed case. */
 const op = (symbol: string, id = symbol, terminalAt: number | null = null): SlotImportOp => ({
@@ -63,10 +70,22 @@ describe("homeSlots", () => {
 		]
 		for (const [rows, imports] of steps) {
 			const { slots } = slotsOf(rows, imports)
-			const home = capTokenRows(orderTokenRows(slots, { pinnedContracts: new Set(), fiatOf: () => undefined }))
+			const home = capHomeSlots(orderTokenRows(slots, { pinnedContracts: new Set(), fiatOf: () => undefined }))
 			expect(home.shown.map((s) => s.token.symbol)).toEqual(["EURC", "GBPC", "USDC"])
 			expect(home.overflow).toBe(1)
 			expect(slots).toHaveLength(4)
 		}
+	})
+
+	test("a default that stopped is never hidden by the cap; inside it, it keeps its place", () => {
+		const home = (seeds: ReturnType<typeof seed>[]) =>
+			capHomeSlots(orderTokenRows(slotsOf([], [], seeds).slots, { pinnedContracts: new Set(), fiatOf: () => undefined }))
+		const failedFourth = home([seed("USDC"), seed("USDT", CHAIN, "failed"), seed("EURC"), seed("GBPC")])
+		expect(failedFourth.shown.map((s) => s.token.symbol)).toEqual(["EURC", "GBPC", "USDC", "USDT"])
+		expect(failedFourth.overflow).toBe(0)
+
+		const rejectedFirst = home([seed("USDC"), seed("USDT"), seed("EURC", CHAIN, "rejected"), seed("GBPC")])
+		expect(rejectedFirst.shown.map((s) => s.token.symbol)).toEqual(["EURC", "GBPC", "USDC"])
+		expect(rejectedFirst.overflow).toBe(1)
 	})
 })

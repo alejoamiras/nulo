@@ -16,8 +16,8 @@ import { PriceServiceClient } from "@/wallet/services/price/client"
 /** Utils */
 import { stringCompare } from "@/utils/string"
 import { parseRawBalance, safeFiatOf } from "@/utils/token-amount"
-import { capTokenRows, forChain, orderTokenRows } from "@/utils/token-order"
-import { homeSlots } from "./home-slots"
+import { forChain, orderTokenRows } from "@/utils/token-order"
+import { capHomeSlots, homeSlots } from "./home-slots"
 
 /** Composables */
 import { usePinnedTokens, pinScopeOf } from "@/composables/usePinnedTokens"
@@ -65,6 +65,8 @@ const visibleTokenImports = computed(() => {
 		// Two profiles can hold the SAME address (one mnemonic imported twice): the profile
 		// compare keeps one profile's import from rendering under the other.
 		if (op.profileId && appStore.profile?.id && op.profileId !== appStore.profile.id) return false
+		// The same address exists on every network, and so can a contract address.
+		if (op.networkId && op.networkId !== appStore.network?.id) return false
 		// In-flight
 		if (op.terminalAt === null) return true
 		// Recently-failed retention window so the user sees the reason.
@@ -100,7 +102,7 @@ const homeLayout = computed(() =>
 	}),
 )
 const homeRows = computed(() =>
-	capTokenRows(orderTokenRows(homeLayout.value.slots, { pinnedContracts: pins.pinnedContracts.value, fiatOf })),
+	capHomeSlots(orderTokenRows(homeLayout.value.slots, { pinnedContracts: pins.pinnedContracts.value, fiatOf })),
 )
 const shownSlots = computed(() => homeRows.value.shown)
 const overflowCount = computed(() => homeRows.value.overflow)
