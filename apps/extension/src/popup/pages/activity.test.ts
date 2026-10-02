@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { ref } from "vue"
 
 import { createAppStoreHarness } from "../../../tests/helpers/app-store-harness"
+import { TESTNET_TOKENS } from "@/wallet/services/token/default-tokens"
 
 const H = vi.hoisted(() => {
 	const event = () => ({ add: () => {}, remove: () => {} })
@@ -144,14 +145,14 @@ describe("pages/activity — arrivals", () => {
 })
 
 describe("pages/activity — the received row's token", () => {
-	const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
+	const TEST_USDC = TESTNET_TOKENS.USDC
 	const TESTNET = { id: "net-1", chainId: CHAIN_IDS.TESTNET }
-	const TST = { id: 7, chainId: CHAIN_IDS.TESTNET, contract: CUSD, name: "Test", symbol: "TST", decimals: 18 }
+	const TST = { id: 7, chainId: CHAIN_IDS.TESTNET, contract: TEST_USDC, name: "Test", symbol: "TST", decimals: 18 }
 	const USDC_QUOTE = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
 	const receipt = (over: Record<string, unknown> = {}) => ({
 		...record("r", 1000),
 		tokenId: TST.id,
-		contract: CUSD,
+		contract: TEST_USDC,
 		amountRaw: (1000n * 10n ** 18n).toString(),
 		...over,
 	})

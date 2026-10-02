@@ -9,12 +9,13 @@ import type { DefaultTokenSeed } from "@/wallet/services/token/default-tokens"
 export const TOKEN_SEEDS_KEY = "nulo:e2e:token-seeds"
 
 /**
- * The sandbox token's symbol is fixed by the e2e fixture
- * (`tests/e2e/fixtures/aztec.ts` deploys "TestToken"/"TST"), so it is pinned
- * HERE rather than accepted from storage: the address is the only field a test
- * genuinely cannot know before the per-run deploy.
+ * The sandbox token's symbol and decimals are fixed by the e2e fixture
+ * (`tests/e2e/fixtures/aztec.ts` deploys "TestToken"/"TST" with 18 decimals),
+ * so they are pinned HERE rather than accepted from storage: the address is the
+ * only field a test genuinely cannot know before the per-run deploy.
  */
 const SANDBOX_SYMBOL = "TST"
+const SANDBOX_DECIMALS = 18
 const SANDBOX_DISPLAY_NAME = "TestToken"
 
 /** Sandbox chain id. A seed for any other chain is rejected outright — an
@@ -59,6 +60,7 @@ export class ChromeStorageTokenSeeds {
 				contract: entry.contract,
 				expectedClassId: entry.expectedClassId,
 				expectedSymbol: SANDBOX_SYMBOL,
+				expectedDecimals: SANDBOX_DECIMALS,
 				displayName: SANDBOX_DISPLAY_NAME,
 			},
 		]

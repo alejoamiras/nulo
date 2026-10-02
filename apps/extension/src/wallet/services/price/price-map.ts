@@ -2,7 +2,7 @@
  * Static price mapping: which CoinGecko id prices which asset, per chain.
  *
  * Aztec-native tokens are too new to be indexed anywhere, so each entry
- * maps to an Ethereum-side proxy ticker (cUSD → USDC, Fee Juice → AZTEC).
+ * maps to an Ethereum-side proxy ticker (Test USDC → USDC, Fee Juice → AZTEC).
  * The wallet always fetches the FULL id set in one batched request — the
  * query never varies with holdings, so the request reveals nothing about
  * what the user owns.
@@ -14,6 +14,7 @@
  */
 
 import { CHAIN_IDS } from "@/utils/chain-ids"
+import { TESTNET_TOKENS } from "@/wallet/services/token/default-tokens"
 
 export type PriceMapEntry = {
 	coingeckoId: string
@@ -27,16 +28,15 @@ const USDC: PriceMapEntry = {
 	sanity: { min: 0.2, max: 5 },
 }
 
+const USDT: PriceMapEntry = { coingeckoId: "tether", sanity: USDC.sanity }
+
+const EURC: PriceMapEntry = { coingeckoId: "euro-coin", sanity: USDC.sanity }
+
 /** Fee Juice is priced as AZTEC on every chain (1 FJ = 1 AZTEC, per plan Ask 3). */
 export const FEE_JUICE_ENTRY: PriceMapEntry = {
 	coingeckoId: "aztec",
 	sanity: { min: 0.000_1, max: 100 },
 }
-
-/** Alpha V5's cUSD address, which no V6 token is expected to occupy. Its testnet row only keeps the
- *  USDC id in the batched query and its sanity band (the e2e sandbox rule prices as USDC) until a
- *  V6 token is mapped here. */
-const CUSD_CONTRACT = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
 
 /**
  * E2E-ONLY sandbox rule: with `VITE_NULO_E2E_PRICE_MAP=1` (set exclusively by
@@ -48,8 +48,13 @@ const CUSD_CONTRACT = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5
  */
 const E2E_SANDBOX_PRICE_MAP = (import.meta.env.VITE_NULO_E2E_PRICE_MAP ?? "") === "1"
 
-/** (chainId, lowercase contract address) → price-map entry. */
-const TOKEN_ENTRIES: ReadonlyMap<string, PriceMapEntry> = new Map([[`${CHAIN_IDS.TESTNET}:${CUSD_CONTRACT}`, USDC]])
+/** (chainId, lowercase contract address) → price-map entry. The e2e sandbox rule above prices
+ *  through the USDC row too: `allCoingeckoIds()` and `getSanityBand()` read ids and bands here. */
+const TOKEN_ENTRIES: ReadonlyMap<string, PriceMapEntry> = new Map([
+	[`${CHAIN_IDS.TESTNET}:${TESTNET_TOKENS.USDC.toLowerCase()}`, USDC],
+	[`${CHAIN_IDS.TESTNET}:${TESTNET_TOKENS.USDT.toLowerCase()}`, USDT],
+	[`${CHAIN_IDS.TESTNET}:${TESTNET_TOKENS.EURC.toLowerCase()}`, EURC],
+])
 
 export function getPriceMapEntry(chainId: number, contract: string): PriceMapEntry | undefined {
 	if (E2E_SANDBOX_PRICE_MAP && chainId === 0) {
@@ -66,7 +71,7 @@ export function getPriceMapEntry(chainId: number, contract: string): PriceMapEnt
 /** Human ticker for the proxy pricing an id represents — powers the explicit
  *  `via USDC` labeling everywhere a proxy quote drives UI. */
 export function proxyTickerFor(coingeckoId: string): string | undefined {
-	return { "usd-coin": "USDC", aztec: "AZTEC" }[coingeckoId]
+	return { "usd-coin": "USDC", tether: "USDT", "euro-coin": "EURC", aztec: "AZTEC" }[coingeckoId]
 }
 
 export function getSanityBand(coingeckoId: string): { min: number; max: number } | undefined {

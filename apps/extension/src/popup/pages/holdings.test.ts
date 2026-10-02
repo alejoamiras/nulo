@@ -7,8 +7,9 @@ import { createTestingPinia } from "@pinia/testing"
 import { flushPromises, mount } from "@vue/test-utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { afterEach, describe, expect, test, vi } from "vitest"
+import { TESTNET_TOKENS } from "@/wallet/services/token/default-tokens"
 
-const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
+const TEST_USDC = TESTNET_TOKENS.USDC
 let seedRows: unknown[] = []
 let fetchError: Error | undefined
 const balanceEvents = { added: new EventHandler(), updated: new EventHandler(), deleted: new EventHandler(), connected: new EventHandler() }
@@ -105,7 +106,7 @@ describe("holdings page", () => {
 		installChromeStorage()
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
 		seedRows = [
-			row("b1", "AAA", CHAIN_IDS.TESTNET, CUSD),
+			row("b1", "AAA", CHAIN_IDS.TESTNET, TEST_USDC),
 			row("b2", "BBB", CHAIN_IDS.TESTNET),
 			row("b-foreign", "FOR", CHAIN_IDS.SANDBOX),
 		]
@@ -135,7 +136,7 @@ describe("holdings page", () => {
 	test("a reconnect rereads the config: a fiat switch flipped while detached takes effect", async () => {
 		installChromeStorage()
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
-		seedRows = [row("b1", "AAA", CHAIN_IDS.TESTNET, CUSD)]
+		seedRows = [row("b1", "AAA", CHAIN_IDS.TESTNET, TEST_USDC)]
 		const w = await mountPage()
 		expect(w.find('[data-testid="holdings-summary"]').text()).toContain("$")
 

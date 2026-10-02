@@ -20,6 +20,7 @@ export const SEED: DefaultTokenSeed = {
 	contract: CONTRACT,
 	expectedClassId: CLASS_ID,
 	expectedSymbol: "cUSD",
+	expectedDecimals: 6,
 	displayName: "Compressed USD",
 }
 

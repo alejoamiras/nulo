@@ -9,6 +9,7 @@
 import { flushPromises, mount } from "@vue/test-utils"
 import { createTestingPinia } from "@pinia/testing"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { TESTNET_TOKENS } from "@/wallet/services/token/default-tokens"
 
 let deletedHandler: ((tb: unknown) => void) | undefined
 let addedHandler: ((tb: unknown) => void) | undefined
@@ -16,13 +17,13 @@ let updatedHandler: ((tb: unknown) => void) | undefined
 let configHandler: ((prop: { key: string; value: unknown }) => void) | undefined
 let connectedHandler: (() => void) | undefined
 
-const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
-// tok-1 is price-mapped (the testnet cUSD row); tok-2 is deliberately unmapped.
+const TEST_USDC = TESTNET_TOKENS.USDC
+// tok-1 is price-mapped (the testnet Test USDC row); tok-2 is deliberately unmapped.
 const SEED = [
 	{
 		id: "b1",
 		account: "0xacct",
-		token: { id: "tok-1", symbol: "AAA", decimals: 6, chainId: CHAIN_IDS.TESTNET, contract: CUSD },
+		token: { id: "tok-1", symbol: "AAA", decimals: 6, chainId: CHAIN_IDS.TESTNET, contract: TEST_USDC },
 		publicBalance: (250n * 10n ** 6n).toString(),
 		privateBalance: (1_000n * 10n ** 6n).toString(),
 	},
@@ -602,7 +603,7 @@ describe("BalanceView — token hero (tokenBalance prop)", () => {
 		const { wrapper } = await mountView({ tokenBalance: SEED[0] })
 
 		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("AAA")
-		expect(wrapper.find('[data-testid="balance-fiat"]').text()).toBe("≈ $1,249.82") // (1,000 + 250) cUSD at $0.999857
+		expect(wrapper.find('[data-testid="balance-fiat"]').text()).toBe("≈ $1,249.82") // (1,000 + 250) Test USDC at $0.999857
 		const icons = wrapper.findAll('[data-testid="stub-icon"]')
 		expect(icons.map((i) => i.attributes("data-name"))).toEqual(["lock", "globe"])
 		expect(wrapper.find('[data-testid="private-balance-value"]').text()).toBe("1,000")

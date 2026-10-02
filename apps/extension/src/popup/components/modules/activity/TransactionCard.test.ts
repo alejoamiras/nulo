@@ -14,6 +14,7 @@ import { describe, expect, test, vi } from "vitest"
 import { OriginType, TransferType, TxStatus } from "@/wallet/services/transaction/spec"
 import { CHAIN_IDS } from "@/utils/chain-ids"
 import { flushPromises } from "@vue/test-utils"
+import { TESTNET_TOKENS } from "@/wallet/services/token/default-tokens"
 
 // Bypass the real Pinia app store + its chrome.storage subscriptions —
 // TransactionCard only reads `network.chainId` + `defaultExplorer` for the
@@ -152,7 +153,7 @@ describe("modules/activity/TransactionCard (settled)", () => {
 })
 
 describe("TransactionCard fiat (D2 activity rows)", () => {
-	const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
+	const TEST_USDC = TESTNET_TOKENS.USDC
 	const mkTransferTx = (contract: string) =>
 		({
 			hash: "0xfiat1",
@@ -177,7 +178,7 @@ describe("TransactionCard fiat (D2 activity rows)", () => {
 
 	test("priced transfer row renders the ≈ fiat under the amount", async () => {
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 1.0, fetchedAt: Date.now(), providerUpdatedAt: null } }
-		const w = mount(TransactionCard, { props: { tx: mkTransferTx(CUSD) }, global: { stubs: STUBS } })
+		const w = mount(TransactionCard, { props: { tx: mkTransferTx(TEST_USDC) }, global: { stubs: STUBS } })
 		await flushPromises()
 		const fiat = w.find('[data-testid="activity-fiat"]')
 		expect(fiat.exists()).toBe(true)

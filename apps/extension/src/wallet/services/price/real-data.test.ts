@@ -4,7 +4,7 @@
  * there): run with `COINGECKO_REAL_TESTS=1 bun run test src/wallet/services/price`.
  *
  * Verifies the two load-bearing external assumptions:
- * - the mapped ids (`aztec`, `usd-coin`) exist and resolve to quotes that
+ * - the mapped ids (`aztec`, `usd-coin`, `tether`, `euro-coin`) exist and resolve to quotes that
  *   pass our own sanity bands;
  * - the keyless endpoint answers with permissive CORS (the manifest ships
  *   NO CoinGecko host_permission — the fetch relies on `ACAO: *`).

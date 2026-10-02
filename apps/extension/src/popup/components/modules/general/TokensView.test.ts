@@ -10,6 +10,7 @@ import { flushPromises, mount } from "@vue/test-utils"
 import { nextTick } from "vue"
 import { createAppStoreHarness } from "../../../../../tests/helpers/app-store-harness"
 import { installChromeStorage } from "../../../../../tests/helpers/chrome-storage-mock"
+import { TESTNET_TOKENS } from "@/wallet/services/token/default-tokens"
 
 const H = vi.hoisted(() => {
 	const makeEvent = () => {
@@ -240,8 +241,8 @@ describe("TokensView — section refresh dot", () => {
 })
 
 describe("TokensView — Home order and cap", () => {
-	// cUSD is price-mapped on the testnet; with a `usd-coin` quote seeded it is the one priced row.
-	const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
+	// Test USDC is price-mapped on the testnet; with a `usd-coin` quote seeded it is the one priced row.
+	const TEST_USDC = TESTNET_TOKENS.USDC
 	const CHAIN = CHAIN_IDS.TESTNET
 
 	beforeEach(() => {
@@ -253,7 +254,7 @@ describe("TokensView — Home order and cap", () => {
 		H.quotes.current = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
 		H.getTokenBalances.mockResolvedValue([
 			namedRow(3, "ZED", { chainId: CHAIN }),
-			namedRow(1, "PRICED", { contract: CUSD, chainId: CHAIN }),
+			namedRow(1, "PRICED", { contract: TEST_USDC, chainId: CHAIN }),
 			namedRow(4, "EMPTY", { chainId: CHAIN, publicBalance: "0" }),
 			namedRow(2, "ALPHA", { chainId: CHAIN }),
 		])
@@ -427,6 +428,8 @@ describe("TokensView — loading, placeholders and the empty state", () => {
 	})
 	const emptyState = (w: ReturnType<typeof mount>) => w.find('[data-testid="tokens-empty-import-link"]').exists()
 	const ghostRows = (w: ReturnType<typeof mount>) => w.findAll('[data-testid="tokens-skeleton-row"]').length
+	/** What the e2e suites wait on before measuring anything below the list. */
+	const settled = (w: ReturnType<typeof mount>) => w.find('[data-testid="tokens-list"]').attributes("data-settled")
 	const seedRows = (w: ReturnType<typeof mount>) =>
 		w.findAllComponents(TokenSeedRow).map((c) => (c.props("entry") as { contract: string }).contract)
 	let wrapper: ReturnType<typeof mount>
@@ -462,8 +465,10 @@ describe("TokensView — loading, placeholders and the empty state", () => {
 		wrapper = mount(TokensView, { shallow: true, props: { seedEntries: [], seedReady: false } })
 		await flushPromises()
 		expect(emptyState(wrapper)).toBe(false)
+		expect(settled(wrapper)).toBe("false")
 		await wrapper.setProps({ seedReady: true })
 		expect(emptyState(wrapper)).toBe(true)
+		expect(settled(wrapper)).toBe("true")
 
 		// The other order: seed status first, balances still in flight.
 		const pending = deferred<unknown[]>()
@@ -471,10 +476,23 @@ describe("TokensView — loading, placeholders and the empty state", () => {
 		const second = mount(TokensView, { shallow: true, props: { seedEntries: [], seedReady: true } })
 		await flushPromises()
 		expect(emptyState(second)).toBe(false)
+		expect(settled(second)).toBe("false")
 		pending.resolve([])
 		await flushPromises()
 		expect(emptyState(second)).toBe(true)
+		expect(settled(second)).toBe("true")
 		second.unmount()
+	})
+
+	test("rows shown before the seed status loads leave the list unsettled: more rows are still to come", async () => {
+		H.getTokenBalances.mockResolvedValue([balanceRow()])
+		wrapper = mount(TokensView, { shallow: true, props: { seedEntries: [], seedReady: false } })
+		await flushPromises()
+		expect(wrapper.findAllComponents(TokenCard)).toHaveLength(1)
+		expect(settled(wrapper)).toBe("false")
+		await wrapper.setProps({ seedEntries: [seedEntry()], seedReady: true })
+		expect(seedRows(wrapper)).toEqual([SEED_CONTRACT])
+		expect(settled(wrapper)).toBe("true")
 	})
 
 	test("anonymous rows appear only after 300 ms of a blank wait, and leave when anything real shows", async () => {

@@ -5,6 +5,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import { CHAIN_IDS } from "@/utils/chain-ids"
 import type { PriceState } from "@/wallet/services/price/spec"
 import TokenCard from "./TokenCard.vue"
+import { TESTNET_TOKENS } from "@/wallet/services/token/default-tokens"
 
 // TokenCard imports useAppStore but never reads from it. The store body calls
 // syncedRef which touches chrome.storage.local — not stubbed in vitest.setup.ts.
@@ -36,7 +37,7 @@ const STUBS = {
 const makeRouter = () =>
 	createRouter({ history: createMemoryHistory(), routes: [{ path: "/:pathMatch(.*)*", component: { template: "<div />" } }] })
 
-const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
+const TEST_USDC = TESTNET_TOKENS.USDC
 
 const tokenInfo = {
 	id: 1,
@@ -166,7 +167,7 @@ describe("TokenCard", () => {
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 0.999857, fetchedAt: Date.now(), providerUpdatedAt: null } }
 		const w = factory(
 			{ updatedAt: 1, privateBalance: (1_000n * 10n ** 6n).toString(), publicBalance: (250n * 10n ** 6n).toString() },
-			{ chainId: CHAIN_IDS.TESTNET, contract: CUSD, decimals: 6, symbol: "cUSD" },
+			{ chainId: CHAIN_IDS.TESTNET, contract: TEST_USDC, decimals: 6, symbol: "cUSD" },
 		)
 		await flushPromises()
 		const fiat = w.find('[data-testid="token-fiat"]')
@@ -186,7 +187,7 @@ describe("TokenCard", () => {
 		mockQuotes = {}
 		const w = factory(
 			{ updatedAt: 1, publicBalance: (250n * 10n ** 6n).toString() },
-			{ chainId: CHAIN_IDS.TESTNET, contract: CUSD, decimals: 6 },
+			{ chainId: CHAIN_IDS.TESTNET, contract: TEST_USDC, decimals: 6 },
 		)
 		await flushPromises()
 		expect(w.find('[data-testid="token-fiat"]').exists()).toBe(false)
@@ -248,7 +249,7 @@ describe("TokenCard — hostile rows", () => {
 
 	test("an absurd decimals value is treated the same way (no exponent is ever computed)", async () => {
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
-		const w = factory({ updatedAt: 1, publicBalance: "1" }, { chainId: CHAIN_IDS.TESTNET, contract: CUSD, decimals: 500 })
+		const w = factory({ updatedAt: 1, publicBalance: "1" }, { chainId: CHAIN_IDS.TESTNET, contract: TEST_USDC, decimals: 500 })
 		await flushPromises()
 		expect(w.find('[data-malformed="true"]').text()).toBe("—")
 		expect(w.find('[data-testid="token-fiat"]').exists()).toBe(false)
@@ -275,7 +276,7 @@ describe("TokenCard — R5 layout (subtitle left, lock/globe split right)", () =
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 0.999857, fetchedAt: Date.now(), providerUpdatedAt: null } }
 		const w = factory(
 			{ updatedAt: 1, privateBalance: (1_000n * 10n ** 6n).toString(), publicBalance: (250n * 10n ** 6n).toString() },
-			{ chainId: CHAIN_IDS.TESTNET, contract: CUSD, decimals: 6, symbol: "cUSD" },
+			{ chainId: CHAIN_IDS.TESTNET, contract: TEST_USDC, decimals: 6, symbol: "cUSD" },
 		)
 		await flushPromises()
 		expect(w.find('[data-testid="token-fiat"]').exists()).toBe(true)

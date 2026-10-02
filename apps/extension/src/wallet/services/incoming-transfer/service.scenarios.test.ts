@@ -49,6 +49,7 @@ import type {
 	PublicTransferFetchArgs,
 	PublicTransferPage,
 } from "@nulo/aztec-runtime/pxe/public-events"
+import { TESTNET_TOKENS } from "@/wallet/services/token/default-tokens"
 
 // ── Repo mock (in-memory) ────────────────────────────────────────────────
 
@@ -3646,9 +3647,9 @@ describe("IncomingTransferService — balance-refresh drain (D4 causal ack)", ()
 
 // ── D8 USD-value dust filter in getIncomingTransfers ───────────────────────
 
-// The one (chainId, contract) the price map recognizes: CHAIN_IDS.TESTNET + the cUSD proxy → USDC.
+// A (chainId, contract) the price map recognizes: CHAIN_IDS.TESTNET + Test USDC → USDC.
 const MAPPED_CHAIN = CHAIN_IDS.TESTNET
-const MAPPED_CONTRACT = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
+const MAPPED_CONTRACT = TESTNET_TOKENS.USDC
 const mappedToken = { id: 9, profileId: "p1", chainId: MAPPED_CHAIN, contract: MAPPED_CONTRACT, symbol: "cUSD", decimals: 6 }
 
 async function bootDust(overrides: { threshold?: number; quotes?: Record<string, { usd: number }>; visibility?: boolean } = {}) {
