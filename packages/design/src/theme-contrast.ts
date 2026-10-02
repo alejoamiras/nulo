@@ -17,17 +17,40 @@ export type Theme = "light" | "dark"
 
 const BASE_CSS_PATH = join(process.cwd(), "src/base.css")
 
+const TOKEN_SELECTORS = new Set([":root", '[theme="light"]', '[theme="dark"]'])
+
+const NESTING: Record<string, number> = { "[": 1, "(": 1, "]": -1, ")": -1 }
+
+/** Split a selector list at its top-level commas; a selector's quoted values sit inside brackets. */
+function splitSelectors(prelude: string): string[] {
+	const parts = [""]
+	let depth = 0
+	for (const c of prelude) {
+		depth += NESTING[c] ?? 0
+		if (c === "," && depth === 0) parts.push("")
+		else parts[parts.length - 1] += c
+	}
+	return parts.map((part) => part.trim())
+}
+
 /**
- * The token map of a root element carrying `theme` (or none): every flat block whose selector list
- * names `:root` or that theme selector exactly, applied in source order, as the cascade does for
- * equal-specificity rules.
+ * The token map of a root element carrying `theme` (or none): every block whose selector list names
+ * `:root` or that theme selector exactly, applied in source order, as the cascade does for
+ * equal-specificity rules. The grammar is base.css's own: token rules sit at the top level, never in
+ * an at-rule, and no string holds a brace; a token rule nested in an at-rule throws.
  */
 export function themeMap(theme: Theme | null, css = readFileSync(BASE_CSS_PATH, "utf8")): Record<string, string> {
 	const matching = new Set([":root", ...(theme ? [`[theme="${theme}"]`] : [])])
 	const out: Record<string, string> = {}
 	const flat = css.replace(/\/\*[\s\S]*?\*\//g, "")
 	for (const block of flat.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-		const selectors = block[1].split(",").map((s) => s.trim())
+		const prelude = block[1].slice(block[1].lastIndexOf(";") + 1)
+		const selectors = splitSelectors(prelude)
+		const before = flat.slice(0, block.index)
+		const nested = before.split("{").length > before.split("}").length
+		if (nested && selectors.some((s) => TOKEN_SELECTORS.has(s))) {
+			throw new Error(`token rule inside an at-rule: ${selectors.join(", ")}`)
+		}
 		if (!selectors.some((s) => matching.has(s))) continue
 		for (const m of block[2].matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/gi)) out[m[1]] = m[2].trim()
 	}

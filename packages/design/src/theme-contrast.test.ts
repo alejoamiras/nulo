@@ -1,5 +1,9 @@
+/// <reference types="node" />
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { describe, expect, test } from "vitest"
 import { contrast, resolveColor, themeMap } from "./theme-contrast"
+import { borders, brand, colors, easings, fonts, layout, scrims, surfaces, text } from "./tokens"
 
 /**
  * WCAG-AA contrast gate (asserted token-pairing table — see theme-contrast.ts for why it is NOT a
@@ -98,12 +102,44 @@ describe("resolveColor rgb() parsing", () => {
 	})
 })
 
-// The landing renders an unthemed root and the wallet sets theme="dark": the two must read the same palette.
-test("an explicit dark root resolves every unthemed token to the same value", () => {
-	const unthemed = themeMap(null)
-	const dark = themeMap("dark")
-	const drifted = Object.keys(unthemed).filter((name) => dark[name] !== unthemed[name])
-	expect(drifted).toEqual([])
+const COLOR_TOKENS = [surfaces, brand, text, borders, scrims, colors].flatMap((group) => Object.values(group))
+const VALUE_TOKENS = [fonts, easings, layout].flatMap((group) => Object.values(group))
+
+/** Contract tokens an unthemed root and a dark root resolve differently, or that one of them lacks. */
+function paletteDrift(css?: string): string[] {
+	const unthemed = themeMap(null, css)
+	const dark = themeMap("dark", css)
+	const drifted = VALUE_TOKENS.filter((name) => !(name in unthemed) || unthemed[name] !== dark[name])
+	for (const name of COLOR_TOKENS) {
+		try {
+			if (JSON.stringify(resolveColor(name, unthemed)) !== JSON.stringify(resolveColor(name, dark))) drifted.push(name)
+		} catch {
+			drifted.push(name)
+		}
+	}
+	return drifted
+}
+
+// The landing renders an unthemed root and the wallet sets theme="dark": the two must read one palette.
+describe("dark palette, unthemed vs explicit", () => {
+	const css = readFileSync(join(process.cwd(), "src/base.css"), "utf8")
+
+	test("every contract token resolves the same on both roots", () => {
+		expect(paletteDrift()).toEqual([])
+	})
+	test("a token the unthemed root loses is drift", () => {
+		expect(paletteDrift(css.replace(':root,\n[theme="dark"] {', '[theme="dark"] {'))).toContain("--app-bg")
+	})
+	test("a token resolving through a theme-only variable is drift", () => {
+		const viaLog = css.replace("--nulo-surface: #141312;", "--nulo-surface: var(--log-background, #141312);")
+		expect(paletteDrift(viaLog)).toContain("--nulo-surface")
+	})
+	test("a token rule nested in an at-rule is refused", () => {
+		expect(() => themeMap("dark", `${css}\n@media not all { :root { --app-bg: #333; } }`)).toThrow(/at-rule/)
+	})
+	test("a comma inside an attribute selector does not split the list", () => {
+		expect(themeMap(null, '[data-x=",:root,"] { --app-bg: #333; }')).toEqual({})
+	})
 })
 
 // Phase-2 sanity: the formerly-broken tokens now resolve to their LIGHT values, not the dark fallthrough.
