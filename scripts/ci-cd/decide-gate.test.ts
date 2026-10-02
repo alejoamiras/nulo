@@ -25,7 +25,7 @@ interface GateSpec {
   file: string
   /** The env var carrying the paths-filter verdict (`NETWORK` / `SMOKE`). */
   filterVar: string
-  /** The advisory Firefox lanes open their gate on the draft test instead. */
+  /** The Firefox lanes open their gate on the draft test instead. */
   skipsDrafts?: true
 }
 
