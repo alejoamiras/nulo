@@ -202,6 +202,8 @@ export function checkSourceArchive(entries: readonly string[], sizeBytes: number
 
 export const NOTES_START = "<!-- reviewer-notes:start -->"
 export const NOTES_END = "<!-- reviewer-notes:end -->"
+/** AMO's cap on `approval_notes`; it is enforced only when the version is created, after the upload. */
+export const NOTES_MAX = 3000
 
 /** The block `store/listing.md` keeps between its two markers, sent as `approval_notes`. */
 export function reviewerNotes(listing: string): Verdict<string> {
@@ -210,6 +212,7 @@ export function reviewerNotes(listing: string): Verdict<string> {
 	if (start < 0 || end < 0 || end < start) return { ok: false, reason: "listing.md has no reviewer-notes block between its markers" }
 	const notes = listing.slice(start + NOTES_START.length, end).trim()
 	if (!notes) return { ok: false, reason: "the reviewer-notes block is empty" }
+	if (notes.length > NOTES_MAX) return { ok: false, reason: `the reviewer notes are ${notes.length} chars; AMO accepts at most ${NOTES_MAX}` }
 	return { ok: true, value: notes }
 }
 
@@ -219,3 +222,6 @@ export const RECOVERY = [
 	"open the version in the Developer Hub (https://addons.mozilla.org/developers/) and attach the same git-archive source there,",
 	"or re-send only the source PATCH for that version id.",
 ].join(" ")
+
+/** What to do when AMO answered the version request with a 400: it validated the request and created nothing. */
+export const REJECTED = "AMO rejected the request and created no version: fix the cause and re-run"

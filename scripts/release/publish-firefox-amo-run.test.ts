@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { type ApiRequest, GECKO_ID, NOTES_END, NOTES_START, OWN_ADDONS_MAX_PAGES, RECOVERY, requiredSourcePaths, sourcePackageJsonPath } from "./publish-firefox-amo"
+import { type ApiRequest, GECKO_ID, NOTES_END, NOTES_START, OWN_ADDONS_MAX_PAGES, RECOVERY, REJECTED, requiredSourcePaths, sourcePackageJsonPath } from "./publish-firefox-amo"
 import { type ApiResponse, type Files, POLL_INTERVAL_MS, type RunIO, runPublishFirefoxAmo, VALIDATION_DEADLINE_MS } from "./publish-firefox-amo-run"
 
 const SECRET = "SECRET-A1B2"
@@ -339,6 +339,15 @@ describe("publish flow", () => {
 		const h = harness([ok({ uuid: "u-1" }), VALID, ok({ detail: "Version 0.27.0.0 already exists." }, 409)])
 		expect((await runPublishFirefoxAmo(env(), h.io)).exit).toBe(1)
 		expect(h.output()).toContain("HTTP 409 — detail: Version 0.27.0.0 already exists.")
+		expect(h.output()).toContain(RECOVERY)
+	})
+
+	test("a 400 on the version request created nothing: it says to fix and re-run, never the recovery", async () => {
+		const h = harness([ok({ uuid: "u-1" }), VALID, ok({ approval_notes: ["Ensure this field has no more than 3000 characters."] }, 400)])
+		expect((await runPublishFirefoxAmo(env(), h.io)).exit).toBe(1)
+		expect(h.output()).toContain(REJECTED)
+		expect(h.output()).not.toContain(RECOVERY)
+		expect(h.kinds()).toEqual(["upload", "upload-status", "version"])
 	})
 
 	test("a non-JSON 502 and an upload timeout are reported by status or by timeout, never raw", async () => {

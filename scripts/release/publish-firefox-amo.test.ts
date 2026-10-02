@@ -14,6 +14,7 @@ import {
 	JWT_LIFETIME_SEC,
 	jwt,
 	NOTES_END,
+	NOTES_MAX,
 	NOTES_START,
 	ownAddonsRequest,
 	requiredSourcePaths,
@@ -173,5 +174,13 @@ describe("reviewerNotes", () => {
 		expect(reviewerNotes("# x\nno block").ok).toBe(false)
 		expect(reviewerNotes(`${NOTES_START}\n\n${NOTES_END}`).ok).toBe(false)
 		expect(reviewerNotes(`${NOTES_END}\n${NOTES_START}`).ok).toBe(false)
+	})
+
+	test("refuses notes over AMO's cap and accepts them at the cap", () => {
+		const block = (n: number) => `${NOTES_START}\n${"x".repeat(n)}\n${NOTES_END}`
+		expect(reviewerNotes(block(NOTES_MAX)).ok).toBe(true)
+		const over = reviewerNotes(block(NOTES_MAX + 1))
+		expect(over.ok).toBe(false)
+		expect(!over.ok && over.reason).toContain(`${NOTES_MAX + 1} chars; AMO accepts at most ${NOTES_MAX}`)
 	})
 })
