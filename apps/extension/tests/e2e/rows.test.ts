@@ -53,7 +53,8 @@ const TOKENS_LAND_MS = 150_000
 
 /** Home's token card settles after the activity row shows and then pushes the row down: a point
  *  measured before it lands can miss the row. Settled is the list's own `data-settled` (its balance
- *  and seed snapshots have both answered) with no row in it still loading. */
+ *  and seed snapshots have both answered, and every default token, shown or not, has landed or
+ *  stopped) with no row in it still loading. */
 async function waitForSettledTokens(page: Page, timeout = 15_000): Promise<void> {
 	await page
 		.waitForFunction(

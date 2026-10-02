@@ -515,9 +515,40 @@ describe("TokensView — loading, placeholders and the empty state", () => {
 		await flushPromises()
 		expect(wrapper.findAllComponents(TokenCard)).toHaveLength(1)
 		expect(settled(wrapper)).toBe("false")
-		await wrapper.setProps({ seedEntries: [seedEntry()], seedReady: true })
+		await wrapper.setProps({ seedEntries: [seedEntry("failed")], seedReady: true })
 		expect(seedRows(wrapper)).toEqual([SEED_CONTRACT])
 		expect(settled(wrapper)).toBe("true")
+	})
+
+	test("a default past the cap keeps the list unsettled; stopped or retried it shows, landed it goes", async () => {
+		const entries = (usdt: string) =>
+			["USDC", "USDT", "EURC", "GBPC"].map((s) => ({
+				...seedEntry(s === "USDT" ? usdt : "seeded", `0xSeed${s}`),
+				symbol: s,
+				displayName: `Test ${s}`,
+			}))
+		const landed = (symbol: string, id: number) => {
+			const row = namedRow(id, symbol, { contract: `0xseed${symbol.toLowerCase()}`, publicBalance: "0" })
+			return { ...row, token: { ...row.token, name: `Test ${symbol}` } }
+		}
+		const viewAll = () => wrapper.find('[data-testid="tokens-view-all"]').exists()
+		H.getTokenBalances.mockResolvedValue(["USDC", "EURC", "GBPC"].map((s, i) => landed(s, i + 1)))
+		wrapper = mount(TokensView, { shallow: true, props: { seedEntries: entries("pending"), seedReady: true } })
+		await flushPromises()
+		expect(cardSymbols(wrapper)).toEqual(["EURC", "GBPC", "USDC"])
+		expect([seedRows(wrapper), viewAll(), settled(wrapper)]).toEqual([[], true, "false"])
+
+		await wrapper.setProps({ seedEntries: entries("failed") })
+		expect([seedRows(wrapper), viewAll(), settled(wrapper)]).toEqual([["0xSeedUSDT"], false, "true"])
+
+		wrapper.findComponent(TokenSeedRow).vm.$emit("retry")
+		await wrapper.setProps({ seedEntries: entries("seeding") })
+		expect([seedRows(wrapper), viewAll(), settled(wrapper)]).toEqual([["0xSeedUSDT"], false, "false"])
+
+		H.balanceAdded.emit(landed("USDT", 4))
+		await wrapper.setProps({ seedEntries: entries("seeded") })
+		expect(cardSymbols(wrapper)).toEqual(["EURC", "GBPC", "USDC"])
+		expect([seedRows(wrapper), viewAll(), settled(wrapper)]).toEqual([[], true, "true"])
 	})
 
 	test("anonymous rows appear only after 300 ms of a blank wait, and leave when anything real shows", async () => {

@@ -15,7 +15,7 @@ export type SlotSeed = Pick<SeedStatusEntry, "chainId" | "contract" | "symbol" |
 
 export type HomeSlot<R extends SlotTokenRow, O extends SlotImportOp, S extends SlotSeed> = OrderableRow & {
 	key: string
-} & ({ kind: "token"; tb: R } | { kind: "import"; op: O } | { kind: "seed"; entry: S })
+} & ({ kind: "token"; tb: R } | { kind: "import"; op: O; entry: S } | { kind: "seed"; entry: S })
 
 export type HomeSlots<R extends SlotTokenRow, O extends SlotImportOp, S extends SlotSeed> = {
 	slots: HomeSlot<R, O, S>[]
@@ -74,19 +74,37 @@ export function homeSlots<R extends SlotTokenRow, O extends SlotImportOp, S exte
 	for (const [contract, seed] of seeds) {
 		if (landed.has(contract)) continue
 		const op = standing.get(contract)
-		if (op) slots.push({ ...pendingRow(seed), key: `import:${op.id}`, kind: "import", op })
+		if (op) slots.push({ ...pendingRow(seed), key: `import:${op.id}`, kind: "import", op, entry: seed })
 		else slots.push({ ...pendingRow(seed), key: `seed:${contract}`, kind: "seed", entry: seed })
 	}
 	return { slots, userImports }
 }
 
-const hasStopped = (slot: { kind: string; entry?: SlotSeed }) =>
-	slot.kind === "seed" && slot.entry !== undefined && !isSeedWorking(slot.entry.status)
+type DefaultSlot = { kind: string; entry?: SlotSeed }
+
+/** The default behind a slot whose token row has not landed; its status is the seeder's word. */
+const defaultOf = (slot: DefaultSlot) => (slot.kind === "token" ? undefined : slot.entry)
+
+/** A default the seeder is still working on, shown or past the cap: one past it shows once it stops. */
+export const isDefaultPending = (slot: DefaultSlot) => {
+	const entry = defaultOf(slot)
+	return entry !== undefined && isSeedWorking(entry.status)
+}
+
+export const defaultKey = (entry: Pick<SlotSeed, "chainId" | "contract">) => `${entry.chainId}:${contractOf(entry.contract)}`
 
 /** Home's cap, except that a default which stopped is never hidden: Home is the only place that
- *  shows it, with its reason and its Retry, so past the cap it follows the capped rows. */
-export function capHomeSlots<T extends { kind: string; entry?: SlotSeed }>(ordered: readonly T[], budget = HOME_TOKEN_ROWS) {
+ *  shows it, with its reason and its Retry, so past the cap it follows the capped rows, and once
+ *  retried (`retried` holds `defaultKey`s) it stays there until it lands. */
+export function capHomeSlots<T extends DefaultSlot>(
+	ordered: readonly T[],
+	retried: ReadonlySet<string> = new Set(),
+	budget = HOME_TOKEN_ROWS,
+) {
 	const { shown, overflow } = capTokenRows(ordered, budget)
-	const stopped = ordered.slice(shown.length).filter(hasStopped)
-	return { shown: [...shown, ...stopped], overflow: overflow - stopped.length }
+	const kept = ordered.slice(shown.length).filter((slot) => {
+		const entry = defaultOf(slot)
+		return entry !== undefined && (!isSeedWorking(entry.status) || retried.has(defaultKey(entry)))
+	})
+	return { shown: [...shown, ...kept], overflow: overflow - kept.length }
 }

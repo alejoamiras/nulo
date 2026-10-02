@@ -17,7 +17,7 @@ import { PriceServiceClient } from "@/wallet/services/price/client"
 import { stringCompare } from "@/utils/string"
 import { parseRawBalance, safeFiatOf } from "@/utils/token-amount"
 import { forChain, orderTokenRows } from "@/utils/token-order"
-import { capHomeSlots, homeSlots } from "./home-slots"
+import { capHomeSlots, defaultKey, homeSlots, isDefaultPending } from "./home-slots"
 
 /** Composables */
 import { usePinnedTokens, pinScopeOf } from "@/composables/usePinnedTokens"
@@ -101,14 +101,17 @@ const homeLayout = computed(() =>
 		chainId: appStore.network?.chainId,
 	}),
 )
+const retriedDefaults = ref(new Set())
 const homeRows = computed(() =>
-	capHomeSlots(orderTokenRows(homeLayout.value.slots, { pinnedContracts: pins.pinnedContracts.value, fiatOf })),
+	capHomeSlots(orderTokenRows(homeLayout.value.slots, { pinnedContracts: pins.pinnedContracts.value, fiatOf }), retriedDefaults.value),
 )
 const shownSlots = computed(() => homeRows.value.shown)
 const overflowCount = computed(() => homeRows.value.overflow)
 const userImports = computed(() => homeLayout.value.userImports)
 const hasAnyRow = computed(() => homeLayout.value.slots.length > 0 || userImports.value.length > 0)
-const isSettled = computed(() => balancesState.value === "loaded" && props.seedReady)
+/** Waits on every default still on its way, shown or not, since one past the cap shows if it stops.
+ *  Each is a slot, so this never changes the empty state or the anonymous rows. */
+const isSettled = computed(() => balancesState.value === "loaded" && props.seedReady && !homeLayout.value.slots.some(isDefaultPending))
 
 /** Anonymous rows cover a wait with nothing to name yet — but only a wait long enough to notice:
  *  a warm service worker answers first, and a flash of skeletons reads as a glitch. */
@@ -265,6 +268,11 @@ let isUnmounted = false
 
 function refreshBalances() {
 	for (const tb of tokenBalances.value) tokenBalanceService.refreshTokenBalance(tb.id)
+}
+
+function retryDefault(entry) {
+	retriedDefaults.value.add(defaultKey(entry))
+	emit("retry-seed", entry)
 }
 
 /** A rejected snapshot is retried once on a timer; after that a reconnect or a scope change retries. */
@@ -454,7 +462,7 @@ onBeforeUnmount(() => {
 			<template v-for="row in shownSlots" :key="row.key">
 				<TokenCard v-if="row.kind === 'token'" :tokenBalance="row.tb" />
 				<TokenImportRow v-else-if="row.kind === 'import'" :op="row.op" />
-				<TokenSeedRow v-else :entry="row.entry" @retry="emit('retry-seed', row.entry)" />
+				<TokenSeedRow v-else :entry="row.entry" @retry="retryDefault(row.entry)" />
 			</template>
 			<template v-if="showGhostRows">
 				<div v-for="n in GHOST_ROWS" :key="n" data-testid="tokens-skeleton-row" aria-hidden="true" :class="$style.ghost_row">
