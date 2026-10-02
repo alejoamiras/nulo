@@ -73,7 +73,7 @@ function makeServices(discoverImpl: () => Promise<{ approved: boolean }>) {
 	}) as never
 	const sessions = new Map<string, { id: string; profileId: string }>()
 	const stubs: Record<string, unknown> = {
-		network: {},
+		network: { servesChain: async () => true },
 		account: {},
 		execution: {},
 		profile: { onActiveProfileChanged, getActiveProfile: async () => ({ id: "p1" }) },

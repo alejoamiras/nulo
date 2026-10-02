@@ -298,6 +298,20 @@ export class ContractNotRegisteredError extends WalletError {
 }
 
 /**
+ * A session's chain has no network in its profile, as when the user removes that network while the
+ * dApp stays connected. Constant message and no details: the requested chain is the dApp's own
+ * input, and nothing here may name a chain the wallet does serve.
+ */
+export class ChainNotSupportedError extends WalletError {
+	public static readonly CODE = "CHAIN_NOT_SUPPORTED"
+	public static readonly MESSAGE = "The wallet has no network for the requested chain. Switch the app to a network the wallet uses."
+
+	public constructor() {
+		super(ChainNotSupportedError.CODE, ChainNotSupportedError.MESSAGE, undefined, "ChainNotSupportedError")
+	}
+}
+
+/**
  * The offscreen document holds no store key for the profile — a designed cold-start step, not an
  * incident: the client derives the key, provisions it, and retries once. Only the chain-runtime
  * bind throws this, BEFORE any PXE operation runs, so the client trusts the class rather than the
@@ -490,6 +504,7 @@ type KnownWalletErrorPayload =
 	| { code: typeof UnsupportedMethodError.CODE; message: string; details?: unknown }
 	| { code: typeof PxeStaleAnchorError.CODE; message: string; details?: unknown }
 	| { code: typeof ContractNotRegisteredError.CODE; message: string; details?: unknown }
+	| { code: typeof ChainNotSupportedError.CODE; message: string; details?: unknown }
 	| { code: typeof PxeStoreKeyMissingError.CODE; message: string; details?: unknown }
 	| { code: typeof SessionEndedError.CODE; message: string; details?: unknown }
 	| { code: typeof TermsAcceptanceRequiredError.CODE; message: string; details?: unknown }
@@ -543,6 +558,8 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 			return new PxeStaleAnchorError(known.message, known.details)
 		case ContractNotRegisteredError.CODE:
 			return new ContractNotRegisteredError(known.message, known.details)
+		case ChainNotSupportedError.CODE:
+			return new ChainNotSupportedError()
 		case PxeStoreKeyMissingError.CODE:
 			return new PxeStoreKeyMissingError(known.message, known.details)
 		case SessionEndedError.CODE:

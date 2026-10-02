@@ -1223,6 +1223,67 @@ describe("NetworkService default seeding", () => {
 	})
 })
 
+describe("NetworkService.servesChain (a dApp asking to connect)", () => {
+	const V5_TESTNET_CHAIN = 1816023401
+
+	test("a profile not seeded yet serves exactly the chains its default seeds will create", async () => {
+		const { service } = setupServiceWithStorage({})
+
+		expect(await service.servesChain("p1", CHAIN_IDS.TESTNET)).toBe(true)
+		expect(await service.servesChain("p1", 0)).toBe(true)
+		expect(await service.servesChain("p1", V5_TESTNET_CHAIN)).toBe(false)
+	})
+
+	test("while the first activation writes the defaults one by one, every default counts", async () => {
+		const { service, local } = setupServiceWithStorage({})
+		const set = local.set.bind(local)
+		let releaseWrite: (() => void) | undefined
+		local.set = async (items) => {
+			if (!releaseWrite && JSON.stringify(items).includes("Local Network")) {
+				await new Promise<void>((resolve) => {
+					releaseWrite = resolve
+				})
+			}
+			return set(items)
+		}
+
+		const seeding = service.getOrInitNetworks()
+		await vi.waitFor(() => expect(releaseWrite).toBeDefined())
+
+		expect((await service.getNetworksRaw("p1")).map((n) => n.chainId)).toEqual([CHAIN_IDS.TESTNET])
+		expect(await service.servesChain("p1", 0)).toBe(true)
+		expect(await service.servesChain("p1", V5_TESTNET_CHAIN)).toBe(false)
+		releaseWrite?.()
+		await seeding
+		expect(await service.servesChain("p1", 0)).toBe(true)
+	})
+
+	test("a seeded profile serves only its live rows: not a removed network, nor one mid-deletion", async () => {
+		const { service } = setupServiceWithStorage({ "https://rpc.test/7": nodeInfoForChain(7) })
+		const local = (await service.getOrInitNetworks()).find((n) => n.chainId === 0)!
+		const seven = await service.addNetwork("Seven", "https://rpc.test/7")
+		let releasePurge: (() => void) | undefined
+		service.registerChainPurgeSubscriber(
+			(_profileId, chainId) =>
+				new Promise<void>((resolve) => {
+					if (chainId === 7) releasePurge = resolve
+					else resolve()
+				}),
+		)
+
+		await service.deleteNetwork(local.id)
+		const deleting = service.deleteNetwork(seven.id)
+		await vi.waitFor(() => expect(releasePurge).toBeDefined())
+
+		expect(await service.servesChain("p1", 0)).toBe(false)
+		expect(await service.servesChain("p1", 7)).toBe(false)
+		expect(await service.servesChain("p1", CHAIN_IDS.TESTNET)).toBe(true)
+		expect(await service.servesChain("p1", V5_TESTNET_CHAIN)).toBe(false)
+		releasePurge?.()
+		await deleting
+	})
+})
+
 describe("NetworkService.onProfileDeleted cascade", () => {
 	test("purges every chain of the deleted profile (covers sender cleanup via PXE clear)", async () => {
 		// This test locks the cascade ContactService.onProfileDeleted's docstring

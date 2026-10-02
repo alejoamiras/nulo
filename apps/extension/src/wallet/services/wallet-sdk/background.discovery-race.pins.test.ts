@@ -58,7 +58,7 @@ function makeServices(popup: Promise<{ approved: boolean }>, timedLookup: Promis
 	let lookups = 0
 	const timedLookupRequested = deferred<void>()
 	const stubs: Record<string, unknown> = {
-		network: {},
+		network: { servesChain: async () => true },
 		account: {},
 		execution: {},
 		profile: { onActiveProfileChanged: new EventHandler<unknown>(), getActiveProfile: async () => ({ id: "p1" }) },

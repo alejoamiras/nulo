@@ -13,7 +13,7 @@ import { waitForTarget } from "./browser"
 import { clickByTestId, clickSelector, patchPagePolling, waitForHash, type ExtensionContext } from "./extension"
 import { selectFeeMethod, type FeeMethodSubtitle } from "./helpers"
 
-export type PopupKind = "discover" | "verify" | "capabilities" | "execute" | "json"
+export type PopupKind = "discover" | "verify" | "capabilities" | "execute" | "json" | "network-unavailable"
 
 /**
  * Wait for a popup window of the given kind to open. If `requestId` is given,
