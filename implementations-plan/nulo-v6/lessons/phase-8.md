@@ -83,6 +83,51 @@ release everytime we add a token, but obviously that's a follow-up".
   for the list's own settledness (`data-settled` on `tokens-list`, new in `TokensView.vue`) with
   nothing in it loading, within 150 s (the seeder's 15 s and 60 s retries), after codex rounds 1
   and 2 found two ways the first version could pass early.
+- dev's #750 landed its own version of that wait while the arc was open (`waitForSettledTokens`:
+  the empty state, or rows none of which is loading, within 15 s). The rebase keeps its helper and
+  its timeout diagnostics and adds the list's `data-settled`, ghost rows as loading, 150 s on the
+  first wait, and the scroll; the `e2e-testing` skill's flake row 44 says so.
+
+## Step 2 · The seeds' ongoing dRPC cost, for the owner
+
+- The 192 requests above mix one-time seeding with ongoing sync, which every user pays on the
+  shared key. Measured on 2026-10-01 before the owner's sign-off, with no code change: production
+  Chrome builds of the arc's tip with four seeds, one (Test USDC) and none (the tip with the list
+  emptied, which is what dev ships), a fresh profile each, unlocked by the e2e fixture. Six
+  sessions ran in parallel under the e2e lock, so all saw the same chain, each with a NetLog
+  counted by host only; JSON-RPC methods were read from the RPC host's HTTP/2 plaintext (capture
+  mode Everything). Seeding settled 0.6 to 13 s after unlock. Window: minutes 3 to 10.
+
+| Seeds | Popup | HTTP requests/min | JSON-RPC calls/min |
+|---|---|---|---|
+| 0 | open | 0 | 0 |
+| 0 | closed | 0 | 0 |
+| 1 | open | 16.7 | 18.7 |
+| 1 | closed | 17.7 | 19.7 |
+| 4 | open | 28.9 | 66.0 |
+| 4 | closed | 28.9 | 66.0 |
+
+- A wallet timer, not the chain. Every seeded session sent one burst every 30 s exactly (13 of 13
+  gaps), 24 to 37 calls at four seeds whether or not a block had arrived, while blocks came every
+  60 or 90 s (mean 72 s). With no tokens nothing polls after unlock: 19 requests in minute 0, then
+  none. The timer is the incoming-transfer pollers' `DEFAULT_POLL_INTERVAL_MS` (30 s): a note scan
+  of every watched token per account, and a public-event scan per token. They run in the service
+  worker, which the runtime's 10 s storage heartbeat keeps alive, so the popup changes nothing.
+  They stop at lock, since no active profile means an empty scheduler set (read in the code, not
+  measured).
+- Calls grow about linearly with tokens (about 19 a minute for the first, 15.5 for each more),
+  requests more slowly, since the client batches what goes out together (1.1 calls per request at
+  one seed, 2.3 at four). At four seeds, calls a minute: `aztec_getBlockNumber` 16.0,
+  `aztec_getContract` 11.1, `aztec_getChainTips`, `aztec_getBlockData`,
+  `aztec_getBlockHashMembershipWitness` and `aztec_getPublicLogsByTags` 8.0 each,
+  `aztec_getPrivateLogsByTags` 5.1, `aztec_getBlock` 1.7.
+- At four seeds that is about 1,700 requests (4,000 calls) per unlocked hour. The one-time part is
+  small next to it: minute 0 has 113 requests against 19 with no seeds, the pollers' first two
+  ticks included, and the steady rate holds from minute 1. Every response was a 200 across the
+  six concurrent profiles. Puppeteer's attachment could also keep the worker alive, which the
+  heartbeat does anyway in a real Chrome. The NetLogs were deleted after counting.
+- The pollers are unchanged here: an imported token costs the same as a seed, and the two
+  candidates are in `follow-ups.md` § Incoming transfers.
 
 ## Step 3 · The bridge link
 
@@ -129,6 +174,10 @@ release everytime we add a token, but obviously that's a follow-up".
      as loading.
 - Round 3, verification: "No material findings". It also confirmed that scrolling the row into
   view before `coveredAt` keeps what the test proves.
+- Round 4, after the rebase onto #750: "No material findings". The reconciled wait has no early
+  pass with an empty list or four seeds, and can time out only where a snapshot never answers,
+  which it should expose. The docs' poller mechanism checked out against the code; the 30 s is
+  nominal, since a singleflight tick or a public scan's backoff can skip work.
 
 ## Validation gate
 
@@ -141,3 +190,7 @@ release everytime we add a token, but obviously that's a follow-up".
     and the whole suite on Firefox, 40 files passed, 3 skipped, 156 tests.
 - Network, `e2e:agent tests/e2e/network/default-token-seeding.test.ts` on Chrome: passed. The
   sandbox TST token seeds under the reader's new decimals pin (18).
+- After the rebase onto #750 (2026-10-02): `bun run test:all` (the extension: 631 files, 8,648
+  tests), `typecheck:all`, `lint`, `test:ci-gating` (255 pass, 2 skip) and `check:plans`: exit 0.
+  `rows.test.ts`, `--retry=0`, 6 of 6 in each of four runs: release artifacts (four live seeds)
+  and the recipe (armed build, empty list), each on Chrome and on Firefox.

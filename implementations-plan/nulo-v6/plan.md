@@ -53,8 +53,11 @@ base: origin/dev at 910a4def
   steps 1 to 3 are done in arc C's PR. The manifest's PrivateFPC matches; the four Testnet seeds
   (Test USDC, USDT, EURC and GBPC) carry live class, symbol and decimals pins; Test USDC is priced
   as USDC; the gas link opens `https://testnet.app.unleashed.systems` on the owner's word; artifact
-  smoke on dRPC is accepted. Codex converged in three rounds. Steps 4 and 5, the owner's hands-on
-  run and sign-off, stay in `follow-ups.md` (`lessons/phase-8.md`).
+  smoke on dRPC is accepted. The seeds' ongoing cost, measured for the owner (about 66 calls a
+  minute per unlocked wallet at four seeds, from the incoming-transfer pollers' 30 s timer), went
+  to `follow-ups.md` § Incoming transfers. Codex converged in three rounds, and a fourth after the
+  rebase onto #750 found nothing. Steps 4 and 5, the owner's hands-on run and sign-off, stay in
+  `follow-ups.md` (`lessons/phase-8.md`).
 - **Lessons:** the two `lessons.md` entries tagged 5.2.0 (the node client's retries, the fee-juice
   import's weight) hold on 6.0.0-rc.1 and are re-dated, and the `bun test` entry's scope is
   renamed after reproducing it on `@aztec-labs/foundation` 6.0.0-rc.1. The new gotchas went to
