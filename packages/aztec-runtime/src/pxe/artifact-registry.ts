@@ -95,8 +95,8 @@ export class ArtifactRegistry {
 	 *    lookup is by definition a class-id match. Recomputing would
 	 *    be the same Poseidon hash twice.
 	 *
-	 *  Cache: `verifiedClassIds: Set<string>` skips repeat recomputes
-	 *  for the same `(classId, artifact)` pair. */
+	 *  Cache: `verifiedClassIds: Set<string>` skips the recompute for a
+	 *  class id already verified once, keyed by class id alone. */
 	public async resolve(
 		classId: Fr,
 		pxeLookup: (id: Fr) => Promise<ContractArtifact | undefined>,

@@ -2,17 +2,14 @@ import { describe, expect, test } from "vitest"
 import { NULO_DESIGN_COMPONENTS, nuloDesignResolver } from "./design-resolver"
 
 /**
- * Resolver-inventory pin (design-system round-2, D-SEAM). `NULO_DESIGN_COMPONENTS` must equal EXACTLY
+ * Resolver-inventory pin. `NULO_DESIGN_COMPONENTS` must equal EXACTLY
  * the set of names the extension routes to `@nulo/design` — NOT "every package export" (the package
  * also exports names the extension never routes, e.g. the wrapper bases `SubPageHeaderBase`/
  * `ToastManagerBase`, which must never enter the resolver). Wrapper-backed names (`Button`/`SubPageHeader`/`ToastManager`)
  * stay local and must be ABSENT (else the bare tag resolves to the package base instead of the wrapper).
  *
- * All 15 names are genuinely DELETED-and-migrated: round 2's 6 (Spinner/Banner/LoadingState/Tooltip/
- * Popover/Input) in round 2, and round 1's 9 (Flex/Icon/Text/MaterialIcon/Badge/BrutalistTitle/Checkbox/
- * SectionLabel/Toggle) in round-3 P4 — closing the round-1 cleanup debt (those shadows had previously
- * WON the bare tag over the package version; Checkbox/Toggle were reconciliations, see round-3 plan).
- * The "no local shadow" test below ENFORCES it. Typecheck catches a missing export; this pins against a
+ * Every listed name has had its extension-local SFC deleted: a local shadow wins the bare tag over
+ * the package version, which the "no local shadow" test below refuses. Typecheck catches a missing export; this pins against a
  * wrong/extra remap AND a re-introduced shadow. Grow `EXPECTED_MIGRATED` in the SAME PR that deletes a
  * local SFC + adds the name to the resolver.
  */
