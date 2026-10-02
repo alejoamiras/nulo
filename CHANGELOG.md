@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.30.0](https://github.com/alejoamiras/nulo/compare/v0.29.0...v0.30.0) (2026-10-02)
+
+
+### Features
+
+* **tokens:** seed unleashed's four v6 testnet tokens and open its v6 app for fee juice ([#751](https://github.com/alejoamiras/nulo/issues/751)) ([73a31f1](https://github.com/alejoamiras/nulo/commit/73a31f1b86eb66096089027c76c66c3d56c50aeb))
+
+
+### Bug Fixes
+
+* **dapp:** show a notice for an unserved chain instead of a dead connection ([#752](https://github.com/alejoamiras/nulo/issues/752)) ([a5bacef](https://github.com/alejoamiras/nulo/commit/a5bacef68046b748cec9c4f2e772bc01920bcc41))
+* **execute:** read the standard token's transfers as transfer rows ([#748](https://github.com/alejoamiras/nulo/issues/748)) ([18a3826](https://github.com/alejoamiras/nulo/commit/18a38265e8022fdaa8cc774088b9b9ad67c1b8ee))
+* **home:** keep three token rows while the default tokens load ([#754](https://github.com/alejoamiras/nulo/issues/754)) ([3ae8177](https://github.com/alejoamiras/nulo/commit/3ae81774e2db6a58296b0937160810daeaa14176))
+
+
+### Tests
+
+* **e2e:** wait for home's settled token card in release builds too ([#750](https://github.com/alejoamiras/nulo/issues/750)) ([20dcc8c](https://github.com/alejoamiras/nulo/commit/20dcc8c47370aae44e2e82e55d0044c15e524cd6))
+
+
+### CI
+
+* **setup-aztec:** run the installer from pinned bytes, make the selector test real ([#747](https://github.com/alejoamiras/nulo/issues/747)) ([fe597a1](https://github.com/alejoamiras/nulo/commit/fe597a1d6b0e1a0b730cd0e5ad554e73ae3b3448))
+
+
+### Misc
+
+* **plans:** archive closed plans with outcome blocks and split the index ([#743](https://github.com/alejoamiras/nulo/issues/743)) ([369bce3](https://github.com/alejoamiras/nulo/commit/369bce3ce8130db42047b6936b7373882f454fb0))
+* **plans:** relocate plan-dir assets that code and ci read ([#742](https://github.com/alejoamiras/nulo/issues/742)) ([f026c96](https://github.com/alejoamiras/nulo/commit/f026c96595529c845b173bcbedb6c0fc193b86fd))
+* re-baseline prerelease manifest to 0.29.0 ([42205ab](https://github.com/alejoamiras/nulo/commit/42205ab0ad8d32b7ffc1956f4c79cd9bdad84d11))
+* sync main → dev ([#739](https://github.com/alejoamiras/nulo/issues/739)) ([d7da8e6](https://github.com/alejoamiras/nulo/commit/d7da8e62ccb8d972a660dd494b6d5c5eaa71b30f))
+
+
+### Docs
+
+* **plans:** close nulo-v6 ([#740](https://github.com/alejoamiras/nulo/issues/740)) ([3452ac3](https://github.com/alejoamiras/nulo/commit/3452ac3b65482922a8c9202eb71c2aed209770db))
+* **plans:** close plans-scaffolding and move it into the archive ([#746](https://github.com/alejoamiras/nulo/issues/746)) ([c09c497](https://github.com/alejoamiras/nulo/commit/c09c4972504aefff106ecc41b2deb5a11045623d))
+* **plans:** record plan closures and seed lessons.md and follow-ups.md ([#741](https://github.com/alejoamiras/nulo/issues/741)) ([d8120c2](https://github.com/alejoamiras/nulo/commit/d8120c2681ad0e3d4d2488f7bd4719866be6ff6d))
+* **plans:** record the release provenance follow-ups ([#745](https://github.com/alejoamiras/nulo/issues/745)) ([7c2425c](https://github.com/alejoamiras/nulo/commit/7c2425ca63f5eeabf258306e0fd2a91e5da545ac))
+* **store:** nulo v6 listing and art for the v6 testnet ([#749](https://github.com/alejoamiras/nulo/issues/749)) ([20b7773](https://github.com/alejoamiras/nulo/commit/20b7773ee72a5afb362fe1643bb594bfb59b3a28))
+* **store:** send amo reviewers to the unleashed faucet for test funds ([#753](https://github.com/alejoamiras/nulo/issues/753)) ([93036d3](https://github.com/alejoamiras/nulo/commit/93036d32ee9aac05663a4006ced18211a2e88cf4))
+
 ## [0.29.0](https://github.com/alejoamiras/nulo/compare/v0.28.0...v0.29.0) (2026-10-01)
 
 
