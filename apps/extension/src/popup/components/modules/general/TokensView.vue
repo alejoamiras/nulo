@@ -362,6 +362,8 @@ watch(
 		// new scope's pins; pins refresh on their own, not behind the task snapshot.
 		tokenBalances.value = []
 		balancesState.value = "loading"
+		// A retry's key names no profile, so it must not outlive the scope it was made in.
+		retriedDefaults.value.clear()
 		void pins.refresh()
 		const gen = scopeGen
 		// Tasks first: fetchTokenBalances derives isUpdating from the snapshot.

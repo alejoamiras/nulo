@@ -520,35 +520,51 @@ describe("TokensView — loading, placeholders and the empty state", () => {
 		expect(settled(wrapper)).toBe("true")
 	})
 
+	/** Four defaults: USDT, last by name, in status `usdt`, the other three seeded. A landed row holds nothing. */
+	const fourDefaults = (usdt: string) =>
+		["USDC", "USDT", "EURC", "GBPC"].map((s) => ({
+			...seedEntry(s === "USDT" ? usdt : "seeded", `0xSeed${s}`),
+			symbol: s,
+			displayName: `Test ${s}`,
+		}))
+	const landed = (symbol: string, id: number) => {
+		const row = namedRow(id, symbol, { contract: `0xseed${symbol.toLowerCase()}`, publicBalance: "0" })
+		return { ...row, token: { ...row.token, name: `Test ${symbol}` } }
+	}
+	const threeLanded = () => ["USDC", "EURC", "GBPC"].map((s, i) => landed(s, i + 1))
+	const viewAll = (w: ReturnType<typeof mount>) => w.find('[data-testid="tokens-view-all"]').exists()
+
 	test("a default past the cap keeps the list unsettled; stopped or retried it shows, landed it goes", async () => {
-		const entries = (usdt: string) =>
-			["USDC", "USDT", "EURC", "GBPC"].map((s) => ({
-				...seedEntry(s === "USDT" ? usdt : "seeded", `0xSeed${s}`),
-				symbol: s,
-				displayName: `Test ${s}`,
-			}))
-		const landed = (symbol: string, id: number) => {
-			const row = namedRow(id, symbol, { contract: `0xseed${symbol.toLowerCase()}`, publicBalance: "0" })
-			return { ...row, token: { ...row.token, name: `Test ${symbol}` } }
-		}
-		const viewAll = () => wrapper.find('[data-testid="tokens-view-all"]').exists()
-		H.getTokenBalances.mockResolvedValue(["USDC", "EURC", "GBPC"].map((s, i) => landed(s, i + 1)))
-		wrapper = mount(TokensView, { shallow: true, props: { seedEntries: entries("pending"), seedReady: true } })
+		H.getTokenBalances.mockResolvedValue(threeLanded())
+		wrapper = mount(TokensView, { shallow: true, props: { seedEntries: fourDefaults("pending"), seedReady: true } })
 		await flushPromises()
 		expect(cardSymbols(wrapper)).toEqual(["EURC", "GBPC", "USDC"])
-		expect([seedRows(wrapper), viewAll(), settled(wrapper)]).toEqual([[], true, "false"])
+		expect([seedRows(wrapper), viewAll(wrapper), settled(wrapper)]).toEqual([[], true, "false"])
 
-		await wrapper.setProps({ seedEntries: entries("failed") })
-		expect([seedRows(wrapper), viewAll(), settled(wrapper)]).toEqual([["0xSeedUSDT"], false, "true"])
+		await wrapper.setProps({ seedEntries: fourDefaults("failed") })
+		expect([seedRows(wrapper), viewAll(wrapper), settled(wrapper)]).toEqual([["0xSeedUSDT"], false, "true"])
 
 		wrapper.findComponent(TokenSeedRow).vm.$emit("retry")
-		await wrapper.setProps({ seedEntries: entries("seeding") })
-		expect([seedRows(wrapper), viewAll(), settled(wrapper)]).toEqual([["0xSeedUSDT"], false, "false"])
+		await wrapper.setProps({ seedEntries: fourDefaults("seeding") })
+		expect([seedRows(wrapper), viewAll(wrapper), settled(wrapper)]).toEqual([["0xSeedUSDT"], false, "false"])
 
 		H.balanceAdded.emit(landed("USDT", 4))
-		await wrapper.setProps({ seedEntries: entries("seeded") })
+		await wrapper.setProps({ seedEntries: fourDefaults("seeded") })
 		expect(cardSymbols(wrapper)).toEqual(["EURC", "GBPC", "USDC"])
-		expect([seedRows(wrapper), viewAll(), settled(wrapper)]).toEqual([[], true, "true"])
+		expect([seedRows(wrapper), viewAll(wrapper), settled(wrapper)]).toEqual([[], true, "true"])
+	})
+
+	test("a retry is forgotten on a profile switch: the next profile's default past the cap stays hidden", async () => {
+		H.getTokenBalances.mockResolvedValue(threeLanded())
+		wrapper = mount(TokensView, { shallow: true, props: { seedEntries: fourDefaults("failed"), seedReady: true } })
+		await flushPromises()
+		wrapper.findComponent(TokenSeedRow).vm.$emit("retry")
+		await wrapper.setProps({ seedEntries: fourDefaults("seeding") })
+		expect(seedRows(wrapper)).toEqual(["0xSeedUSDT"])
+
+		H.store.current.profile = { ...H.store.current.profile, id: "p-other" } as never
+		await flushPromises()
+		expect([cardSymbols(wrapper), seedRows(wrapper), viewAll(wrapper)]).toEqual([["EURC", "GBPC", "USDC"], [], true])
 	})
 
 	test("anonymous rows appear only after 300 ms of a blank wait, and leave when anything real shows", async () => {
