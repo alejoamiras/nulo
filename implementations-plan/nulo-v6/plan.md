@@ -50,14 +50,16 @@ base: origin/dev at 910a4def
   (P7 step 6) was not confirmed by close-out, and the owner dropped it from the follow-ups:
   "Remove the retiring v5 drpc key as follow-up please" (2026-10-01).
 - **Arc C (P8), run from follow-ups on 2026-10-01** once unleashed's V6 manifest landed (its #23):
-  steps 1 to 3 are done in arc C's PR. The manifest's PrivateFPC matches; the four Testnet seeds
-  (Test USDC, USDT, EURC and GBPC) carry live class, symbol and decimals pins; Test USDC is priced
-  as USDC; the gas link opens `https://testnet.app.unleashed.systems` on the owner's word; artifact
+  steps 1 to 3 and 5 are done in arc C's PR. The manifest's PrivateFPC matches; the four Testnet
+  seeds (Test USDC, USDT, EURC and GBPC) carry live class, symbol and decimals pins; Test USDC,
+  USDT and EURC are priced as USDC, USDT and EURC, and Test GBPC is unpriced (the owner's option
+  B); the gas link opens `https://testnet.app.unleashed.systems` on the owner's word; artifact
   smoke on dRPC is accepted. The seeds' ongoing cost, measured for the owner (about 66 calls a
   minute per unlocked wallet at four seeds, from the incoming-transfer pollers' 30 s timer), went
   to `follow-ups.md` § Incoming transfers. Codex converged in three rounds, and a fourth after the
-  rebase onto #750 found nothing. Steps 4 and 5, the owner's hands-on run and sign-off, stay in
-  `follow-ups.md` (`lessons/phase-8.md`).
+  rebase onto #750 found nothing. The owner signed off the rows, their cost and the pricing on
+  2026-10-02 (step 5). Step 4, the owner's hands-on run, stays in `follow-ups.md`
+  (`lessons/phase-8.md`).
 - **Lessons:** the two `lessons.md` entries tagged 5.2.0 (the node client's retries, the fee-juice
   import's weight) hold on 6.0.0-rc.1 and are re-dated, and the `bun test` entry's scope is
   renamed after reproducing it on `@aztec-labs/foundation` 6.0.0-rc.1. The new gotchas went to
@@ -1184,6 +1186,14 @@ as its spec.
    Juice. Record each step and the tx hashes in lessons.
 5. The owner signs off U2's resolution (the token row), U5 if it is still open, and the bridge URL
    if it moved.
+   **Signed off 2026-10-02.** The owner in chat: "Signed-off details." Their sign-off page records
+   call 3, token prices: "b", and the tokens sign-off: approved, with no note. That covers the
+   four seeded rows on Home and Holdings as pictured, in the order shown; their ongoing cost as the
+   page stated it (about 66 calls a minute per unlocked wallet with four seeds, against about 19
+   with Test USDC alone), with all four seeds kept; and option B: Test USDT priced as `tether` and
+   Test EURC as `euro-coin`, both in the 0.20 to 5 band, Test GBPC unpriced, Test USDC as
+   `usd-coin`. The bridge URL was signed off on 2026-10-01. U5 was answered in arc A ("Keep linking
+   to Aztecscan").
 
 **Validation gate.**
 - Commands: `bun run test:all`, `bun run lint`, `bun run typecheck:all`, the smoke recipe on Chrome

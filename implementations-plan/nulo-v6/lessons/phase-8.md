@@ -153,6 +153,14 @@ release everytime we add a token, but obviously that's a follow-up".
   and the nearest GBP stablecoin, `tokenised-gbp`, trades about $132k a day on $26.6M: a thin
   quote is the easiest to push, and a GBP figure on a test token buys the user little.
 
+- The owner's answer, 2026-10-02: "Signed-off details." in chat, and on the sign-off page call 3,
+  token prices: "b", and the tokens sign-off: approved, with no note. B is applied: Test USDT
+  prices through `tether` and Test EURC through `euro-coin`, in Test USDC's 0.20 to 5 band, each
+  labelled with its proxy ticker, and Test GBPC stays unpriced. The screenshot build carried the
+  same price-map rows and tickers. The live CoinGecko check (`COINGECKO_REAL_TESTS=1`) resolves
+  both new ids in band. All four seeds stay: the owner saw their ongoing cost and asked for none
+  fewer.
+
 ## Codex (high, adversarial, read-only)
 
 - Round 1, on `2c58fa7e`: three medium findings, all accepted.
