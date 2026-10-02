@@ -129,8 +129,6 @@ describe("PxeService.executeUtility runs through the helper", () => {
 	const noopProfiles: IProfileReader = {
 		connect: async () => {},
 		getProfiles: async () => [],
-		onProfileDeleted: { add: () => {} },
-		onActiveProfileChanged: { add: () => {} },
 	}
 	const network: NetworkInfo = { profileId: "p1", chainId: 31337, rpcUrl: "http://localhost:8080" }
 

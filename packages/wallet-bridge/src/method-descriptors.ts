@@ -370,14 +370,6 @@ export function deriveScopeCheckerMap(registry: Record<string, MethodDescriptor>
  *  the dispatch boundary; layered FROM the registry (not a second whitelist). */
 export type MethodName = keyof typeof METHOD_REGISTRY_SOURCE
 
-/** A dApp RPC request after the dispatch-entry guard has validated the method.
- *  `args` stays `unknown[]` — per-arg typing would need per-method arg schemas
- *  (new descriptor fields → an oracle change), deferred. */
-export interface RpcRequest {
-	method: MethodName
-	args: unknown[]
-}
-
 /** Fail-closed dispatch-entry guard + narrowing. Throws (preserving the frozen
  *  "Unsupported wallet method" string) for any name absent from `METHOD_REGISTRY`;
  *  `Object.hasOwn` (not a truthy index) rejects prototype names. On return,

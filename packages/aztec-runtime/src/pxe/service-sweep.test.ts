@@ -62,8 +62,6 @@ describe("PxeService orphan-store sweep — recheck at commit", () => {
 				await service.provisionChainStoreKey("p1", KEY_B64, "gen-fresh")
 				return []
 			},
-			onProfileDeleted: { add: () => {} },
-			onActiveProfileChanged: { add: () => {} },
 		}
 		service = makeSweepService(profiles)
 
@@ -77,8 +75,6 @@ describe("PxeService orphan-store sweep — recheck at commit", () => {
 		const profiles: IProfileReader = {
 			connect: async () => {},
 			getProfiles: async () => [],
-			onProfileDeleted: { add: () => {} },
-			onActiveProfileChanged: { add: () => {} },
 		}
 		const service = makeSweepService(profiles)
 		// Simulate a successor store-open in flight: registry.ensure runs under
@@ -109,8 +105,6 @@ describe("PxeService orphan-store sweep — recheck at commit", () => {
 		const profiles: IProfileReader = {
 			connect: async () => {},
 			getProfiles: async () => [],
-			onProfileDeleted: { add: () => {} },
-			onActiveProfileChanged: { add: () => {} },
 		}
 		const service = makeSweepService(profiles)
 
@@ -140,8 +134,6 @@ describe("PxeService orphan-store sweep — recheck at commit", () => {
 			connect: async () => {},
 			// p1 still exists so the OPFS arm skips; this test is the IDB arm's.
 			getProfiles: async () => [{ id: "p1" }],
-			onProfileDeleted: { add: () => {} },
-			onActiveProfileChanged: { add: () => {} },
 		}
 		const service = makeSweepService(profiles)
 

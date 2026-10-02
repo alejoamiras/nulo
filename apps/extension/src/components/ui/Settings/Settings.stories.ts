@@ -1,13 +1,12 @@
 /**
  * Storybook coverage for the Settings family — ItemsContainer, SettingItem,
- * SettingField, SettingValue. The components compose into the canonical
+ * SettingField. The components compose into the canonical
  * "settings list" pattern used across the extension.
  */
 import type { Meta, StoryObj } from "@storybook/vue3-vite"
 import ItemsContainer from "./ItemsContainer.vue"
 import SettingItem from "./SettingItem.vue"
 import SettingField from "./SettingField.vue"
-import SettingValue from "./SettingValue.vue"
 
 const meta: Meta<typeof ItemsContainer> = {
 	title: "UI / Settings",
@@ -61,25 +60,6 @@ export const SettingFieldStory: Story = {
 					<SettingField label="Network" value="Aztec testnet" icon="chevron" />
 					<SettingField label="Endpoint" value="https://endpoint.example/" icon="chevron" />
 					<SettingField label="Disabled field" value="Read only" :disabled="true" />
-				</ItemsContainer>
-			</div>
-		`,
-	}),
-}
-
-export const SettingValueStory: Story = {
-	render: () => ({
-		components: { ItemsContainer, SettingValue },
-		template: `
-			<div style="padding: 24px; width: 360px;">
-				<ItemsContainer title="Profile">
-					<SettingValue label="Name" value="Alice" icon="copy" />
-					<SettingValue label="Address" value="0xab12…cd34" icon="copy" />
-					<SettingValue label="Custom slot" value="(unused)">
-						<template #value>
-							<span style="font-family: monospace;">slot &lt;value&gt; override</span>
-						</template>
-					</SettingValue>
 				</ItemsContainer>
 			</div>
 		`,

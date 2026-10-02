@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, test } from "vitest"
-import { buildFeeEstimate, feeJuicePricingFromUsd, feeToUsd, formatGasBalance } from "./fee-estimation"
+import { feeJuicePricingFromUsd, feeToUsd, formatGasBalance } from "./fee-estimation"
 
 const FJ = 10n ** 18n // 1 Fee Juice (18 decimals)
 
@@ -48,17 +48,5 @@ describe("formatGasBalance — per-surface precision", () => {
 	test("maxDecimals=2 truncates (never rounds) — the home card's precision", () => {
 		expect(formatGasBalance((421239n * 10n ** 14n).toString(), 2)).toBe("42.12")
 		expect(formatGasBalance((99n * 10n ** 16n).toString(), 2)).toBe("0.99")
-	})
-})
-
-describe("buildFeeEstimate — pricing threads through", () => {
-	test("with pricing: maxFeeUsd populated; without: null", () => {
-		const withPricing = buildFeeEstimate(10, 20, 5n * 10n ** 14n, 5n * 10n ** 14n, feeJuicePricingFromUsd(1))
-		expect(withPricing.maxFee).toBe(30n * 5n * 10n ** 14n)
-		expect(withPricing.maxFeeUsd).toBe("$0.015")
-
-		const without = buildFeeEstimate(10, 20, 5n * 10n ** 14n, 5n * 10n ** 14n)
-		expect(without.maxFeeUsd).toBeNull()
-		expect(without.maxFeeFormatted).toBe(withPricing.maxFeeFormatted)
 	})
 })

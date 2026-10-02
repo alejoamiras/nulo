@@ -60,8 +60,6 @@ describe("getContractInstance pxeOnly pin", () => {
 			{
 				connect: async () => {},
 				getProfiles: async () => [],
-				onProfileDeleted: { add: () => {} },
-				onActiveProfileChanged: { add: () => {} },
 			} as IProfileReader,
 			noopLogger,
 			factory,
@@ -89,8 +87,6 @@ describe("orphan sweep barrier-pending pin", () => {
 		const profiles: IProfileReader = {
 			connect: async () => {},
 			getProfiles: async () => [],
-			onProfileDeleted: { add: () => {} },
-			onActiveProfileChanged: { add: () => {} },
 		}
 		service = new PxeService(profiles, noopLogger, {
 			createChainRuntime: async () => {

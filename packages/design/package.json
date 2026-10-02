@@ -10,7 +10,6 @@
 		"./base.css": "./src/base.css",
 		"./core/*": "./src/core/*",
 		"./ui/*": "./src/ui/*",
-		"./composite/*": "./src/composite/*",
 		"./composables/*": "./src/composables/*",
 		"./testing": "./src/testing.ts"
 	},

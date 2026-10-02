@@ -199,48 +199,4 @@ onBeforeUnmount(() => {
 	letter-spacing: 0.18em;
 	color: var(--nulo-secondary);
 }
-
-.cta {
-	width: 100%;
-	border: none;
-
-	background: var(--nulo-accent);
-	color: var(--txt-inverse);
-
-	font-family: var(--font-headline);
-	font-weight: 700;
-	font-size: 14px;
-	letter-spacing: 0.2em;
-	text-transform: uppercase;
-
-	padding: 20px 0;
-	cursor: pointer;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		background: #fff;
-	}
-
-	&:active {
-		background: var(--txt-primary);
-		color: var(--app-bg);
-		transition: none;
-	}
-
-	&:disabled {
-		opacity: 0.3;
-		pointer-events: none;
-	}
-
-	&:focus-visible {
-		outline: 2px dotted var(--nulo-accent);
-		outline-offset: 2px;
-	}
-}
-
-.cta_red {
-	background: var(--red);
-	color: #fff;
-}
 </style>

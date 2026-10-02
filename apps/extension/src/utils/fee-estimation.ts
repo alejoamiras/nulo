@@ -113,28 +113,3 @@ export function feeToUsd(feeAmount: bigint, pricing: AssetPricing | undefined): 
 export function formatGas(gas: number): string {
 	return gas.toLocaleString("en-US")
 }
-
-export type FeeEstimate = {
-	gasUsed: { daGas: number; l2Gas: number }
-	maxFee: bigint
-	maxFeeFormatted: string
-	/** Null when no live Fee Juice quote is available — display omits USD. */
-	maxFeeUsd: string | null
-}
-
-/** Build a FeeEstimate from raw gas data */
-export function buildFeeEstimate(
-	daGas: number,
-	l2Gas: number,
-	feePerDaGas: bigint,
-	feePerL2Gas: bigint,
-	pricing?: AssetPricing,
-): FeeEstimate {
-	const maxFee = BigInt(daGas) * feePerDaGas + BigInt(l2Gas) * feePerL2Gas
-	return {
-		gasUsed: { daGas, l2Gas },
-		maxFee,
-		maxFeeFormatted: formatFeeJuice(maxFee),
-		maxFeeUsd: feeToUsd(maxFee, pricing),
-	}
-}

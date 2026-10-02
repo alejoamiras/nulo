@@ -23,8 +23,6 @@ const noopLogger: ILogger = { log: () => {} }
 const noopProfiles: IProfileReader = {
 	connect: async () => {},
 	getProfiles: async () => [],
-	onProfileDeleted: { add: () => {} },
-	onActiveProfileChanged: { add: () => {} },
 }
 const network: NetworkInfo = { profileId: "p1", chainId: 31337, rpcUrl: "http://localhost:8080" }
 const seed = Fr.fromHexString("0x0000000000000000000000000000000000000000000000000000000000000002")
