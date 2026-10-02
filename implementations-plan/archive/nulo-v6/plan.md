@@ -92,7 +92,9 @@ base: origin/dev at 910a4def
   run then. It ran at the archive on 2026-10-02 (`lessons/phase-9.md`): round 1 found the V5
   lock-out and Privacy § 5's gap (both now follow-ups) and P8's unrecorded hashes (corrected
   above), and three findings were rejected with reasons; round 2 corrected this close-out's
-  records. CROSSARC-ROUND3
+  records; round 3, the last, found nothing material, corrected one line of that log and the
+  runbook's advice on re-running after a 400, and raised two low points in #758's code, which
+  #758 fixed before it merged, on the owner's call.
 - **Lessons:** the two `lessons.md` entries tagged 5.2.0 (the node client's retries, the fee-juice
   import's weight) hold on 6.0.0-rc.1 and are re-dated, and the `bun test` entry's scope is
   renamed after reproducing it on `@aztec-labs/foundation` 6.0.0-rc.1. The new gotchas went to

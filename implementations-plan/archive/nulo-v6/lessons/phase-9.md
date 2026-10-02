@@ -174,9 +174,11 @@ What the session reported, relayed by the owner:
     status `public`, `current_version` 0.30.0.0 (version `6536242`, file `5080385`, public).
     The version notes the owner approved, which are public: "Nulo V6, on the Aztec v6 testnet."
     and three bullets, for #754, #752 and #748.
-  - #758, which the Mac session opened, puts those notes into `listing.md`, refuses notes over
-    3,000 characters before the upload, and reports a 400 on the version request as "created no
-    version", so a re-run is safe once the cause is fixed.
+  - #758, which the Mac session opened, cuts the faucet paragraph from `listing.md`'s
+    reviewer-notes block, leaving the 2,950 characters submitted; refuses notes over 3,000
+    characters, counted in code points as AMO counts them, before the upload; and reports a 400
+    on the version request as "created no version" instead of with the do-not-re-run recovery,
+    adding that a cause in the tag's files fails a re-run the same way.
 
 ## The final cross-arc pass (codex, high, adversarial, read-only)
 
@@ -226,7 +228,23 @@ between arc A (`80663b61`), the store arc (`20b7773e`, `93036d32`), arc C (`73a3
     `follow-ups.md` § Release, and the entry goes.
   It confirmed the triage of findings 2 and 4, the lock-out's symbols and routes, the follow-ups'
   paths, the release commits' parents and the tag.
-- TODO(round 3)
+- Round 3, the loop's last, on the finished close-out and #758: "No material blocker remains".
+  - Accepted, this log: the line on #758 said it puts "those notes" into `listing.md`, right
+    after the public version notes; it now names the reviewer-notes block.
+  - Accepted, `CLAUDE.md`: the row for a 400 on the version request said a re-run of the tag
+    fails the same way. The job checks out the tag's commit, so that holds for a cause in its
+    files; the row now allows a re-run once a cause outside the tag is fixed.
+  - Two low findings in #758's code, the Mac session's PR, went to the owner before its merge:
+    `REJECTED` says "fix the cause and re-run", which a cause in the tag's files cannot meet;
+    and the cap counts `.length`, UTF-16 units, where AMO's validator counts code points, so it
+    can refuse notes AMO would take, those with characters such as emoji, and never passes
+    notes AMO refuses. The owner's call, "Fix both, then merge": #758's second commit counts
+    with `amoChars`, in code points, puts an emoji in the cap test's block, and words the 400
+    message like the runbook row.
+  - It found no supported path where AMO creates a version and then answers the request with a
+    400 (addons-server validates before it creates, and rolls the request back on a validation
+    error), and confirmed that the cut leaves exactly 2,950 characters, that the rebase should
+    delete the store-upload entry #758 edits, and that the three commits are signed.
 
 ## Validation gate (2026-10-02)
 
@@ -234,7 +252,9 @@ On the close-out tree (`dev` at `8cfee502`, whose code is 0.30.0's, plus this do
 - `bun run lint`: exit 0.
 - `bun run test:all`: exit 0, every workspace green; the extension 634 files passed and 3 skipped,
   8,685 tests passed, 4 skipped and 7 todo.
-- TODO(ci-gating)
+- `bun run test:ci-gating`: exit 0, 255 passed and 2 skipped across 17 files, the plans gate at
+  0 findings, on the archived tree; again, with `bun run lint`, after the rebase on #758
+  (`6a006fb9`), whose own CI covered its code.
 - `bun run --cwd apps/landing build`: exit 0, its prebuild writing `release.json` for `v0.30.0`.
 - The capture run (step 1) ran for #749's art and was not repeated; the art has not changed.
 - Smoke on both browsers: #755's Chrome and Firefox smoke lanes on `3ae81774`, the code 0.30.0
