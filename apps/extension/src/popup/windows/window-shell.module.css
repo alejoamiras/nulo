@@ -16,6 +16,14 @@
 	scrollbar-gutter: stable;
 }
 
+.footer {
+	flex-shrink: 0;
+
+	padding: 16px;
+	border-top: 1px solid var(--nulo-border);
+	background: var(--nulo-surface);
+}
+
 .viewer_wrapper {
 	width: 100%;
 	background: var(--app-bg);

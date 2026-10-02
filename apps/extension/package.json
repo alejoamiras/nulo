@@ -2,7 +2,7 @@
 	"name": "@nulo/extension",
 	"private": true,
 	"displayName": "Nulo V6",
-	"description": "User-friendly self-custody wallet for Aztec network, preserving your privacy and revealing the power of account abstraction.",
+	"description": "A wallet for Aztec: your balance and payments stay private unless you decide otherwise. Your keys stay on your device.",
 	"version": "0.29.0",
 	"license": "Apache-2.0",
 	"scripts": {

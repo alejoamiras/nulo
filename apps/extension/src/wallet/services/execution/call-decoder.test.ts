@@ -1,10 +1,21 @@
+// @vitest-environment node
 /**
  * The decoder reads a call's wire fields with the registered artifact's ABI — real `encodeArguments`
  * in, real `decodeFromAbi` out — and names why a call stays undecoded instead of guessing.
+ *
+ * Node environment on purpose: a selector lookup hashes with poseidon2, which throws
+ * `BBApiException: std::bad_cast` under jsdom, so there every lookup would miss.
  */
 
 import { describe, expect, test } from "vitest"
-import { type AbiType, type ContractArtifact, type FunctionAbi, FunctionType, encodeArguments } from "@aztec-labs/stdlib/abi"
+import {
+	type AbiType,
+	type ContractArtifact,
+	type FunctionAbi,
+	FunctionSelector,
+	FunctionType,
+	encodeArguments,
+} from "@aztec-labs/stdlib/abi"
 import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { decodeCallForDisplay } from "./call-decoder"
 
@@ -107,12 +118,23 @@ describe("decodeCallForDisplay", () => {
 	})
 
 	test("a selector is the truth: a dApp-supplied name cannot pick a different function", async () => {
-		const bySelector = await decodeCallForDisplay(lookup({ [TOKEN]: artifact }), {
-			to: TOKEN,
-			name: "claim_private",
-			selector: "0x00000000",
-			args: encoded,
-		})
-		expect(bySelector).toEqual({ kind: "undecoded", reason: "unknown-function" })
+		const sweep = fn("sweep", [
+			{ name: "to", type: ADDRESS },
+			{ name: "amount", type: U128 },
+		])
+		const hub = { name: "BridgeHub", functions: [claim, sweep], nonDispatchPublicFunctions: [] } as unknown as ContractArtifact
+		const sweepArgs = encodeArguments(sweep, [AztecAddress.fromStringUnsafe(TO), 9n]).map((f) => f.toString())
+		const selectorOf = async (f: FunctionAbi) => (await FunctionSelector.fromNameAndParameters(f.name, f.parameters)).toString()
+		const claimSelector = await selectorOf(claim)
+		const sweepSelector = await selectorOf(sweep)
+		expect(claimSelector).not.toBe(sweepSelector)
+		const decode = (name: string, selector: string, args: string[]) =>
+			decodeCallForDisplay(lookup({ [TOKEN]: hub }), { to: TOKEN, name, selector, args })
+
+		// Each call names the other function, so only a selector lookup that matches can decode it: a run
+		// where every lookup misses fails these two instead of passing the refusal below.
+		expect(await decode("claim_private", sweepSelector, sweepArgs)).toMatchObject({ kind: "decoded", fn: "sweep" })
+		expect(await decode("sweep", claimSelector, encoded)).toMatchObject({ kind: "decoded", fn: "claim_private" })
+		expect(await decode("claim_private", "0x00000000", encoded)).toEqual({ kind: "undecoded", reason: "unknown-function" })
 	})
 })

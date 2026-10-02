@@ -12,7 +12,7 @@
  *      address. The "I wiped my profile and want it back" flow. Same
  *      popup, same FTN, same authenticator = same PRF = same master.
  *
- * NOT covered (still blocked, see implementations-plan/passkey-e2e/PRF-NON-PORTABLE.md):
+ * NOT covered (still blocked, see apps/extension/tests/e2e/PRF-NON-PORTABLE.md):
  *   - Passkey IMPORT in a FRESH extension instance. PRF state is per-
  *     credential authenticator-internal and not serializable via CDP.
  *     The reset-then-import test (3 above) is the closest in-FTN proxy.
@@ -194,5 +194,5 @@ test("register → reset profile → import via passkey discovery → same addre
 // browser context = a different popup target = a different authenticator
 // = no shared credential. The reset-then-import test above is the closest
 // in-the-same-FTN proxy: same authenticator instance, same PRF, same master.
-// See `implementations-plan/passkey-e2e/PRF-NON-PORTABLE.md` for the full
+// See `apps/extension/tests/e2e/PRF-NON-PORTABLE.md` for the full
 // blocker analysis.

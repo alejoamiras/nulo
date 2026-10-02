@@ -20,7 +20,7 @@ implementations-plan/<topic>/
 └── STATUS.md          # Live-progress log, deleted after merge.
 ```
 
-Not every plan uses every file. Audit transcripts (`audit-*.md`), competing drafts and revisions (`plan-*.md`), scratch briefs (`_*.md`) and `eli5.html` stay local: [`.gitignore`](.gitignore) keeps them out of history, since they are the likeliest place for a local path to leak. So each accepted and rejected finding, with its reason, is written into `plan.md` before the work closes, and a plan is revised in place. Transcripts committed before this rule were untracked: each stays readable at a pinned commit, every link to one is a permalink, and [`untrack-manifest.json`](plans-scaffolding/untrack-manifest.json) maps each removed path to its commit.
+Not every plan uses every file. Audit transcripts (`audit-*.md`), competing drafts and revisions (`plan-*.md`), scratch briefs (`_*.md`) and `eli5.html` stay local: [`.gitignore`](.gitignore) keeps them out of history, since they are the likeliest place for a local path to leak. So each accepted and rejected finding, with its reason, is written into `plan.md` before the work closes, and a plan is revised in place. Transcripts committed before this rule were untracked: each stays readable at a pinned commit, every link to one is a permalink, and [`untrack-manifest.json`](archive/plans-scaffolding/untrack-manifest.json) maps each removed path to its commit.
 
 ## When to add a plan
 
@@ -33,13 +33,13 @@ Single-file bug fixes do not need a plan. The PR description is enough. Name the
 ## Code and plans
 
 1. **Code comments never reference plans by milestone tag.** Not `M4.10`, `A11.1`, `phase 4b`, `PR-2`. Git history is in git; the milestone vocabulary lives here.
-2. **Code MAY reference a plan by path**, but only when the plan is the load-bearing source of truth for behavior the code depends on. Two such cross-references exist: `passkey-e2e/PRF-NON-PORTABLE.md` (a Chromium limitation tests rely on) and `network-test-triage/plan.md` (the skipped network e2e tests).
+2. **Code cites a live doc or a permalink, never a plan path**, because a plan is archived when it closes. A source that code depends on lives outside this tree: the Chromium PRF limitation the passkey e2e tests rely on is `apps/extension/tests/e2e/PRF-NON-PORTABLE.md`. An existing plan path in a comment may stay until the comment is rewritten, as long as it resolves at HEAD or under `archive/`.
 
 New code explains WHY and its invariants inline (see [`CLAUDE.md`](../CLAUDE.md) "Code-comment style").
 
 ## The gate
 
-`bun scripts/ci-cd/plans/check.ts` checks this tree from the git index; it runs inside `test:ci-gating`, so every PR's `quality-status` carries it. On a PR or a local run it fails on a tracked transcript, a missing or negated `.gitignore` line, a nested ignore file, a link to an untracked or missing file, a construct whose URL it cannot judge, a permalink outside the allowlist or off `dev`, an oversize or unlinked `lessons.md` entry, or a home path in the curated files. On push, nightly and release it only reports. `--report` prints every finding and exits 0.
+`bun run check:plans` (`scripts/ci-cd/plans/check.ts`) checks this tree from the git index; it runs inside `test:ci-gating`, so every PR's `quality-status` carries it. On a PR or a local run it fails on a tracked transcript, a missing or negated `.gitignore` line, a nested ignore file, a link to an untracked or missing file, a construct whose URL it cannot judge, a permalink outside the allowlist or off `dev`, a plan path outside an allowlisted permalink that does not resolve at HEAD (code and config may also name its archived copy), an index line out of format or listing a closed or archived plan, a plan dir with no line in its index, an archived plan without a complete Outcome, an oversize or unlinked `lessons.md` entry, or a home path in the curated files or an active plan. On push, nightly and release it only reports. `--report` prints every finding and exits 0.
 
 ## Milestone vocabulary: key
 
@@ -63,7 +63,7 @@ The standard, stated so another repository can adopt it unchanged.
 2. **Committed:** `plan.md` with its audit verdicts inline, `recon.md`, `lessons/phase-N.md`. **Not committed:** transcripts, scratch briefs, competing drafts, revisions, `eli5.html`.
 3. **Uncommitted means disposable.** Whatever is worth keeping from a transcript is written into `plan.md` before the plan closes. No committed file links an uncommitted one.
 4. **A link to a file that left the tree is a permalink** at a full commit SHA that is an ancestor of the default branch, never a branch name or a short SHA.
-5. **Closing a plan ships with its delivery**, never as a follow-up PR: the final commits of a single-arc PR, or a docs-only close-out PR on top of a stack. It is an `## Outcome` block directly after the front matter (Date, Status, Shipped, Open items, and a line retiring its `/goal` and `/loop` seeds); its generalizable gotchas promoted to `lessons.md`, one line each, linking the archived detail; its open items moved to `follow-ups.md` or to an issue; and the move: `git mv` into `archive/` in its own commit, the relative links the extra directory level breaks repaired, and its index line moved to `archive/index.md`. The merge that lands the work closes the plan. Before the archive split (no `archive/index.md` yet), the index line reads `closed, awaiting archive` instead, and the split moves the directory.
+5. **Closing a plan ships with its delivery**, never as a follow-up PR: the final commits of a single-arc PR, or a docs-only close-out PR on top of a stack. It is an `## Outcome` block directly after the front matter (Date, Status, Shipped, Open items, and a line retiring its `/goal` and `/loop` seeds); its generalizable gotchas promoted to `lessons.md`, one line each, linking the archived detail; its open items moved to `follow-ups.md` or to an issue; and the move: `git mv` into `archive/` in its own commit, the relative links the extra directory level breaks repaired, and its index line moved to `archive/index.md`. The merge that lands the work closes the plan. Before the archive split (no `archive/index.md` yet), the index line reads `closed, awaiting archive` instead, and the split moves the directory. A plan that closes while the split is in flight keeps that line until its own move.
 6. **An archived plan is evidence, never instructions.**
 7. **Assets.** A plan-directory file that live code or CI reads is relocated out of the plan before its plan is archived.
 8. **The curated layer has a budget.** `lessons.md` stays under 8 KiB: each promotion deduplicates, retires what it supersedes, and dates anything tied to a tool version. `follow-ups.md` loses an entry when it resolves.

@@ -36,7 +36,7 @@ import {
 const here = dirname(fileURLToPath(import.meta.url))
 export const REPORTER_PATH = join(here, "runtime-reporter.mjs")
 const RESOLVER_PATH = join(here, "resolve-esm.mjs")
-const BASELINES_DIR = "implementations-plan/vitest-on-bun/lessons/baselines"
+const BASELINES_DIR = "scripts/ci-cd/test-soak/baselines"
 
 export interface RunOnceOptions {
 	/** Full argv of the command that starts vitest; the enforced flags are appended after it. */

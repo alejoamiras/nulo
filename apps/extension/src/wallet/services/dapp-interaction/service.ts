@@ -39,6 +39,9 @@ import {
 	type DiscoveryParams,
 	type DiscoveryResult,
 	type DiscoveryOutcome,
+	type InteractionPayload,
+	type NetworkUnavailableParams,
+	type NetworkUnavailablePayload,
 	type ExecutionHooks,
 	type ExecutionParams,
 	type CaipChain,
@@ -66,9 +69,13 @@ function isExecutionPayload(payload: DappInteraction["payload"]): payload is Exe
 	return "session" in payload && Array.isArray((payload as { params?: { operations?: unknown } }).params?.operations)
 }
 
-/** A discovery is the only interaction without a session: it is what creates one. */
+function isNoticePayload(payload: DappInteraction["payload"]): payload is NetworkUnavailablePayload {
+	return "notice" in payload
+}
+
+/** A discovery is the only answerable interaction without a session: it is what creates one. */
 function isDiscoveryPayload(payload: DappInteraction["payload"]): payload is DiscoveryPayload {
-	return !("session" in payload)
+	return !("session" in payload) && !isNoticePayload(payload)
 }
 
 /** The confirmation gate keys off the strongest level in a batch; a kind missing here is a
@@ -169,7 +176,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		if (record && record.progress.stage !== "queued") this.cancelInteractionForJournal(journalId)
 	}
 
-	public async getInteractionPayload(id: string): Promise<ExecutionPayload | CapabilityPayload | DiscoveryPayload> {
+	public async getInteractionPayload(id: string): Promise<InteractionPayload> {
 		const interactionRequest = this.storage.get(id)
 		if (!interactionRequest) {
 			throw new Error("Invalid id")
@@ -208,7 +215,9 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 
 	public async resolveInteraction(id: string, result: ExecutionResult | CapabilityResult | DiscoveryResult): Promise<void> {
 		const interactionRequest = this.storage.get(id)
-		if (!interactionRequest) {
+		// A notice has nothing to approve: only a dismissal settles it, so no page answer can be read
+		// as an approved discovery. Non-disclosing, like an unknown id.
+		if (!interactionRequest || isNoticePayload(interactionRequest.payload)) {
 			throw new Error("Invalid id")
 		}
 		// Same first-claim-wins refusal as approveInteraction — capability and
@@ -446,9 +455,19 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		return (await this.interaction("discover", payload, cancellationToken)) as DiscoveryOutcome
 	}
 
+	/** Show the notice for a discovery whose chain the profile has no network for. Settles, never
+	 *  throws, once the window is dismissed, closed, timed out or could not open. */
+	public async notifyNetworkUnavailable(params: NetworkUnavailableParams): Promise<void> {
+		const payload: NetworkUnavailablePayload = { notice: "network-unavailable", params }
+		await this.interaction("network-unavailable", payload).then(
+			() => undefined,
+			() => undefined,
+		)
+	}
+
 	private async interaction(
 		type: string,
-		payload: ExecutionPayload | CapabilityPayload | DiscoveryPayload,
+		payload: InteractionPayload,
 		cancellationToken?: string,
 		hooks?: ExecutionHooks,
 	): Promise<ExecutionResult | CapabilityResult | DiscoveryResult> {

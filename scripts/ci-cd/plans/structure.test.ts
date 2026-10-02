@@ -1,6 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { CANONICAL_GITIGNORE, cleanupRepos, commitAll, findings, git, makeRepo, writeFiles } from "./fixture-repo"
-import { NESTED_IGNORE_ALLOWLIST } from "./structure"
 
 afterAll(cleanupRepos)
 
@@ -73,10 +72,10 @@ describe("nested-ignore", () => {
 		])
 	})
 
-	test("an allowlisted one passes, and the allowlist only shrinks", () => {
-		const repo = makeRepo({ ...HYGIENE, [NESTED_IGNORE_ALLOWLIST[0]]: "*\n!.gitignore\n" })
-		expect(findings(repo, "nested-ignore")).toEqual([])
-		expect(NESTED_IGNORE_ALLOWLIST.length).toBeLessThanOrEqual(1)
+	test("none is exempt: the soak baselines' ignore file fails if it returns to the plan tree", () => {
+		const baselines = "implementations-plan/vitest-on-bun/lessons/baselines/full/.gitignore"
+		const repo = makeRepo({ ...HYGIENE, [baselines]: "*\n!.gitignore\n" })
+		expect(findings(repo, "nested-ignore").map((f) => f.file)).toEqual([baselines])
 	})
 })
 
@@ -116,6 +115,22 @@ describe("index-structure", () => {
 			"z points into archive/",
 			"archive/z/plan.md is not in the git index",
 			"not `- [name](target) — status — hook`",
+		])
+	})
+
+	test("a target must be a plain `<dir>/<file>` path: `./` and `..` name no dir", () => {
+		const repo = makeRepo({
+			...split,
+			"implementations-plan/index.md": ["- [a](./a/plan.md) — active — a", "- [b](b/../README.md) — active — b"].join("\n"),
+			"implementations-plan/README.md": "# Plans\n",
+			"implementations-plan/a/plan.md": "# A\n",
+			"implementations-plan/b/plan.md": `# B\n\n${OUTCOME}`,
+		})
+		expect(findings(repo, "index-structure").map((f) => f.detail)).toEqual([
+			"a has no line in index.md",
+			"b has no line in index.md",
+			"./a/plan.md is not a plain <dir>/<file> path",
+			"b/../README.md is not a plain <dir>/<file> path",
 		])
 	})
 
@@ -163,6 +178,33 @@ describe("archive-structure", () => {
 			"implementations-plan/archive/b/plan.md",
 			"implementations-plan/archive/c/plan.md",
 			"implementations-plan/archive/d",
+		])
+	})
+
+	test("a line cannot lend a decoy's Outcome: `..`, `%2e%2e` or an escaped `\\.` names no dir, and a second line fails", () => {
+		const repo = makeRepo({
+			"implementations-plan/archive/index.md": [
+				line("a"),
+				line("a"),
+				"- [b](b/../a/plan.md) — completed — b",
+				"- [c](c/%2e%2e/a/plan.md) — completed — c",
+				"- [d](d/\\.\\./a/plan.md) — completed — d",
+			].join("\n"),
+			"implementations-plan/archive/a/plan.md": `# A\n\n${OUTCOME}`,
+			"implementations-plan/archive/b/plan.md": "# B\n",
+			"implementations-plan/archive/c/plan.md": "# C\n",
+			"implementations-plan/archive/c/%2e%2e/a/plan.md": `# Decoy\n\n${OUTCOME}`,
+			"implementations-plan/archive/d/plan.md": "# D\n",
+			"implementations-plan/archive/d/\\.\\./a/plan.md": `# Decoy\n\n${OUTCOME}`,
+		})
+		expect(findings(repo, "archive-structure").map((f) => `${f.file}:${f.line} ${f.detail}`)).toEqual([
+			"implementations-plan/archive/b:1 b has no line in archive/index.md",
+			"implementations-plan/archive/c:1 c has no line in archive/index.md",
+			"implementations-plan/archive/d:1 d has no line in archive/index.md",
+			"implementations-plan/archive/index.md:2 a is listed twice",
+			"implementations-plan/archive/index.md:3 b/../a/plan.md is not a plain <dir>/<file> path",
+			"implementations-plan/archive/index.md:4 c/%2e%2e/a/plan.md is not a plain <dir>/<file> path",
+			"implementations-plan/archive/index.md:5 d/\\.\\./a/plan.md is not a plain <dir>/<file> path",
 		])
 	})
 })

@@ -8,6 +8,7 @@ import { flushPromises, mount } from "@vue/test-utils"
 import { nextTick } from "vue"
 import { createAppStoreHarness } from "../../../../tests/helpers/app-store-harness"
 import { installChromeStorage } from "../../../../tests/helpers/chrome-storage-mock"
+import { TESTNET_TOKENS } from "@/wallet/services/token/default-tokens"
 
 const H = vi.hoisted(() => {
 	const makeEvent = () => {
@@ -91,8 +92,8 @@ const STUBS = {
 }
 
 const CHAIN = CHAIN_IDS.TESTNET
-// cUSD is price-mapped on the testnet; with a `usd-coin` quote seeded it is the one priced row.
-const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
+// Test USDC is price-mapped on the testnet; with a `usd-coin` quote seeded it is the one priced row.
+const TEST_USDC = TESTNET_TOKENS.USDC
 const ACCOUNT = `0x${"a".repeat(64)}`
 const OTHER_ACCOUNT = `0x${"b".repeat(64)}`
 
@@ -148,7 +149,7 @@ describe("SelectTokenPopup", () => {
 		const wrapper = await mountOpen([
 			row(3, "ZED"),
 			row(4, "EMPTY", { publicBalance: "0" }),
-			row(1, "PRICED", { contract: CUSD }),
+			row(1, "PRICED", { contract: TEST_USDC }),
 			row(2, "ALPHA"),
 		])
 		expect(rowSymbols(wrapper)).toEqual(["PRICED", "ALPHA", "ZED", "EMPTY"])

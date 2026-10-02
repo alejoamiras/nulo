@@ -6,12 +6,13 @@ pattern='/Users/[A-Za-z]|/home/[A-Za-z]'
 
 # Vendored upstream noir artifacts are byte-exact (digest-pinned); their file_map embeds
 # Aztec's own public CI build paths (/home/aztec-dev/...), not a local-machine leak.
+# Archived plans are frozen records, and some still hold home paths until their scrub (follow-ups.md).
 mapfile -t hits < <(
 	git grep -i -l -E "$pattern" -- \
 		. \
 		':!scripts/check-no-local-paths.sh' \
-		':!implementations-plan' \
-		':!implementations-plan/**' \
+		':!implementations-plan/archive' \
+		':!implementations-plan/archive/**' \
 		':!packages/aztec-runtime/src/account/artifacts/*.json' || true
 )
 

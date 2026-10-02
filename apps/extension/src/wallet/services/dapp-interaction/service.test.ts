@@ -35,6 +35,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import { CHAIN_IDS } from "@/utils/chain-ids"
 import { DappInteractionService } from "./service"
 import type { CapabilityPayload, DappInteraction, DiscoveryResult, ExecutionHooks, OperationRequest } from "./spec"
+import { TESTNET_TOKENS } from "@/wallet/services/token/default-tokens"
 
 const noopLogger: ILogger = { log: () => {} }
 
@@ -753,6 +754,10 @@ describe("DappInteractionService — the capability window's known contracts", (
 			{ address: SPONSORED, name: "Sponsored fee payer" },
 			{ address: PRIVATE, name: "Private fee payer" },
 			{ address: "0x1ec33912c9f14470513e0eb23db81ddb2aa1ae3395e6ab4d3cba383f68dec3c5", name: "Auth registry" },
+			{ address: TESTNET_TOKENS.USDC, name: "Test USDC" },
+			{ address: TESTNET_TOKENS.USDT, name: "Test USDT" },
+			{ address: TESTNET_TOKENS.EURC, name: "Test EURC" },
+			{ address: TESTNET_TOKENS.GBPC, name: "Test GBPC" },
 		])
 	})
 })
@@ -827,5 +832,70 @@ describe("DappInteractionService — an approved connect window is handed to the
 
 		await expect(w.pending).resolves.toEqual(answer)
 		expect(h.removes).toHaveBeenCalledWith(w.windowId)
+	})
+})
+
+describe("DappInteractionService — the network-unavailable notice only informs", () => {
+	const PARAMS = { dappMetadata: { name: "dapp.example", url: "https://dapp.example" } }
+
+	function noticeHarness() {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const windowManager = new WindowManager(api.windows, new MockClock(), noopLogger)
+		const opens = vi.spyOn(windowManager, "openAndAwait")
+		const dapp = new DappInteractionService(noopLogger, windowManager)
+		const creates = vi.spyOn(api.windows, "create")
+		const removes = vi.spyOn(api.windows, "remove")
+		const storage = (dapp as unknown as { storage: Map<string, DappInteraction> }).storage
+		const open = async () => {
+			const settled = vi.fn()
+			const pending = dapp.notifyNetworkUnavailable(PARAMS).then(settled)
+			await expect.poll(() => creates.mock.results.length).toBe(1)
+			const created = (await creates.mock.results[0]?.value) as { id: number }
+			await flush()
+			return { pending, settled, windowId: created.id, id: [...storage.keys()][0] as string }
+		}
+		const closeByUser = (windowId: number) => (api.windows as unknown as { closeByUser: (id: number) => void }).closeByUser(windowId)
+		return { dapp, opens, removes, open, closeByUser }
+	}
+
+	test("opens its own window type where the connect window opens, with the payload the window reads", async () => {
+		const h = noticeHarness()
+		const w = await h.open()
+
+		expect(h.opens.mock.calls[0]?.[0]).toEqual(
+			expect.objectContaining({ kind: "network-unavailable", width: 400, height: 800, placement: "top-right" }),
+		)
+		await expect(h.dapp.getInteractionPayload(w.id)).resolves.toEqual({ notice: "network-unavailable", params: PARAMS })
+	})
+
+	test("refuses to be resolved, even as an approved discovery, and stays open", async () => {
+		const h = noticeHarness()
+		const w = await h.open()
+
+		await expect(h.dapp.resolveInteraction(w.id, { approved: true } as DiscoveryResult)).rejects.toThrow("Invalid id")
+		await flush()
+
+		expect(w.settled).not.toHaveBeenCalled()
+		expect(h.removes).not.toHaveBeenCalled()
+	})
+
+	test("Close (a reject) closes the window and settles without throwing", async () => {
+		const h = noticeHarness()
+		const w = await h.open()
+
+		await h.dapp.rejectInteraction(w.id, "Closed")
+
+		await expect(w.pending).resolves.toBeUndefined()
+		expect(h.removes).toHaveBeenCalledWith(w.windowId)
+	})
+
+	test("closing the window by hand settles it too", async () => {
+		const h = noticeHarness()
+		const w = await h.open()
+
+		h.closeByUser(w.windowId)
+
+		await expect(w.pending).resolves.toBeUndefined()
 	})
 })

@@ -28,7 +28,7 @@ that cannot be read out of this repository.
 | ~~`country/state of residence`~~ | Filled: Argentina; venue is the Ciudad Autónoma de Buenos Aires. |
 | ~~`contact email`~~ | Filled: `hello@nulo.sh`. |
 | `effective date` | Privacy 1.0: filled, 23 September 2026 (the submission day). Terms 1.0: the date the 1.0 listing goes live. |
-| ~~`official Chrome Web Store / Firefox Add-ons listing URL`~~ | Filled 2026-09-23, after both first submissions: Chrome item `jlmiaokmjoicmclelpiiocdhncddkdmc` (slug `nulo-v5`) and the AMO add-on `nulo-v5`. Neither resolves publicly until its store publishes it. Nulo V6 reuses both items, renamed; the AMO URL changes, in place, when its slug moves to `nulo-v6`. |
+| ~~`official Chrome Web Store / Firefox Add-ons listing URL`~~ | Filled 2026-09-23, after both first submissions: Chrome item `jlmiaokmjoicmclelpiiocdhncddkdmc` (slug `nulo-v5`) and the AMO add-on `nulo-v5`. Neither resolves publicly until its store publishes it. Nulo V6 reuses both items, renamed; both URLs name the item by its ID (AMO add-on `3077967`), so no rename changes them. |
 | ~~`published security-reporting URL`~~ | Filled: `https://github.com/alejoamiras/nulo/security` (GitHub private vulnerability reporting, enabled 2026-09-22). |
 | ~~`provider legal name and privacy-policy link`~~ | Filled: Google LLC (Google Workspace, from the MX record and Google's contracting-entity table). |
 | ~~`applicable Cloudflare contracting entity and privacy-policy link`~~ | Filled: Cloudflare, Inc. (Self-Serve Subscription Agreement; `nulo.sh` is on the Free plan). |
@@ -53,7 +53,7 @@ These came out of the two-round review and are **not** fixed by editing the docu
    broadcasting and dApp requests is gated, and the sheet cannot cover an export page
    (`apps/extension/tests/e2e/legal-acceptance.test.ts`, scenarios S5, S6, S8).
 
-   Blockers 1–3 shipped as one arc: `implementations-plan/legal-terms/`.
+   Blockers 1–3 shipped as one arc: `implementations-plan/archive/legal-terms/`.
 4. ~~**Verify the Presto MIT relicense reached the bundled artifacts.**~~ — done. The lockfile
    resolves MIT versions (first `@alejoamiras/presto@5.2.0-revision.3`, `presto-core@1.1.0` and
    `presto-banners@1.1.0`, whose tarballs differ from the AGPL ones only in the licence files and
@@ -65,7 +65,7 @@ These came out of the two-round review and are **not** fixed by editing the docu
    bundled fonts are listed, each bound to its file by hash. **Stated limit:** the barretenberg and
    noir wasm are attributed to the projects that publish them, under their licences; what they
    compile in is not itemised, because upstream publishes no inventory (the notices file says so,
-   and `implementations-plan/third-party-notices/follow-ups.md` records what would reopen it).
+   and `implementations-plan/follow-ups.md` records what would reopen it).
 5. **Chrome trader disclosure — declared non-trader (2026-09-21).** The developer account answered
    Chrome's trader question as a non-trader (no revenue, no entity, no professional activity), so the
    listing shows no address or phone number. A natural person acting professionally can still be a

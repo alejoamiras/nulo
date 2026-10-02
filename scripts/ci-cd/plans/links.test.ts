@@ -1,7 +1,8 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { checkTree } from "./check"
-import { cleanupRepos, findings, makeRepo, writeFiles } from "./fixture-repo"
-import { expandBraces, extract, pathTokens, resolveHref } from "./links"
+import { cleanupRepos, commitAll, findings, git, makeRepo, writeFiles } from "./fixture-repo"
+import { createCtx } from "./lib"
+import { expandBraces, extract, PATH_TOKEN_ALLOWLIST, pathTokenFindings, pathTokens, resolveHref } from "./links"
 
 afterAll(cleanupRepos)
 
@@ -139,15 +140,28 @@ describe("resolveHref", () => {
 })
 
 describe("path tokens", () => {
-	test("brace tokens expand; templates and globs are not paths; trailing punctuation drops", () => {
+	test("brace tokens expand; templates and globs are not paths, a `>` outside a placeholder ends a path; trailing punctuation drops", () => {
 		expect(expandBraces("implementations-plan/{a,b}/x/{c,d}.md")).toEqual([
 			"implementations-plan/a/x/c.md",
 			"implementations-plan/a/x/d.md",
 			"implementations-plan/b/x/c.md",
 			"implementations-plan/b/x/d.md",
 		])
-		expect(pathTokens("see implementations-plan/{a,b}/plan.md, implementations-plan/<plan>/x and implementations-plan/**.")).toEqual({
-			paths: ["implementations-plan/a/plan.md", "implementations-plan/b/plan.md"],
+		const line =
+			"see implementations-plan/{a,b}/plan.md, implementations-plan/<plan>/x, implementations-plan/** and <implementations-plan/c/>."
+		expect(pathTokens(`${line} <implementations-plan/d.md><implementations-plan/e.md> implementations-plan/f.md>tail`)).toEqual({
+			paths: [
+				"implementations-plan/a/plan.md",
+				"implementations-plan/b/plan.md",
+				"implementations-plan/c",
+				"implementations-plan/d.md",
+				"implementations-plan/e.md",
+				"implementations-plan/f.md",
+			],
+			overflow: [],
+		})
+		expect(pathTokens("implementations-plan/<plan>/lessons/phase-<N>.md and implementations-plan/<plan>.")).toEqual({
+			paths: [],
 			overflow: [],
 		})
 	})
@@ -358,5 +372,74 @@ describe("path-token", () => {
 	test("a brace token is checked alternative by alternative", () => {
 		const repo = makeRepo({ "CLAUDE.md": "implementations-plan/{a,b}/plan.md\n", "implementations-plan/a/plan.md": "a\n" })
 		expect(findings(repo, "path-token").map((f) => f.detail)).toEqual(["implementations-plan/b/plan.md does not resolve at HEAD"])
+	})
+
+	test("an allowlisted permalink pins its file and names no plan path; any other URL's path still does, its tail included", () => {
+		const [allowed, other] = ["a".repeat(40), "b".repeat(40)]
+		const url = (ref: string) => `https://github.com/alejoamiras/nulo/blob/${ref}/implementations-plan/gone/audit-x.md`
+		const repo = makeRepo({
+			"scripts/ci-cd/plans/permalink-bases.json": JSON.stringify({ [allowed]: "a dev commit" }),
+			"src/a.ts": [
+				`// ${url(allowed)}`,
+				`// (${url(allowed)}#L3).`,
+				`// ${url(other)}`,
+				`// ${url("dev")}`,
+				`// ${url(allowed)}/%2e%2e/%2e%2e/%2e%2e/%2e%2e/dev/README.md`,
+				`// <${url("dev")}>`,
+				`// ${url(allowed)}(x)/%2e%2e/%2e%2e/%2e%2e/%2e%2e/dev/README.md`,
+				`// ${url(allowed)}[x]/%2e%2e/%2e%2e/%2e%2e/%2e%2e/dev/README.md`,
+				`// <${url("dev")}>tail`,
+				`// See **[audit](${url(allowed)}#L27)**.`,
+				`// |[audit](${url(allowed)})|`,
+				"",
+			].join("\n"),
+			"docs/notes.md": `See [the audit](${url(allowed)}).\n`,
+		})
+		expect(findings(repo, "path-token").map((f) => `${f.file}:${f.line}`)).toEqual([
+			"src/a.ts:3",
+			"src/a.ts:4",
+			"src/a.ts:5",
+			"src/a.ts:6",
+			"src/a.ts:7",
+			"src/a.ts:8",
+			"src/a.ts:9",
+		])
+	})
+
+	test("plan prose is not scanned; the indexes and curated files are, code spans included", () => {
+		const stale = "See `implementations-plan/gone/plan.md`.\n"
+		const repo = makeRepo({
+			"implementations-plan/p/plan.md": stale,
+			"implementations-plan/index.md": "- [p](p/plan.md) — active — replaces `implementations-plan/gone/plan.md`\n",
+			"implementations-plan/archive/index.md": stale,
+			"implementations-plan/follow-ups.md": stale,
+		})
+		expect(findings(repo, "path-token").map((f) => f.file)).toEqual([
+			"implementations-plan/archive/index.md",
+			"implementations-plan/follow-ups.md",
+			"implementations-plan/index.md",
+		])
+	})
+
+	test("the reference projects and the soak baselines record their paths and are not scanned", () => {
+		const stale = "// implementations-plan/gone/plan.md\n"
+		const repo = makeRepo({
+			"reference/p/gen.ts": stale,
+			"scripts/ci-cd/test-soak/baselines/bun/x.json": `{ "out": "implementations-plan/gone/full/x.json" }\n`,
+			"scripts/ci-cd/test-soak/cli.ts": stale,
+		})
+		expect(findings(repo, "path-token").map((f) => f.file)).toEqual(["scripts/ci-cd/test-soak/cli.ts"])
+	})
+
+	test("an allowlisted mention holds while its file is the recorded blob, and the first edit ends it", () => {
+		const text = "// implementations-plan/gone/plan.md\n"
+		const repo = makeRepo({ "src/a.ts": text, "src/b.ts": text })
+		const allowlist = [{ file: "src/a.ts", blob: git(repo, "rev-parse", ":src/a.ts"), token: "implementations-plan/gone/plan.md" }]
+		const flagged = () => pathTokenFindings(createCtx({ cwd: repo }), new Map(), allowlist).map((f) => f.file)
+		expect(flagged()).toEqual(["src/b.ts"])
+		writeFiles(repo, { "src/a.ts": `${text}// touched\n` })
+		commitAll(repo)
+		expect(flagged()).toEqual(["src/a.ts", "src/b.ts"])
+		expect(PATH_TOKEN_ALLOWLIST.length).toBeLessThanOrEqual(3)
 	})
 })

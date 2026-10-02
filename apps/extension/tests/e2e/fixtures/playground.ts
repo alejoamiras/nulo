@@ -28,11 +28,16 @@ export function playgroundTestPage(): string {
 	return PLAYGROUND_TEST_URL.endsWith("/") ? `${PLAYGROUND_TEST_URL}?test=1` : `${PLAYGROUND_TEST_URL}/?test=1`
 }
 
-/** Open a fresh playground tab on the test-mode page. */
-export async function openPlayground(ctx: ExtensionContext): Promise<Page> {
+/** Open a fresh playground tab on the test-mode page. `chainInfo` (decimal strings) makes it ask for
+ *  that chain instead of the sandbox's: the wallet derives its chain id as `chainId ^ version`. */
+export async function openPlayground(
+	ctx: ExtensionContext,
+	opts: { chainInfo?: { chainId: string; version: string } } = {},
+): Promise<Page> {
 	const page = await newPage(ctx.browser)
 	patchPagePolling(page)
-	await page.goto(playgroundTestPage(), { waitUntil: "domcontentloaded" })
+	const chain = opts.chainInfo ? `&chainId=${opts.chainInfo.chainId}&version=${opts.chainInfo.version}` : ""
+	await page.goto(`${playgroundTestPage()}${chain}`, { waitUntil: "domcontentloaded" })
 	await page.waitForSelector('[data-testid="pg-status"]', { timeout: 30_000 })
 	return page
 }

@@ -46,7 +46,7 @@ export type SeedMarkerEntry = {
 	/** Terminal outcomes. `deleted` is the user tombstone: it survives chain
 	 *  purges — delete + network re-add must NOT resurrect the default. */
 	outcome?: "seeded" | "deleted"
-	/** Chain-observed decimals recorded at seed time (TOFU — see default-tokens.ts). */
+	/** Chain-observed decimals recorded at seed time; equal to the seed's `expectedDecimals`. */
 	observedDecimals?: number
 }
 
@@ -572,6 +572,7 @@ export class TokenSeeder {
 
 	private metadataValid(seed: DefaultTokenSeed, preview: SeedPreview): boolean {
 		if (preview.symbol !== seed.expectedSymbol) return false
+		if (preview.decimals !== seed.expectedDecimals) return false
 		if (preview.name.length === 0 || preview.name.length > NAME_MAX_LENGTH) return false
 		if (preview.symbol.length > SYMBOL_MAX_LENGTH) return false
 		if (!Number.isInteger(preview.decimals) || preview.decimals < 0 || preview.decimals > DECIMALS_MAX) return false

@@ -1,10 +1,10 @@
 # `.github/` — CI configuration
 
-This directory holds the GitHub Actions wiring. The contributor-facing guide lives at [`../CI.md`](../CI.md); the original plan lives in [`../implementations-plan/ci-cd/`](../implementations-plan/ci-cd/) and links its audits by permalink.
+This directory holds the GitHub Actions wiring. The contributor-facing guide lives at [`../CI.md`](../CI.md); the original plan lives in [`../implementations-plan/archive/ci-cd/`](../implementations-plan/archive/ci-cd/) and links its audits by permalink.
 
 ## Status check matrix
 
-These `status` aggregators are what branch protection on `main` / `dev` requires. Branch protection matches the **produced check-run name**, which for a normal GitHub Actions job is its bare `name:` — there is no `Workflow / Status` form (that only exists for reusable `uses:` jobs). The old required contexts `Quality / Status` etc. were hand-typed phantoms that never matched a produced check, hanging every required gate `Expected` and forcing `--admin` on every merge; the aggregators were renamed to unique bare names and the required contexts re-pointed (2026-06-24 — see [`CI.md`](../CI.md#branch-protection) + [`../implementations-plan/required-check-mismatch/`](../implementations-plan/required-check-mismatch/)).
+These `status` aggregators are what branch protection on `main` / `dev` requires. Branch protection matches the **produced check-run name**, which for a normal GitHub Actions job is its bare `name:` — there is no `Workflow / Status` form (that only exists for reusable `uses:` jobs). The old required contexts `Quality / Status` etc. were hand-typed phantoms that never matched a produced check, hanging every required gate `Expected` and forcing `--admin` on every merge; the aggregators were renamed to unique bare names and the required contexts re-pointed (2026-06-24 — see [`CI.md`](../CI.md#branch-protection) + [`../implementations-plan/archive/required-check-mismatch/`](../implementations-plan/archive/required-check-mismatch/)).
 
 | Workflow | Required check-run | Required on | Runs when | What it checks |
 |---|---|---|---|---|
@@ -41,7 +41,7 @@ Composite actions live in `.github/actions/` and are shared step fragments used 
 | Composite | Purpose |
 |---|---|
 | `setup-bun` | checkout + bun + install cache + `bun install --frozen-lockfile` |
-| `setup-aztec` | Foundry + Aztec CLI matching the `@aztec-labs/aztec.js` version |
+| `setup-aztec` | Foundry + Aztec CLI matching the `@aztec-labs/aztec.js` version; the installer, its `versions` manifest and the noir tarball are SHA-256-pinned in the action (`installer-pins.sha256`), and its npm resolve is held to a 7-day release age outside the Aztec scopes |
 | `setup-puppeteer` | warm `~/.cache/puppeteer` (Chrome); with `browser: firefox`, install + cache the Firefox revision the locked Puppeteer pins, under a key that shares no prefix with Chrome's |
 | `setup-geckodriver` | download + verify (tarball and extracted-binary SHA-256 pins, single-member archive) + install `geckodriver` for the Firefox lanes; the pins live in the action. See [SECURITY.md](../SECURITY.md#binary-dependencies). |
 | `setup-presto-server` | download + verify (tarball and extracted-binary SHA-256 pins, single-member archive) + install the headless `presto-server` binary (Linux x86_64) for CI proving. Used by `_extension-network-e2e.yml`. See [CI.md](../CI.md#presto-in-ci). |

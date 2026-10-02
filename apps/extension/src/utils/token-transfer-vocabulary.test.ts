@@ -1,8 +1,10 @@
 import { describe, expect, test } from "vitest"
+import { TOKEN_FN_DESCRIPTORS } from "@/wallet/services/token/functions/descriptors"
 import {
 	MINT_SIGNATURES,
 	TRANSFER_LABELS,
 	TRANSFER_SIGNATURES,
+	abiNameFitsRole,
 	findMintSignature,
 	findTransferSignature,
 	transferLabel,
@@ -77,5 +79,24 @@ describe("token-mint vocabulary", () => {
 		expect(findMintSignature("mint_to_public", 3)).toBeUndefined()
 		expect(findMintSignature("transfer", 2)).toBeUndefined()
 		expect(findTransferSignature("mint_to_private", 2)).toBeUndefined()
+	})
+})
+
+describe("abiNameFitsRole", () => {
+	test("the nonce role takes either nonce name and nothing else; no other role takes a nonce name", () => {
+		expect(abiNameFitsRole("authwit_nonce", "authwit_nonce")).toBe(true)
+		expect(abiNameFitsRole("authwit_nonce", "_nonce")).toBe(true)
+		expect(abiNameFitsRole("to", "to")).toBe(true)
+		for (const name of ["nonce", "__nonce", "authwitNonce", "from"]) expect(abiNameFitsRole("authwit_nonce", name), name).toBe(false)
+		for (const role of ["from", "to", "amount"]) expect(abiNameFitsRole(role, "_nonce"), role).toBe(false)
+	})
+
+	test("it agrees with the transfer descriptors' own predicate on the fourth parameter's name", () => {
+		const descriptor = TOKEN_FN_DESCRIPTORS.transferPublic
+		const abi = descriptor.abiBuilder("transfer_public_to_public", 0)
+		for (const name of ["authwit_nonce", "_nonce", "nonce", "authwitNonce"]) {
+			const renamed = { ...abi, parameters: abi.parameters.map((p, i) => (i === 3 ? { ...p, name } : p)) }
+			expect(descriptor.candidatePredicate(renamed, 0), name).toBe(abiNameFitsRole("authwit_nonce", name))
+		}
 	})
 })

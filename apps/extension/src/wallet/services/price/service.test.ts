@@ -91,7 +91,7 @@ describe("PriceService — refresh pipeline", () => {
 		const { service, state } = await harness()
 		const quotes = await service.refreshIfStale()
 		expect(state.fetchCalls).toHaveLength(1)
-		expect(state.fetchCalls[0]).toContain("ids=aztec,usd-coin")
+		expect(state.fetchCalls[0]).toContain("ids=aztec,euro-coin,tether,usd-coin")
 		expect(state.fetchCalls[0]).toContain("vs_currencies=usd")
 		expect(state.fetchCalls[0]).toContain("include_last_updated_at=true")
 		expect(quotes.aztec?.usd).toBe(0.0147)

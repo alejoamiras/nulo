@@ -143,6 +143,13 @@ describe("TokenSeeder — trust boundary (hard skips)", () => {
 		expect(deps.persist).not.toHaveBeenCalled()
 	})
 
+	test("decimals mismatch: an in-range value other than the pinned one is a hard skip, nothing persisted", async () => {
+		const { seeder, deps } = makeSeeder({ preview: vi.fn(async () => ({ ...goodPreview(), decimals: 18 })) })
+		await seeder.run()
+		expect(deps.persist).not.toHaveBeenCalled()
+		expect((await readMarker())[KEY]?.outcome).toBeUndefined()
+	})
+
 	test("metadata bounds: out-of-range decimals and empty name are rejected", async () => {
 		for (const bad of [
 			{ ...goodPreview(), decimals: 19 },

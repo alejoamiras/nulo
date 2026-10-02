@@ -219,7 +219,7 @@ The wallet talks to Aztec nodes over HTTPS-JSON-RPC. The endpoint URL is a
 user-controlled input — users add custom endpoints (Settings → Manage Networks
 → chain → Add endpoint), and any added endpoint can be promoted to the
 chain's primary. M4.10's network-model rework (executed 2026-04-27, see
-`implementations-plan/M4/DECISIONS.md`) split the conflated `Network` entity
+`implementations-plan/archive/M4/DECISIONS.md`) split the conflated `Network` entity
 into `Network` (chain-level) + nested `NetworkEndpoint[]`, which makes the
 endpoint trust boundary explicit.
 
@@ -340,7 +340,7 @@ erroneously applied the gate during `bun install --frozen-lockfile`,
 blocking installs of currently-pinned lockfile entries inside the
 window. **Retested on Bun 1.4.0 (2026-08-24): that bug is fixed** — a
 14-day gate passes frozen installs cleanly against this lockfile
-(evidence: `implementations-plan/bun-1.4-bump/lessons/phase-5.md`).
+(evidence: `implementations-plan/archive/bun-1.4-bump/lessons/phase-5.md`).
 Widening back to 14d is now viable; it is a deliberate policy change to
 make on its own PR, not a side effect of a toolchain bump.
 
@@ -560,7 +560,7 @@ did not apply `minimumReleaseAge` to transitive deps (workaround was
 deleting `bun.lock` first). Verified fixed on 1.4.0 with a
 positive-control mock-registry probe: when a gated update actually
 re-resolves, direct AND transitive candidates are both held to the gate
-(matrix: `implementations-plan/bun-1.4-bump/lessons/phase-5.md`). One
+(matrix: `implementations-plan/archive/bun-1.4-bump/lessons/phase-5.md`). One
 nuance remains by design: update never re-gates versions already in
 `bun.lock` — evicting an already-locked too-young version takes a
 deliberate lockfile regeneration.

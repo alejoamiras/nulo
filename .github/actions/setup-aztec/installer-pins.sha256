@@ -1,0 +1,7 @@
+# SHA-256 of each file setup-aztec downloads before it runs the Aztec installer, keyed by path:
+#   <aztec version>/install and <aztec version>/versions, from https://install.aztec-labs.com/
+#   noir/<noir version>/<asset>, from the noir-lang/noir release that versions file names
+# An Aztec bump re-pins them in one commit (the aztec-update skill has the procedure).
+af20f7054b0a43bcf490062953df83dac6e12cddeef8e28136202f194512fca6  6.0.0-rc.1/install
+bd07b479c05d41cc4a18745bad2d057fed7da1c0217997597896ef47a4dad5f9  6.0.0-rc.1/versions
+5792dd962afce1eed834570f95d9f72cc4a09d45cd846d3b80b7a57392732973  noir/1.0.0-rc.3/noir-x86_64-unknown-linux-gnu.tar.gz

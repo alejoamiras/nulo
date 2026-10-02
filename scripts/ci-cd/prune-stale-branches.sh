@@ -3,7 +3,8 @@
 # are archived under refs/archive/local-stale/<name> before deletion so nothing
 # is lost.
 #
-# Safety rules (per the audit in implementations-plan/ci-cd/audit-smoke-gating.md
+# Safety rules (per the audit at
+# https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/ci-cd/audit-smoke-gating.md#L27
 # and the practical observation that this repo squash-merges):
 #   - AUTO-DELETE when either:
 #       (a) the current tip SHA is reachable from origin/main OR origin/dev

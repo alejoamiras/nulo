@@ -2,12 +2,17 @@
 <html lang="en">
 	<head>
 		<meta charset="utf-8" />
-		<title>Nulo V5 — small promo tile</title>
+		<title>Nulo V6 small promo tile</title>
 		<style>
 			@font-face {
 				font-family: "Space Grotesk";
 				font-weight: 300 700;
 				src: url("{{font}}") format("woff2");
+			}
+			@font-face {
+				font-family: "JetBrains Mono";
+				font-weight: 400 700;
+				src: url("{{mono}}") format("woff2");
 			}
 			html,
 			body {
@@ -17,7 +22,8 @@
 				overflow: hidden;
 			}
 			body {
-				background: #0a0908;
+				position: relative;
+				background: radial-gradient(circle at 26% 50%, rgba(255, 85, 0, 0.14), transparent 46%), #0a0908;
 				color: #f5f0e6;
 				font-family: "Space Grotesk", sans-serif;
 				display: flex;
@@ -38,18 +44,22 @@
 				letter-spacing: 0.08em;
 				line-height: 1;
 			}
+			.wordmark .version {
+				color: #ff5500;
+			}
 			.wordmark small {
 				display: block;
-				margin-top: 10px;
-				font-size: 15px;
-				font-weight: 400;
-				letter-spacing: 0.22em;
-				color: #a39d94;
+				margin-top: 12px;
+				font-family: "JetBrains Mono", monospace;
+				font-size: 13px;
+				font-weight: 500;
+				letter-spacing: 0.2em;
+				color: #999187;
 			}
 		</style>
 	</head>
 	<body>
 		<div class="ring"></div>
-		<div class="wordmark">NULO V5<small>AZTEC WALLET</small></div>
+		<div class="wordmark">NULO <span class="version">V6</span><small>PRIVATE AZTEC WALLET</small></div>
 	</body>
 </html>

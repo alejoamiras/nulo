@@ -1,15 +1,16 @@
 /**
  * How the approval card reads one call's arguments, in the first shape that applies: the wallet's
- * transfer/mint vocabulary (structured, on a registered token whose ABI spells the signature), the
- * ABI decode the wallet fetched (named parameters, in the contract's own words), or the raw wire
- * fields — 32-byte hex nobody can review, so never the default view.
+ * transfer/mint vocabulary (structured, on a registered token whose call carries the signature's
+ * selector and whose ABI spells it), the ABI decode the wallet fetched (named parameters, in the
+ * contract's own words), or the raw wire fields — 32-byte hex nobody can review, so never the
+ * default view.
  */
 
 import type { DecodedCall, DecodedParam, DecodedValue, UndecodedReason } from "@/wallet/services/execution/client"
 import type { TokenInfo } from "@/wallet/services/token/client"
 import { formatBaseUnits } from "@/utils/amount"
 import { trimAddress } from "@/utils/string"
-import { findMintSignature, findTransferSignature } from "@/utils/token-transfer-vocabulary"
+import { abiNameFitsRole, findMintSignature, findTransferSignature, vocabularySelector } from "@/utils/token-transfer-vocabulary"
 import { humanizeMethodName } from "@/utils/tx-enrichment"
 import { parseTransferIntent, projectArgument, smallFieldDecimal } from "@/utils/transfer-intent"
 import { safeWire } from "./humanize"
@@ -27,8 +28,8 @@ export type RawRow = { kind: "field"; short: string; full: string; decimal?: str
 export type RawRows = { rows: RawRow[]; hidden: number }
 
 export type CallSurface =
-	| { kind: "transfer"; to: string; amount: string; sender: TransferSender; nonce?: string }
-	| { kind: "mint"; to: string; amount: string }
+	| { kind: "transfer"; fn: string; to: string; amount: string; sender: TransferSender; nonce?: string }
+	| { kind: "mint"; fn: string; to: string; amount: string }
 	| { kind: "decoded"; fn: string; params: readonly DecodedParam[] }
 	| { kind: "pending" }
 	| ({ kind: "raw"; reason: UndecodedReason } & RawRows)
@@ -69,16 +70,17 @@ const isZero = (n: string): boolean => /^(0x0+|0)$/.test(n)
 
 const senderOf = (ctx: CallerContext): TransferSender => (ctx.noFrom ? { kind: "none" } : { kind: "account", address: ctx.accountAddress })
 
-const vocabularySurface = (ctx: CallerContext | undefined, call: WireCall): CallSurface | undefined => {
-	const intent = parseTransferIntent(call as { name?: string; args?: unknown[] })
-	if (intent.kind === "mint") return { kind: "mint", to: intent.to, amount: intent.amount }
+/** Reads `call`'s arguments as the vocabulary entry for `fn`, never a wire `method` alias's. */
+const vocabularySurface = (ctx: CallerContext | undefined, fn: string, call: WireCall): CallSurface | undefined => {
+	const intent = parseTransferIntent({ name: fn, args: call.args as unknown[] | undefined })
+	if (intent.kind === "mint") return { kind: "mint", fn, to: intent.to, amount: intent.amount }
 	if (intent.kind !== "transfer") return undefined
 	// A call that hides its msg_sender executes with a null caller; naming the account there would
 	// be a confident lie, so the call falls through to the decode or the raw fields.
 	if (intent.from === undefined && (ctx === undefined || call.hideMsgSender === true)) return undefined
 	const sender: TransferSender = intent.from !== undefined ? { kind: "explicit", address: intent.from } : senderOf(ctx as CallerContext)
 	const nonce = intent.nonce !== undefined && !isZero(intent.nonce) ? { nonce: intent.nonce } : {}
-	return { kind: "transfer", to: intent.to, amount: intent.amount, sender, ...nonce }
+	return { kind: "transfer", fn, to: intent.to, amount: intent.amount, sender, ...nonce }
 }
 
 const ROLE_KIND: Readonly<Record<string, DecodedValue["kind"]>> = {
@@ -91,17 +93,23 @@ const ROLE_KIND: Readonly<Record<string, DecodedValue["kind"]>> = {
 const vocabularyRoles = (name: string, arity: number): readonly string[] | undefined =>
 	findTransferSignature(name, arity)?.params ?? findMintSignature(name, arity)?.params
 
-/** The vocabulary reads arguments by position, so the contract's ABI must spell the signature —
- *  the same roles, in the same order, of the same kinds. Registration says a contract is a token,
- *  not that its `transfer` takes `(to, amount)`. The reading is then keyed by the decoded name alone:
- *  a `method` alias on the wire must not pick a different vocabulary entry. */
-const corroborates = (decoded: Extract<DecodedCall, { kind: "decoded" }>): boolean => {
-	const roles = vocabularyRoles(decoded.fn, decoded.params.length)
-	return roles !== undefined && decoded.params.every((p, i) => p.name === roles[i] && p.value.kind === ROLE_KIND[p.name])
+/** The vocabulary reads arguments by position, so the call must prove the signature: the selector
+ *  that runs is the vocabulary's own (an interface a dApp registers can name any selector), and the
+ *  ABI spells its roles in order; a kind is looked up by role, since `_nonce` has no entry. */
+const corroborates = (decoded: Extract<DecodedCall, { kind: "decoded" }>, selector: unknown): boolean => {
+	const arity = decoded.params.length
+	const roles = vocabularyRoles(decoded.fn, arity)
+	const expected = vocabularySelector(decoded.fn, arity)
+	return (
+		roles !== undefined &&
+		expected !== undefined &&
+		selector === expected &&
+		decoded.params.every((p, i) => abiNameFitsRole(roles[i], p.name) && p.value.kind === ROLE_KIND[roles[i]])
+	)
 }
 
 /** `decoded` is `undefined` while the wallet is still decoding. The vocabulary applies only on a
- *  registered token (`tokenKnown`) whose decode corroborates the signature; every other call reads
+ *  registered token (`tokenKnown`) whose call corroborates the signature; every other call reads
  *  as the contract's own parameters, or as raw fields (`maxRows` of them) with the reason. */
 export const callSurface = (
 	ctx: CallerContext | undefined,
@@ -112,19 +120,17 @@ export const callSurface = (
 ): CallSurface => {
 	if (decoded === undefined) return { kind: "pending" }
 	if (decoded.kind === "decoded") {
-		const known =
-			tokenKnown && corroborates(decoded)
-				? vocabularySurface(ctx, { name: decoded.fn, args: call.args, hideMsgSender: call.hideMsgSender })
-				: undefined
+		const known = tokenKnown && corroborates(decoded, call.selector) ? vocabularySurface(ctx, decoded.fn, call) : undefined
 		return known ?? { kind: "decoded", fn: decoded.fn, params: decoded.params }
 	}
 	return { kind: "raw", reason: decoded.reason, ...rawRows(call.args, maxRows) }
 }
 
-/** The header names the function by its ABI name once decoded, by the dApp's label otherwise. Both are
- *  untrusted strings, and a curated label applies only on the contract it belongs to. */
+/** The header names the function by its decoded name, which a structured reading has checked against
+ *  the selector, and by the dApp's label only when there is no decode. Both are untrusted strings,
+ *  and a curated label applies only on the contract it belongs to. */
 export const callName = (call: WireCall, surface: CallSurface): string => {
-	const name = surface.kind === "decoded" ? safeWire(surface.fn, 64) : wire(call.name ?? call.selector, 64)
+	const name = "fn" in surface ? safeWire(surface.fn, 64) : wire(call.name ?? call.selector, 64)
 	return humanizeMethodName(name, wire(call.to, 80))
 }
 
@@ -170,6 +176,14 @@ export const valueText = (v: DecodedValue, full = false): string => {
 		case "struct":
 			return `{ ${v.fields.map((f) => `${safeWire(f.name, 32)}: ${valueText(f.value, full)}`).join(", ")} }`
 	}
+}
+
+/** An authwit nonce as the raw rows read a field: its decimal below 2^64, else the 32-byte hex. */
+export const nonceValue = (nonce: string): DecodedValue => {
+	const decimal = smallFieldDecimal(nonce)
+	return decimal !== undefined
+		? { kind: "integer", value: decimal }
+		: { kind: "field", value: `0x${BigInt(nonce).toString(16).padStart(64, "0")}` }
 }
 
 /** What the row reveals on hover: the whole field, or the whole list when the line summarized it. */

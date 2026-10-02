@@ -1,0 +1,3664 @@
+{
+	"closuresBase": "910a4defcbacbb4e76b53c1d57551a457b1d3fb0",
+	"rows": [
+		{
+			"dir": "A11",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/A11/plan.md",
+			"hook": "A11 — Vue popup-window decomposition"
+		},
+		{
+			"dir": "M2",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/M2/README.md",
+			"hook": "M2 implementation plans"
+		},
+		{
+			"dir": "M3",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/M3/README.md",
+			"hook": "M3 — Package Extraction (~4-6 weeks)"
+		},
+		{
+			"dir": "M4",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #246",
+			"date": "2026-07-06",
+			"prs": [
+				246
+			],
+			"outcomeFile": "implementations-plan/M4/README.md",
+			"hook": "M4 — Production hardening (~10-15d of execution)"
+		},
+		{
+			"dir": "M6",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/M6/plan.md",
+			"hook": "M6 — Vue design system + component library (post-triple-audit)"
+		},
+		{
+			"dir": "accelerator-server-ci",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #67",
+			"date": "2026-06-01",
+			"prs": [
+				67
+			],
+			"outcomeFile": "implementations-plan/accelerator-server-ci/plan.md",
+			"hook": "accelerator-server CI integration"
+		},
+		{
+			"dir": "account-artifact-freeze",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #303",
+			"date": "2026-07-22",
+			"prs": [
+				303
+			],
+			"outcomeFile": "implementations-plan/account-artifact-freeze/plan.md",
+			"hook": "7 phases ✓** (mid; codex r1 reject → v2 → fable cond-approve + final fresh codex cond-approve, all folded into v3) — account identity frozen per extension major: vendored raw SchnorrAccount.json (digest + class-id pins, provenance, biome/brand-guard carve-outs, lazy-wrapper decouple → +0.66 MB instead of +1.44 MB), frozen instantiation descriptor consumed by BOTH derivation and first-tx ctor (consistency test ties the emitted call to the committed init hash), append-only one-regime-per-major record with ack-to-digest binding + independently hardcoded paired test (tamper demos verified red), the DEDICATED frozen-account canary GREEN with native proving (init-nullifier ABSENT→PRESENT, authwit consume, SW-restart re-derive + tx; mandatory bump gate in the aztec-update skill + UPDATE.md), background AccountIntegrityCoordinator (session-open chokepoint ×9 sites, durable fail-closed blocking record, typed RPC-reconstructable error, sanitized dApp envelope, no-phishing barrier screen), and the V5/V6 policy in CLAUDE.md. KAT green with ZERO vector edits throughout. Lessons `lessons/phase-{1..5}.md`."
+		},
+		{
+			"dir": "account-balance-orphans",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #488",
+			"date": "2026-08-31",
+			"prs": [
+				488
+			],
+			"outcomeFile": "implementations-plan/account-balance-orphans/plan.md",
+			"hook": "codex + fable dual audit to explicit approve; post-impl codex loop converged in 2 rounds) — TokenBalanceRaw gains required profileId/chainId/contract; one shared identity predicate at every raw-row decision; a registered awaited purgeForAccounts closes the reconcileImportedAccounts orphan, the same-profile multi-chain hazard, and the temporal token-id-reuse residual"
+		},
+		{
+			"dir": "account-profile-siloing",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #325, #328",
+			"date": "2026-07-28",
+			"prs": [
+				325,
+				328
+			],
+			"outcomeFile": "implementations-plan/account-profile-siloing/plan.md",
+			"hook": "silo wallet activity by (profileId, networkId, chainId, accountAddress): per-scope slices, composite account keys, in-flight-send switch guard, journal lock + creation fences, shared dApp account resolver; incoming re-key superseded by dev's profile+network-scoped record id."
+		},
+		{
+			"dir": "account-switch-isolation",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [
+				"account-switch-remaining-phases"
+			],
+			"evidence": "S12",
+			"date": "2026-07-23",
+			"prs": [
+				314
+			],
+			"outcomeFile": "implementations-plan/account-switch-isolation/plan.md",
+			"hook": "cross-account state-leak fix on account switch (item 3 / PR-D from wallet-ux-fixes); privacy"
+		},
+		{
+			"dir": "adversarial-key-model-review",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #417, #429, #433",
+			"date": "2026-08-22",
+			"prs": [
+				417,
+				429,
+				433
+			],
+			"outcomeFile": "implementations-plan/adversarial-key-model-review/plan.md",
+			"hook": "stack #417..#429: 12 hypotheses, no security downgrade found (H8), full-chain differential agrees step-by-step (H12), tamper defenses hold live; T5 identity-adoption residual REPRODUCED as executable evidence (F-1 MEDIUM) + new F-2 LOW (unauthenticated fingerprint blinds dup-guard); harnesses in adversarial-key-model-review/harness/"
+		},
+		{
+			"dir": "amount-honesty",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "closing index status",
+			"date": "2026-09-30",
+			"prs": [
+				735
+			],
+			"outcomeFile": "implementations-plan/amount-honesty/plan.md",
+			"hook": "no amount off by a power of ten, delivered on `fix/amount-honesty`: activity amounts only in decimals the wallet knows, no figure on the first-receive prompt, and a Send amount field that reads its text whole and holds what it cannot read; the owner signed it off on 2026-09-30 with one line changed; its open items are in follow-ups.md"
+		},
+		{
+			"dir": "any-erc20-bridge",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [
+				"any-erc20-bridge-p10"
+			],
+			"evidence": "S1",
+			"date": "2026-09-04",
+			"prs": [
+				536,
+				537,
+				538,
+				539,
+				540,
+				542,
+				543,
+				544
+			],
+			"outcomeFile": "implementations-plan/any-erc20-bridge/plan.md",
+			"hook": "permissionless any-ERC-20 bridge: L1 `PortalFactory` (OZ immutable-args clones, one per token) + `SwapBridgeRouter` (Permit2 witness, swap-in-place gas slice, direct-gas lane) + ONE L2 `TokenBridgeHub` per generation (registers from the factory's attested words, derives the aztec-standards Token, 2-tx private first claim, exit-only guardian pause); bridge-core v2 (strict self-deriving manifest, journal schema 3, `runSend`, integer gas-share with two exact ceilings, `walletChainIdOf`); the journalled nonce-pinned testnet conductor + an OWNED local-network 13-flow smoke; the tools app's Send wizard (Token → Amount → Review, per-token wallet grants at Sign & send, sprite + monogram, mainnet placeholder-only); one-step legacy retirement. Gates: forge 140 · halmos 8/2/2 · TXE 65 · bridge-core 379 · faucet 1060 · e2e 19; the real-origin token-list canary caught the list going multi-chain (fixed in P9)"
+		},
+		{
+			"dir": "approval-card-decoding",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #605",
+			"date": "2026-09-16",
+			"prs": [
+				605
+			],
+			"outcomeFile": "implementations-plan/approval-card-decoding/plan.md",
+			"hook": "merging is the owner's (light, retrofit: plan written after the fix; codex reject ×3 then approve at round 4, 13 findings all folded; two owner asks open) — the execute window reads dApp call arguments again: mint + 3-arg transfers back in the vocabulary, a display-only `decodeCallsForDisplay` RPC decoding against the PXE-registered artifact (selector is truth), raw fields folded behind a toggle, flat full-width rows (owner-picked over a folded headline), the CLAUDE.md \"UI changes need explicit owner sign-off\" rule; one PR"
+		},
+		{
+			"dir": "approval-scope-follow",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #614, #615, #617, #622",
+			"date": "2026-09-17",
+			"prs": [
+				614,
+				615,
+				617,
+				622
+			],
+			"outcomeFile": "implementations-plan/approval-scope-follow/plan.md",
+			"hook": "merged to dev 2026-09-17 as #614, #615 (popup fix + scope banner) and #617 (execution, `30010f60`) (mid; rev 6, 2026-09-17; six review rounds — fable cond. approve, codex reject → approve; D7: three PRs by layer) — the execute window names the chain/account a dApp transaction runs in and, after Confirm, writes the wallet's active-network + active-account pointers to match (info banner, text-action opt-out); narrows the in-flight-send freeze to wallet-origin sends and clears it on lock; signs authwits under the session fence and refuses sends that cannot be journaled; a two-PR popup stack plus one unstacked execution PR"
+		},
+		{
+			"dir": "audit-448-remediation",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S15",
+			"date": "2026-08-24",
+			"prs": [
+				451
+			],
+			"outcomeFile": "implementations-plan/audit-448-remediation/runbook.md",
+			"hook": "autonomous 9-batch remediation of the 2026-08-22 bug audit (PR #448) per the 2026-08-24 owner-adjudicated verdict (19 confirmed / 8 re-weighted / N-20 refuted); codex-mediated, gate-validated, squash-merged per batch; includes the owner-approved aztecReset/sentinel removal (N-09)"
+		},
+		{
+			"dir": "authwit-lifecycle-and-execution-followups",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S3",
+			"date": "2026-06-15",
+			"prs": [
+				85
+			],
+			"outcomeFile": "implementations-plan/authwit-lifecycle-and-execution-followups/plan.md",
+			"hook": "grantPublicAuthwit RPC + lifecycle e2e (CI-gated) + exec follow-ups; audit caught+fixed a dead scope gate"
+		},
+		{
+			"dir": "aztec-4.2.0-bump",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/aztec-4.2.0-bump/plan.md",
+			"hook": "Plan v2: Bump Aztec packages → 4.2.0"
+		},
+		{
+			"dir": "aztec-5.0-rc2",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #248",
+			"date": "2026-07-02",
+			"prs": [
+				248
+			],
+			"outcomeFile": "implementations-plan/aztec-5.0-rc2/plan.md",
+			"hook": "ALL 4 phases ✓; PR #248 → dev, all 3 required checks GREEN on the final head (network-e2e twice)** (mid + user gate-override folding the redeploy in-arc; 4 audit rounds: codex reject → folded · Opus conditional → folded · final codex conditional → folded · delta codex on the redeploy phases conditional → folded; post-impl codex REJECT → all 3 findings fixed same-session `631a9da`) — `@aztec/*` rc.1→rc.2 (~20 pins + accelerator npm + Wonderland→`@alejoamiras` takeover scope, 16-file import rename + standards Noir tag) + rc.2 API churn (`AztecAddress.from*Unsafe` ×146 · PXE senders→tagging-secret sources, service-wrapped) + rc.2 Noir toolchain (keystone now compiled) + `linker=hoisted` pin (bun 1.3.13 fresh-lock isolated-linker footgun) + the **executed redeploy**: testnet reset confirmed (rollupVersion→`2787991301`, chainId→`2793892258` cascaded, storage v9 wipe), L1 fuel router/swap re-bound to the new FeeJuicePortal, portal-fork re-pinned (latent #186 comment-repath bug), candidate-first bridge deploy w/ the `l1.feeJuice` manifest carry, dripper landed at the PREDICTED derivation, PrivateFPC universal-deployed at the pinned `0x0d4b2c…`, ALL FIVE live gates green (verify-l1 · verify:deployments · candidate smoke 1.9m → promoted · **private self-paying claim SETTLED** 4.88 FJ, minFuelFj recalibrated 4× · drip). Gates: typecheck:all 0 · test:all 0 (2637/423/129) · lint 0 · 5 builds 0"
+		},
+		{
+			"dir": "aztec-5.0-upgrade",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S3",
+			"date": "2026-06-21",
+			"prs": [
+				122
+			],
+			"outcomeFile": "implementations-plan/aztec-5.0-upgrade/plan.md",
+			"hook": "full network-e2e GREEN incl. 6B native-proving (CI run 27839983521); PR #122 open vs dev**. P1–P5 + P6/P6B + P7 done; test:all green (extension 2466 · faucet 336 · bridge-core 112 · aztec-runtime 32), lint 0, build, Noir recompile, verify:deployments. Nine 5.0 CI-adaptation fixes (lessons/phase-6.md): anvil-rename · forge-PATH · fee-ceiling · isL1ToL2→checkpoint · accelerator origin-gating · native-proving timeout · **senderForTags (shield/private-tx keystone)** · Fee-Juice claimability force-block · PrivateFPC construction-time deploy. Post-impl: /code-review + codex audit in progress. Deferred/operational: bridge --smoke + on-chain redeploy + keystone + min-age-excludes removal (~06-22). Was: approved (mega-deep; 5 research artifacts + independent Sonnet plan [fable unavailable] + 2 codex rounds: round-1 reject → fixed → round-2 conditional-approve, 3 conditions folded), ready to implement via the /loop seed — Aztec 4.2.0 → 5.0.0-rc.1 protocol HARD FORK across all TS packages + 3 Noir bridge crates; PublicKeys hash + immutables_hash address change, Schnorr→Poseidon2, PXE pre-v6 wipe, fee/gas + tx-receipt + deploy API churn; 8 phases, native-proving network-e2e on the canary shards = definition of done; accelerator-server downloads 5.0 bb on demand (no binary release needed); document-the-reset (no migration UX)"
+		},
+		{
+			"dir": "aztec-5.0.0-stable",
+			"class": "closed",
+			"status": "superseded by aztec-5.2.0-js-line",
+			"followUps": [],
+			"evidence": "S8",
+			"date": "2026-07-22",
+			"prs": [
+				282,
+				303
+			],
+			"outcomeFile": "implementations-plan/aztec-5.0.0-stable/plan.md",
+			"hook": "`@aztec/*` rc.2→5.0.0 stable (67+10 pins) + signing-key-root inversion under a FROZEN two-regime-vector KDF (NULO-ACCOUNT-KDF v1) + PXE churn (`registerContract` preimage/address-assert, `AccountPrivacyKeys`, `updateContract` gone) + **encrypted per-(profile,chain) SQLite-OPFS stores** (mandatory `createPXE options.store` injection, HKDF ChaCha20 key, fail-closed, crypto-erase purge; the `sqlite3mc-wasm-emit` vite plugin after the silent-worker 404 war story) + Noir 5.0.0 (token dep → ecosystem-tooling v5.0.0) + backup compat-epoch 3 + the **EXECUTED coupled redeploy under NEW intent tooling** (`live-intent.ts` build/verify: plan-pinned signer, caps 0.5 ETH, candidate digest, privileged readbacks, allowlist tree gate): rollupVersion→`1821665230`, chainId→`1816023401`, canonical PrivateFPC `0x257aa870…` (salt `0x…01`), ALL candidate proofs green (verify-l1 4/4 · smoke 2.0m · fueled 4.5m · private settle 8.3m · **direct-FJ canary 3.5m — which live-caught the app-phase `claim_and_end_setup` product bug**, fixed) → digest-pinned promotion → verify:deployments/drip/balance-caps green (spend 0.233/0.5 ETH). Lessons `lessons/phase-{1..5}.md`"
+		},
+		{
+			"dir": "aztec-5.0.1-line",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S5",
+			"date": "2026-07-27",
+			"prs": [
+				282,
+				286,
+				287,
+				289,
+				299,
+				324
+			],
+			"outcomeFile": "implementations-plan/aztec-5.0.1-line/plan.md",
+			"hook": "all folded, 25-entry ledger) — ONE mega-PR growing #282: bump-first client 5.0.1 → restore-boot deadlock fix + full #281 (emit-after-release, ticketed locks, persisted incarnation fence, refuse-not-wipe stores) → standards→@aztec-foundation@5.0.1 behind a provenance STOP-gate + fee-payment 5.0.1 (FPC identity moves, digest-keyed compat gate) + Noir 5.0.1 → drift-triggered candidate-first testnet redeploy (reuse-token mode, receipt-backed promote) → squash-merge → dev→main + stable release + faucet publish + PUBLIC-surface acceptance, under standing authorization"
+		},
+		{
+			"dir": "aztec-5.2.0-js-line",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #470, #471",
+			"date": "2026-08-27",
+			"prs": [
+				470,
+				471
+			],
+			"outcomeFile": "implementations-plan/aztec-5.2.0-js-line/plan.md",
+			"hook": "@aztec JS line 5.0.1→5.2.0 as a split line (Noir + standards + private-fee-juice held at 5.0.1); the accelerator SDK had to move with the line after a dual-generation bundle broke upstream getVKIndex; PR-0 (accelerator-server 2.0.0, enforced canary proofs) merged as #470"
+		},
+		{
+			"dir": "backup-import-decomposition",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #498",
+			"date": "2026-09-01",
+			"prs": [
+				498
+			],
+			"outcomeFile": "implementations-plan/backup-import-decomposition/plan.md",
+			"hook": "arc 4 monster 2: useFullBackupImport's restore pipeline staged into full-backup-restore.ts (typed stage outcomes + applyOutcome renderer) under budget (152 → 147); 25 pre-extraction pins + the 74-test suite zero-edit green"
+		},
+		{
+			"dir": "backup-import-repair",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/backup-import-repair/plan.md",
+			"hook": "Backup Import Repair — Plan v2 (post-audit)"
+		},
+		{
+			"dir": "backup-import",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "closing index status",
+			"date": "2026-09-30",
+			"prs": [
+				726
+			],
+			"outcomeFile": "implementations-plan/backup-import/plan.md",
+			"hook": "a full-backup import that one slow public node cannot stall: skip what every PXE rebuilds, one clock per network, and a Retry for the networks that did not answer, which the warning names; its open items are in follow-ups.md"
+		},
+		{
+			"dir": "backup-integrity",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #503, #504",
+			"date": "2026-09-01",
+			"prs": [
+				503,
+				504
+			],
+			"outcomeFile": "implementations-plan/backup-integrity/plan.md",
+			"hook": "migration core + restore surface staged under budget (126 → 117); 49 exact-reason reject-oracle pins + 6 restore/passkey pins committed first; four backup e2e gates green per PR"
+		},
+		{
+			"dir": "backup-log-hygiene",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #473, #474, #478",
+			"date": "2026-08-28",
+			"prs": [
+				473,
+				474,
+				478
+			],
+			"outcomeFile": "implementations-plan/backup-log-hygiene/plan.md",
+			"hook": "codex + fable dual audit, then a per-branch codex loop bottom-up: arc 0 ✓, arc 1 ✓, arc 2 ✓, arc 3 ✓ 6 rounds, arc 4 ✓ 5 rounds, arc 5 ✓ 7 rounds) — the log pipeline made safe end to end: `console.*` is hijacked into `LoggerStore` and its only redaction is an OBJECT walker, so 289 of 365 call sites were building strings it could never see. Retention gated on developer mode with purge-on-disable (arc 0); transport envelopes summarised instead of dumped (arc 1); `trim()` extended with a denylist, URL-origin reduction and shape collapses (arc 2); always-captured call sites stop writing note contents, contact PII, endpoint URLs and dApp origins, with page-supplied ids replaced by locally-minted `ext-N` tokens (arc 3); restore-error records allowlisted per service by name AND type, fail-closed for unknown services (arc 4); a static payload-ban scanner over the app and every package plus a `noConsole` biome rule (arc 5)"
+		},
+		{
+			"dir": "backup-restore-corruption-fix",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #275",
+			"date": "2026-07-12",
+			"prs": [
+				275
+			],
+			"outcomeFile": "implementations-plan/backup-restore-corruption-fix/plan.md",
+			"hook": "4 phases ✓ + post-impl audit fixes** (mid; dual audit → v3 conditional-approve conditions-met → post-impl codex+code-review, converged) — fix the 3 pre-existing backup-restore data-corruption bugs (P1 cross-profile tx wipe → remove redundant subscriber + tx-restore provenance filter; P2 networkId remap → index-pairing; P3 token-balance collapse → (chainId,contract) key) + P6/P7; network-e2e round-trip proof. **Post-impl (`579df23`)**: P2-CRITICAL unconditional profileId remap (unused-root/victim-child graft), P3-MEDIUM old-key balance ambiguity (failed-duplicate misgraft), P3-LOW error-log merge; **P1-HIGH unawaited tx-cleanup DEFERRED to P4** (orphan-leak not corruption, inert pre-production — codex's own call; design = awaited deletion coordinator). Lessons `lessons/phase-{1..5}.md`"
+		},
+		{
+			"dir": "backup-restore-residuals",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [
+				"backup-restore-fence-epic"
+			],
+			"evidence": "S13",
+			"date": "2026-07-13",
+			"prs": [
+				277
+			],
+			"outcomeFile": "implementations-plan/backup-restore-residuals/plan.md",
+			"hook": "intended to finish D13 to ZERO deferrals (token-metadata + balance-projection epoch fences) + 4 cleanups. The dual audit REJECTED every plan version and proved \"provable zero-resurrection in one PR\" is INFEASIBLE: it decomposes into a wallet-wide deletion-concurrency redesign across ~10 leaf services (token/balance/account/incoming/journal/fpc/auth/contact/session/network) with a service-worker leaf-draining protocol, all-silent purges, a snapshot-after-beginDeletion predicate fix, a token↔network lock-order redesign (the atomic fix INTRODUCES an ABBA deadlock), AND a NOVEL cross-process PXE offscreen-barrier generation fence (a SW `isLive` check provably can't fence the offscreen worker). codex NO-GO'd the design until those are built explicitly. Both auditors: the parent arc's DEFERRAL was the correct pre-production call. **Shipped (this branch):** the coordinator direct order/await unit test, corrupt-tombstone TELEMETRY (auto-repair rejected as fail-open by both auditors), + confirmed dup-token-id is already blocked upstream by normalization. The 7-pass `audit-codex.md`/`audit-fable.md` are the 80%-done design doc for the eventual epic."
+		},
+		{
+			"dir": "backup-restore-security-hardening",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #276",
+			"date": "2026-07-12",
+			"prs": [
+				276
+			],
+			"outcomeFile": "implementations-plan/backup-restore-security-hardening/plan.md",
+			"hook": "9 phases ✓ + post-impl audit round, MERGED PR #276 → dev (`fb61a63`)** (deep; 3 legs → dual audit → decision ledger → final codex; then a codex xhigh post-impl adversarial audit that returned **BLOCK** → resolved across **5 verify rounds**) — close every backup-import + profile-deletion cross-profile/resurrection primitive: provenance filter on every account-owned slice (A/F), validate-before-persist (H), tx create-only + reject-Pending (B/D16), one-pass network remap (E), index-paired token relink (G), the awaited `ProfileDeletionCoordinator` + durable tombstones + two-phase `deleteProfile` + PXE deletion honesty (D/C), and the **D13 tx-path execution fence** (shared `ProfileDeletionState`, capture-at-authorization → `addTransaction` asserts epoch+account under the tx lock). Post-impl fixes: C1 reserved-id gates on unlock/export/confirm + a fence-capture TOCTOU + generation-reuse epoch-gate. **token-metadata + balance-projection epoch fences DEFERRED** (codex-backed, pre-production) → see backup-restore-residuals. 3053 unit + network e2e green."
+		},
+		{
+			"dir": "balance-durable-jobs",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #508, #509",
+			"date": "2026-09-01",
+			"prs": [
+				508,
+				509
+			],
+			"outcomeFile": "implementations-plan/balance-durable-jobs/plan.md",
+			"hook": "the balance pipeline + durable jobs staged under budget (100 → 87): balances store → core class, job queue fence ladder, projector plans kept lazy, incoming-transfer lock arms hoisted, seeder seedOne, journal asserts + reaper classifier; 15 seam pins committed first"
+		},
+		{
+			"dir": "balance-fpc-cache",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #346",
+			"date": "2026-08-07",
+			"prs": [
+				346
+			],
+			"outcomeFile": "implementations-plan/balance-fpc-cache/plan.md",
+			"hook": "one shared popup balance/FPC cache + honest-unknown wire fix"
+		},
+		{
+			"dir": "balance-row-reconciliation",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #486",
+			"date": "2026-08-31",
+			"prs": [
+				486
+			],
+			"outcomeFile": "implementations-plan/balance-row-reconciliation/plan.md",
+			"hook": "PR #486 open vs dev, 28/28 checks green** — an MV3 worker death inside `createTokenBalance` left a token either invisible (no balance row) or stuck loading forever (row at `updatedAt: 0`, nothing queued); adds a create-only reconcile at init + profile-switch, and closes a PRE-EXISTING silent row-loss bug by serializing every allocating path behind one `maxHoldMs: null` service lock with the pair-existence check inside the hold. Residual tail of #485"
+		},
+		{
+			"dir": "bb-wasm-hardening",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/bb-wasm-hardening/plan.md",
+			"hook": "Plan v1: Harden the bb.js WASM pipeline (eliminate manual vendoring)"
+		},
+		{
+			"dir": "bootstrap-route-decouple",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #357, #358, #359",
+			"date": "2026-08-12",
+			"prs": [
+				357,
+				358,
+				359
+			],
+			"outcomeFile": "implementations-plan/bootstrap-route-decouple/plan.md",
+			"hook": "smoke backup-roundtrip fixed at product root: bounded import chain-sync tail (45s budget, exp-backoff preflight, skip-to-Continue), persisted balance syncFailure + honest TokenCard states, restore-pending marker + torn-unlock refusal — product fix for the OPEN smoke-roundtrip flake (e2e-deflake entry 1): corrected root cause (account-state PXE restore leg, not syncTransactions); owner-approved bounded preflight w/ exp backoff + skip-with-record + Continue gate; bundles balance-failure record, TokenCard isUpdating render, restore-atomicity boot check"
+		},
+		{
+			"dir": "bridge-permit2-recipient-commitment",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S11",
+			"date": "2026-07-21",
+			"prs": [
+				260
+			],
+			"outcomeFile": "implementations-plan/bridge-permit2-recipient-commitment/plan.md",
+			"hook": "Phases 1✓ 2✓ 3✓ 4✓ 5✓ 8✓ 9✓ + Phase 6 offline-prep ✓; branch `feat/bridge-permit2-recipient-commitment` (pushed). Phase 9 tri-auditor re-audit (codex xhigh + 2 subagents): **no Critical**, circuit cryptographically sound, verdict SHIP-FOR-TESTNET/DO-NOT-SHIP-FOR-VALUE; fixed a bypassable sole-consumer guard (M2, proven live) + 2 more, each with a test (`audit/security/2026-07-06-recipient-commitment/`). **Remaining = Phase 6 live testnet deploy + Phase 7 promotion — both gated on explicit user go (hard limit).** — Permit2 everywhere (bridge-only + fuel-only through the router's existing `bridge()`, **zero new Solidity** — `ITokenPortal.depositToAztecPublic` ≡ `IFeeJuicePortal.depositToAztecPublic`) + recipient-committed private claims (`poseidon2([salt, recipient], DS=3140354885)`, enables a relayer that can't steal; closes F-007) + candidate-first testnet cutover w/ salt-v2 runtime interlock + relayer script (`relay-claim-testnet.ts`) + first Foundry fuzz suite (5 targets). Sign-off: A-1 ratify reuse, A-3/A-5 WIPE, defaults elsewhere"
+		},
+		{
+			"dir": "bridge-private",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #78",
+			"date": "2026-06-09",
+			"prs": [
+				78
+			],
+			"outcomeFile": "implementations-plan/bridge-private/plan.md",
+			"hook": "Bridge — private L1↔L2 flows"
+		},
+		{
+			"dir": "bug-fixes-batch-1",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #9",
+			"date": "2026-05-20",
+			"prs": [
+				9
+			],
+			"outcomeFile": "implementations-plan/bug-fixes-batch-1/plan.md",
+			"hook": "Bug-fixes batch #1 — plan v2.1"
+		},
+		{
+			"dir": "bun-1.4-adoption",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S7",
+			"date": "2026-08-25",
+			"prs": [
+				452,
+				459,
+				460
+			],
+			"outcomeFile": "implementations-plan/bun-1.4-adoption/adoption-map.md",
+			"hook": "Bun 1.3.14→1.4 adoption map: bump+pm wins (A light), isolated-linker store (B mid), vitest-on-bun (C mid), Bun-native tooling (D light)"
+		},
+		{
+			"dir": "bun-1.4-bump",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #452, #454",
+			"date": "2026-08-25",
+			"prs": [
+				452,
+				454
+			],
+			"outcomeFile": "implementations-plan/bun-1.4-bump/plan.md",
+			"hook": "Arc A: bun 1.4.0 bump, pin+lockfile dedupe, parallel scripts, bunx renovate; v2 lockfile PROVEN unforcible → deferred to Arc B; #25305 + 1.3.1 frozen-gate bugs proven fixed"
+		},
+		{
+			"dir": "bundle-fpc-nft",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/bundle-fpc-nft/plan.md",
+			"hook": "Plan v2: Bundle PrivateFPC + Wonderland NFT (note-parsing coverage)"
+		},
+		{
+			"dir": "capabilities-popup-quality",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #47",
+			"date": "2026-05-22",
+			"prs": [
+				47
+			],
+			"outcomeFile": "implementations-plan/capabilities-popup-quality/plan.md",
+			"hook": "Capabilities popup — quality + brutalist + honest-copy pass (plan v2)"
+		},
+		{
+			"dir": "capture-await-write-sweep",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #489",
+			"date": "2026-08-31",
+			"prs": [
+				489
+			],
+			"outcomeFile": "implementations-plan/capture-await-write-sweep/plan.md",
+			"hook": "targeted concurrency sweep for un-fenced capture→await→write beyond audit-448: ~300-row triage, 13 fix units with revert-probed pins, plus the review loops own catches (token-network ABBA inversion, session-row re-validation, lock ownership probes)"
+		},
+		{
+			"dir": "chrome-store-launch",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [
+				"chrome-store-launch-items"
+			],
+			"evidence": "S4",
+			"date": "2026-09-24",
+			"prs": [
+				662,
+				663,
+				671,
+				683,
+				684
+			],
+			"outcomeFile": "implementations-plan/chrome-store-launch/plan.md",
+			"hook": "merged to dev 2026-09-22 (#662 `0af7d9bc`, #663 `a5374be2`); owner-side setup done 2026-09-23: v0.28.0 in review at both stores, store-check `both` green; open items in the plan's \"Launch status and follow-ups\"** (light) — the repo half of the Chrome Web Store **and Firefox Add-ons** launch: \"Nulo V5\" name and icon set, shared listing tested against both manifests and `legal/privacy.md`, keyless Chrome publish (GitHub OIDC → Google Workload Identity → linked service account), Mozilla API publish with a `git archive` source package and an x86/ARM64 rebuild-and-diff workflow, a read-only `store-check.yml`; two stacked PRs"
+		},
+		{
+			"dir": "ci-cd",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/ci-cd/plan.md",
+			"hook": "CI/CD bring-up plan"
+		},
+		{
+			"dir": "cognitive-shallow-tail",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #496",
+			"date": "2026-09-01",
+			"prs": [
+				496
+			],
+			"outcomeFile": "implementations-plan/cognitive-shallow-tail/plan.md",
+			"hook": "arc 3 of the complexity burn-down: the whole 16–20 cognitive band decomposed under budget by extract-helper only (51 cognitive directives + 10 length directives burned across the batches); harness/test in-band entries stay baselined with justification; one review-caught fence-gap fix (await-boundary microtask window)"
+		},
+		{
+			"dir": "complexity-budgets",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S14",
+			"date": "2026-08-31",
+			"prs": [
+				490,
+				491,
+				492
+			],
+			"outcomeFile": "implementations-plan/complexity-budgets/plan.md",
+			"hook": "Biome-only complexity budgets: cognitive ≤15 everywhere + ≤80 non-blank lines in prod + describe-nesting ≤5, all error-severity in the existing pipeline; 230 grandfathered offenders carry function-scoped baseline directives pinned by a shrink-only manifest + Biome-version-pin test riding test:ci-gating; burn-down leads ranked (profile/service.ts, useDeposit, useFullBackupImport, bridge-core scripts)"
+		},
+		{
+			"dir": "complexity-residue-round-2",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #502, #503, #515",
+			"date": "2026-09-01",
+			"prs": [
+				502,
+				503,
+				515
+			],
+			"outcomeFile": "implementations-plan/complexity-residue-round-2/scope.md",
+			"hook": "round 2 of the complexity burn-down: binding burn/accept list with per-plan tiers + exact e2e gates"
+		},
+		{
+			"dir": "complexity-residue-round-3",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #519, #521, #526, #527, #528",
+			"date": "2026-09-02",
+			"prs": [
+				519,
+				521,
+				526,
+				527,
+				528
+			],
+			"outcomeFile": "implementations-plan/complexity-residue-round-3/scope.md",
+			"hook": "retires \"refactor when touched\": 14 refactors on merit (49 → 35), 35 directives justified in place, scanner/generator flip to a fail-closed accepted form + a CI rescore audit, plus the two round-1 BUG PINs (useDeposit stale fuel spread, useBridgeJournal reverted-hash trap)"
+		},
+		{
+			"dir": "composition-root-pilot",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #415",
+			"date": "2026-08-18",
+			"prs": [
+				415
+			],
+			"outcomeFile": "implementations-plan/composition-root-pilot/plan.md",
+			"hook": "Q-04 pilot ONLY: buildFeeStrategies + wireTabLifecycle extracted pins-first; STOP honored; findings + DAG-first owner recommendation in [pilot-findings.md](composition-root-pilot/pilot-findings.md)"
+		},
+		{
+			"dir": "composition-test-rollout",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S7",
+			"date": "2026-06-29",
+			"prs": [
+				160
+			],
+			"outcomeFile": "implementations-plan/composition-test-rollout/plan.md",
+			"hook": "shared `ShallowPxeClient` seam + fake under src/ + CI bundle-grep; **Token `parseTokenInterface` (wiring) + DappSession lifecycle (real coverage) composition tests**; **Fpc seam+test TRIMMED as theatre** (both value-reviewers agreed) → Fpc reverted to baseline, remains the doc's pure counter-example. **bb-boundary finding** (vitest jsdom doesn't load Barretenberg WASM) ⇒ composition boundary is \"shallow PXE AND bb-free AND no simulate/prove\"; the durable artifact is the normative COMPOSITION-TESTS.md (D1–D6) + CLAUDE pointer. ⚠ branch cut off the spike branch — resolve before PR (see plan.md)"
+		},
+		{
+			"dir": "connect-chain-mismatch",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #545",
+			"date": "2026-09-05",
+			"prs": [
+				545
+			],
+			"outcomeFile": "implementations-plan/connect-chain-mismatch/plan.md",
+			"hook": "the connect popup derives the dApp-chain default account on demand instead of blocking with \"No accounts on this chain\", names the dApp chain, and offers (never requires) switching the wallet to it"
+		},
+		{
+			"dir": "connect-window",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "closing index status",
+			"date": "2026-09-30",
+			"prs": [
+				727,
+				730
+			],
+			"outcomeFile": "implementations-plan/connect-window/plan.md",
+			"hook": "ux-feedback's 4B and the emoji check's header, delivered on `feat/connect-window`: after Allow the connect window waits, then shows the emoji check itself instead of a second window; the check's header names the account and the network; a panel decided O1, O2 and the blanket rows under the owner's delegation (2026-09-29), and it merges once the owner signs off; its open items are in follow-ups.md"
+		},
+		{
+			"dir": "contacts-export-uxr",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/contacts-export-uxr/plan.md",
+			"hook": "Contacts export UX rework — plan v2"
+		},
+		{
+			"dir": "contacts-rename-export-senders",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/contacts-rename-export-senders/plan.md",
+			"hook": "Contacts: rename + persist isSender across export/import — plan v2"
+		},
+		{
+			"dir": "contacts-sender-decouple",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #302",
+			"date": "2026-07-21",
+			"prs": [
+				302
+			],
+			"outcomeFile": "implementations-plan/contacts-sender-decouple/plan.md",
+			"hook": "6 phases ✓ + code-review + codex post-impl (cond-approve, all findings addressed)** (light; codex xhigh conditional-approve, all 5 conditions folded) — remove the contacts↔sender-registration coupling (add/edit/delete toggles + silent migrations) now that v5 handshake-backed delivery makes registration unnecessary for the bundled token's receives; keep the chip, isSender export/import (adds-only, counted), the Advanced senders surface, and the dApp RPC; receive-from-unregistered-sender network e2e as a REQUIRED ship gate."
+		},
+		{
+			"dir": "copy-polish",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "closing index status",
+			"date": "2026-09-30",
+			"prs": [
+				734
+			],
+			"outcomeFile": "implementations-plan/copy-polish/plan.md",
+			"hook": "no em dash joins two clauses on a screen, and a guard keeps new ones out; a snack raised while the Terms sheet is open shows over it; the glossary's Authorization line names Connected apps; a screen reader hears an unknown contract's Details row as unknown; its open items are in follow-ups.md"
+		},
+		{
+			"dir": "dapp-grants",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "closing index status",
+			"date": "2026-09-30",
+			"prs": [
+				722
+			],
+			"outcomeFile": "implementations-plan/dapp-grants/plan.md",
+			"hook": "ux-feedback's grant follow-ups as #722: no scope refusal carries a request value into the log, the journal or the dApp, which gets one classified refusal; a refused send reads \"Not allowed\" in its journal record and on its card; the capability answer is the grant as stored; its open items are in follow-ups.md"
+		},
+		{
+			"dir": "dapp-interaction-lock-fix-v1",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #70",
+			"date": "2026-05-29",
+			"prs": [
+				70
+			],
+			"outcomeFile": "implementations-plan/dapp-interaction-lock-fix-v1/plan.md",
+			"hook": "Concurrent dApp sendTx — plan v6"
+		},
+		{
+			"dir": "dapp-interaction-lock-fix-v2",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #68, #70",
+			"date": "2026-05-29",
+			"prs": [
+				68,
+				70
+			],
+			"outcomeFile": "implementations-plan/dapp-interaction-lock-fix-v2/plan.md",
+			"hook": "dapp-interaction-lock-fix-v2 — Layer A only"
+		},
+		{
+			"dir": "dapp-interaction-lock-fix-v3",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #71",
+			"date": "2026-06-02",
+			"prs": [
+				71
+			],
+			"outcomeFile": "implementations-plan/dapp-interaction-lock-fix-v3/plan.md",
+			"hook": "dapp-interaction-lock-fix-v3 — parallel popups UX refactor (plan v2)"
+		},
+		{
+			"dir": "dapp-popup-cancel-focus",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [
+				"dapp-popup-space-switch"
+			],
+			"evidence": "S4",
+			"date": "2026-09-06",
+			"prs": [
+				550,
+				551
+			],
+			"outcomeFile": "implementations-plan/dapp-popup-cancel-focus/plan.md",
+			"hook": "arc 1: cancelling a queued dApp tx from the activity feed closes its approval popup and rejects the dApp with the structured 4001 cancel, and the popup's own Reject reaches the dApp as 4001/USER_REJECTED; arc 2: the approval window opens centered on the last-focused Chrome window (signed coordinates) and the Queued card click refocuses it"
+		},
+		{
+			"dir": "dapp-preexisting-fee",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S7",
+			"date": "2026-09-04",
+			"prs": [
+				544
+			],
+			"outcomeFile": "implementations-plan/dapp-preexisting-fee/plan.md",
+			"hook": "the wallet routes a dApp payload that names the account itself as payer with no fee call to its own Fee Juice (payload-aware `classifyFeePayer` in wallet-bridge, the native Fee Juice strategy, the fee card locked to it, always confirmed), advertises it through the Nulo-custom `getWalletFeatures` RPC, and the bridge's held-gas claims pay from public Fee Juice where the wallet says so"
+		},
+		{
+			"dir": "dapp-profile-binding",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #458",
+			"date": "2026-08-25",
+			"prs": [
+				458
+			],
+			"outcomeFile": "implementations-plan/dapp-profile-binding/plan.md",
+			"hook": "the hardest gate arc: codex reject ×3 then approve at rev 4; post-impl independent max review 11 findings + codex 4-round loop to APPROVE, 5 real interleavings adopted) — N-04 dApp channels are profile-bound end-to-end (request-keyed approver marker, sessionProfiles stamp, dispatch guard, switch teardown, anchored session/network lookups, switch-epoch response-delivery gate); N-26 marker TTL + tab-teardown deletion; N-19 toJsonSafe ancestor-chain (DAG-safe); playground harness observes wallet-initiated disconnects; first in-session profile-switch e2e"
+		},
+		{
+			"dir": "data-safety",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #462",
+			"date": "2026-08-25",
+			"prs": [
+				462
+			],
+			"outcomeFile": "implementations-plan/data-safety/plan.md",
+			"hook": "codex R1 REJECT with 6 adopted findings incl. a destructive boot race, R2 approve; independent max review caught a float-boundary hostile-input DoS the R1-mandated cursor introduced; 3-round codex final-diff caught two caller forward-contiguity breaks, then approve) — N-06 orphan imported-key sweep live-set from PHYSICAL keys + awaited in init (codec-hidden accounts can't cascade into signing-key deletion); N-24 authwit restore dedupes on injective (account,hash) with raw-payload seeding, raw-occupancy cursor, and a safe-integer boundary guard; N-20 hardening — nextNumericId allocates only canonical/safe/physically-free ids (defective proof c5-3 replaced by exclusion + write-back pins), token restore re-allocates per row, balance allocation is fence-aware"
+		},
+		{
+			"dir": "dedup-bridge-conductors",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #377",
+			"date": "2026-08-16",
+			"prs": [
+				377
+			],
+			"outcomeFile": "implementations-plan/dedup-bridge-conductors/plan.md",
+			"hook": "Q-02 split client factories + Q-10 existence-check-first FPC deploy + Q-13 resolveNetworkAndAccount; viem generics centralized to ONE contained cast"
+		},
+		{
+			"dir": "dedup-clipboard",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #380",
+			"date": "2026-08-16",
+			"prs": [
+				380
+			],
+			"outcomeFile": "implementations-plan/dedup-clipboard/plan.md",
+			"hook": "Q-06: 22 modules → `copyToClipboard` + `useSecretClipboardCopy` (F-14 scrub, no-lifecycle BY DESIGN); false-toast fix propagated (authorized); dual audit + 4-session codex trail"
+		},
+		{
+			"dir": "dedup-design",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #378",
+			"date": "2026-08-16",
+			"prs": [
+				378
+			],
+			"outcomeFile": "implementations-plan/dedup-design/plan.md",
+			"hook": "Q-12 shared CTA typography rule + Q-15 tooltip `crossAxisOffset` (old fall-through 0 default); letter-spacing lead → owner follow-up"
+		},
+		{
+			"dir": "dedup-fee-estimation",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #381",
+			"date": "2026-08-16",
+			"prs": [
+				381
+			],
+			"outcomeFile": "implementations-plan/dedup-fee-estimation/plan.md",
+			"hook": "Q-03: private state-sink engine behind both fee composables (byte-identical APIs, handoffInclusive/handoffCompleted seams); dual audit SPLIT then converged on Shape C; 51 pins green on both impls"
+		},
+		{
+			"dir": "dedup-followups",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #573",
+			"date": "2026-09-07",
+			"prs": [
+				573
+			],
+			"outcomeFile": "implementations-plan/dedup-followups/plan.md",
+			"hook": "Dedup follow-ups — three pinned bugs, X5 + N5"
+		},
+		{
+			"dir": "dedup-ledger",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #561, #566, #568, #569, #570, #571, #573",
+			"date": "2026-09-07",
+			"prs": [
+				561,
+				566,
+				568,
+				569,
+				570,
+				571,
+				573
+			],
+			"outcomeFile": "implementations-plan/dedup-ledger/README.md",
+			"hook": "maintainability review of `apps/extension` + its `@nulo/*` packages: 14 Sonnet cluster reviewers + jscpd, 92 findings; `ledger.md` is the table, `reports/` the evidence, README carries the phase plan"
+		},
+		{
+			"dir": "dedup-messaging-primitives",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #374",
+			"date": "2026-08-15",
+			"prs": [
+				374
+			],
+			"outcomeFile": "implementations-plan/dedup-messaging-primitives/plan.md",
+			"hook": "Q-14 super-name-param error identity + Q-07 template-method transport shaping + Q-05 curried passthrough exhaustiveness; TooManyPendingError wire gap BUG-PINNED (owner follow-up)"
+		},
+		{
+			"dir": "dedup-p1-delete",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #561",
+			"date": "2026-09-07",
+			"prs": [
+				561
+			],
+			"outcomeFile": null,
+			"hook": "dedup-p1-delete"
+		},
+		{
+			"dir": "dedup-p2-adopt-helpers",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #566",
+			"date": "2026-09-07",
+			"prs": [
+				566
+			],
+			"outcomeFile": "implementations-plan/dedup-p2-adopt-helpers/plan.md",
+			"hook": "P2 — adopt the helper that already exists"
+		},
+		{
+			"dir": "dedup-p3-service-wrappers",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #568",
+			"date": "2026-09-07",
+			"prs": [
+				568
+			],
+			"outcomeFile": "implementations-plan/dedup-p3-service-wrappers/plan.md",
+			"hook": "P3 — collapse the repeated wrappers in the service and utility layer"
+		},
+		{
+			"dir": "dedup-p4-vue-shells",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #569",
+			"date": "2026-09-07",
+			"prs": [
+				569
+			],
+			"outcomeFile": "implementations-plan/dedup-p4-vue-shells/plan.md",
+			"hook": "P4 — share the page shells and style partials"
+		},
+		{
+			"dir": "dedup-p5-vue-components",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #570",
+			"date": "2026-09-07",
+			"prs": [
+				570
+			],
+			"outcomeFile": "implementations-plan/dedup-p5-vue-components/plan.md",
+			"hook": "P5 — shared field, list-sync and card pieces for popups and windows"
+		},
+		{
+			"dir": "dedup-pxe-memo",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #376",
+			"date": "2026-08-16",
+			"prs": [
+				376
+			],
+			"outcomeFile": "implementations-plan/dedup-pxe-memo/plan.md",
+			"hook": "Q-04: six hand-rolled promise caches → structural `memoizeAsync`/`memoizeAsyncBy`; real-catalog regression relocated to note-schema-reset.test.ts"
+		},
+		{
+			"dir": "dedup-ui-structure",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #379",
+			"date": "2026-08-16",
+			"prs": [
+				379
+			],
+			"outcomeFile": "implementations-plan/dedup-ui-structure/plan.md",
+			"hook": "Q-08 IdentityStrip (testids verbatim) + Q-11 all 13 files + Q-09 trimAddress separator param (short-input deviation D3; ReceivePopup scoped out; 4-style unification = owner call)"
+		},
+		{
+			"dir": "dedup-withlock",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #375",
+			"date": "2026-08-15",
+			"prs": [
+				375
+			],
+			"outcomeFile": "implementations-plan/dedup-withlock/plan.md",
+			"hook": "Q-01: 69 hand-rolled lock frames → `Lock.withLock()`; `enter()` hardened never-reject (ledgered deviation D2); parallel-editor git incident + standing rules in lessons/phase-2.md"
+		},
+		{
+			"dir": "deflake-round-2",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #360, #361, #362, #364, #365",
+			"date": "2026-08-13",
+			"prs": [
+				360,
+				361,
+				362,
+				364,
+				365
+			],
+			"outcomeFile": "implementations-plan/deflake-round-2/plan.md",
+			"hook": "flake-class close-out: A1 appearance flake REPRODUCED + fixed at cause (dropdown close-transition state signal), pg-result bounded dumps + retry-error surfacing, body-scan sweep + fail-hard fixtures, durable dApp-cancel + typed fee selector, causal post-restart liveness gates; certification 3× qualifying greens (ba33d81b/b164b56e/c6ce1264), zero retries"
+		},
+		{
+			"dir": "deflake-round-3",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #367, #368, #369, #370",
+			"date": "2026-08-14",
+			"prs": [
+				367,
+				368,
+				369,
+				370
+			],
+			"outcomeFile": "implementations-plan/deflake-round-3/plan.md",
+			"hook": "measured two \"known\" mechanisms: the duplicate-aggregator trap's stated mechanism is UNSUPPORTED (an older duplicate FAILURE does not by itself keep a PR unmergeable — though round-2's observed blocks remain unexplained), and `Runtime.terminateExecution` never killed the service worker (three sw-resilience tests were passing without the restart they claimed; `worker().close()` fixed it and restored them). Also: `ensureUnlocked`'s silent no-op and unlock proof, `launchExtension` page ownership + detach retry, promoted cert/PR-watch scripts"
+		},
+		{
+			"dir": "deflake-round-4",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #400, #404",
+			"date": "2026-08-18",
+			"prs": [
+				400,
+				404
+			],
+			"outcomeFile": "implementations-plan/deflake-round-4/plan.md",
+			"hook": "the crash-truth rewrite (rendezvous-anchored SW kills) found TWO product bugs across 7 instrumented runs: BUG-FENCE (independently fixed upstream mid-arc — PR-2 re-scoped to defense-in-depth hardening) and BUG-TRANSPORT (the designed crash rollback died <1s in the SW respawn gap; fixed via the liveness-gated rollback, scenario A green)"
+		},
+		{
+			"dir": "dependency-hardening",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/dependency-hardening/plan.md",
+			"hook": "Dependency hardening + supply-chain age gate (v4 — locked-in)"
+		},
+		{
+			"dir": "dependency-refresh",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #178",
+			"date": "2026-06-25",
+			"prs": [
+				178
+			],
+			"outcomeFile": "implementations-plan/dependency-refresh/plan.md",
+			"hook": "PR #178 → dev** (light; codex conditional-approve, 3 conditions folded) — one consolidated in-range `bun update` across all 11 pkgs + root (186 bun.lock entries, 12 package.json `^`-floor bumps, no cross-major, `@types/node` ≤24; full-diff min-age 186/186 ≥7d); the planned 2-stage libs/tooling split proved mechanically impossible in bun (per-child update refreshes each child broadly) → collapsed to one refresh + push-through. zod-v5 premise moot (no v5; on 4.4.3). Fallout fixed inline: biome 2.4.15→2.5.0 (`noSvgWithoutTitle` `.svg`-exclude, `noRedundantRoles`, `useVueMultiWordComponentNames` off, `preset` migrate) + `@types/webextension-polyfill` 0.12.5 Alarm cast. typecheck:all+lint+test:all + 5 builds + smoke e2e green; network e2e in CI"
+		},
+		{
+			"dir": "deprecate-simulate-views",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #56",
+			"date": "2026-05-24",
+			"prs": [
+				56
+			],
+			"outcomeFile": "implementations-plan/deprecate-simulate-views/plan.md",
+			"hook": "Deprecate `simulate_views` op kind — plan-v2 (consolidated)"
+		},
+		{
+			"dir": "design-system-externalization-round-2",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #123, #124, #127",
+			"date": "2026-06-21",
+			"prs": [
+				123,
+				124,
+				127
+			],
+			"outcomeFile": "implementations-plan/design-system-externalization-round-2/plan.md",
+			"hook": "finished the 9 L2 holdouts + composables into @nulo/design: router-free Button/SubPageHeader bases + extension wrappers (resolver discipline: add-on-delete only), Spinner superset reconcile, toast/outside composables behind `.js` re-export shims, Tooltip/Popover teleportTo, Input + internal sanitizeString, storybook rolldown fix + faucet base.css parity guard; the faucet AppButton→Button consolidation was ~invisible (already uppercase font-headline; the one visible change is the 4s spinner); toast-region unification + AppButton retirement deferred to round 3"
+		},
+		{
+			"dir": "design-system-externalization-round-3",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #127",
+			"date": "2026-06-21",
+			"prs": [
+				127
+			],
+			"outcomeFile": "implementations-plan/design-system-externalization-round-3/plan.md",
+			"hook": "all 4 phases ✓; PR #127 → dev (network e2e green + user visual no-deltas sign-off 2026-06-21, on a v5/aztec-5.0 rebuild)** (`/blueprint light`; codex pre-audit conditional-approve + post-impl ship-with-fixes [1 MED fixed]; `/code-review max` clean) — round-3 close-out: **toast KEPT SEPARATE** (not unified — faucet queue vs extension single-transient; different host contexts; faucet already shares the package `Toast.vue` card), drop the `dark` color name (split: `tertiary` dots / `secondary` metadata), retire `AppButton` (migrate `DripButton` → `Button`, disable-on-loading made mandatory), delete the 9 round-1 local SFC shadows so the resolver finally takes effect (Checkbox/Toggle are reconciliations not pure ports — per-component tests + network e2e + human visual no-deltas sign-off)"
+		},
+		{
+			"dir": "design-system-externalization",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #102, #114, #124, #127",
+			"date": "2026-06-21",
+			"prs": [
+				102,
+				114,
+				124,
+				127
+			],
+			"outcomeFile": "implementations-plan/design-system-externalization/plan.md",
+			"hook": "AMBITIOUS + SUPERVISED: single-source token contract + base/theme/font takeover (relocate-don't-drop) + externalized 9 primitives via an unplugin-vue-components resolver (zero template churn); look-same gated by machine checks + human visual; Button/SubPageHeader/ToastManager/Spinner/Banner/LoadingState/Tooltip/Popover/Input + storybook-rolldown fix deferred to round 2"
+		},
+		{
+			"dir": "docs-improvement",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/docs-improvement/plan.md",
+			"hook": "Documentation Improvement — Plan v2 (post-audit)"
+		},
+		{
+			"dir": "e2e-deflake",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #356, #358, #365, #370, #400, #404, #409, #410",
+			"date": "2026-08-18",
+			"prs": [
+				356,
+				358,
+				365,
+				370,
+				400,
+				404,
+				409,
+				410
+			],
+			"outcomeFile": "implementations-plan/e2e-deflake/plan.md",
+			"hook": "5 of 6 flakes root-cause-fixed via signal-level changes + 1 OPEN owner call (smoke roundtrip RPC-dependency); found+fixed a test-manufactured partial-restore race; product asks: restore atomicity, balance-failure observability; certification: 3 consecutive fully-green labeled runs, zero re-runs (lessons/phase-6.md)"
+		},
+		{
+			"dir": "e2e-determinism",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/e2e-determinism/plan.md",
+			"hook": "e2e Determinism Plan — FINAL v3a (post-codex-audit + DOM-purity revision, settled-card edition)"
+		},
+		{
+			"dir": "e2e-flake-fixes",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #548",
+			"date": "2026-09-05",
+			"prs": [
+				548
+			],
+			"outcomeFile": "implementations-plan/e2e-flake-fixes/plan.md",
+			"hook": "root-caused two CI flakes without touching a timeout: `stopServiceWorker` now stops the SW with an unattached `Target.closeTarget` (Puppeteer's `worker.close()` raced its own detach against the MV3 restart and inherited the DevTools host); `callExpectingNoPopup` decides \"new popup\" by target identity, and the first-run onboarding tab no longer lingers in every e2e browser"
+		},
+		{
+			"dir": "e2e-full-network-recovery",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #46",
+			"date": "2026-05-26",
+			"prs": [
+				46
+			],
+			"outcomeFile": "implementations-plan/e2e-full-network-recovery/plan.md",
+			"hook": "E2E Full Network Recovery — Consolidated Plan (v1)"
+		},
+		{
+			"dir": "e2e-network-recovery",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #46",
+			"date": "2026-05-26",
+			"prs": [
+				46
+			],
+			"outcomeFile": "implementations-plan/e2e-network-recovery/plan.md",
+			"hook": "E2E Network Suite Recovery — Plan v2 (post-audit)"
+		},
+		{
+			"dir": "e2e-proverless-stub",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #86",
+			"date": "2026-06-15",
+			"prs": [
+				86
+			],
+			"outcomeFile": "implementations-plan/e2e-proverless-stub/plan.md",
+			"hook": "proverEnabled:false for bulk network e2e + SW-side barrier-gated stub for sequencing/cancel + prover-ON canaries; double-opt-in + DCE + negative-grep prod guard"
+		},
+		{
+			"dir": "e2e-reliability-fixes",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "closing index status",
+			"date": "2026-09-29",
+			"prs": [
+				719
+			],
+			"outcomeFile": "implementations-plan/e2e-reliability-fixes/plan.md",
+			"hook": "ux-feedback's five test-reliability follow-ups and the two smoke flakes ux-owner-picks found, as #719: the setup page as the launch fixture's scratch page, `send-picker`'s setup in a file-scoped fixture, cold imports out of two timed unit tests, the backup tests keeping only the sandbox's account-state, a `data-fpc-id` on each fee-menu row, Home's measurements after its token card settles, and a port draw that skips Fetch's bad ports; its open items are in follow-ups.md"
+		},
+		{
+			"dir": "e2e-skill-refresh",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #553",
+			"date": "2026-09-06",
+			"prs": [
+				553
+			],
+			"outcomeFile": "implementations-plan/e2e-skill-refresh/plan.md",
+			"hook": "the six remaining service-worker kill sites import the shared `stopServiceWorker` (four verbatim pre-fix copies, two canaries on the non-lethal `Runtime.terminateExecution`); the real restart exposed a product edge in the passkey canary (an open popup outlives a restart logged-in, and its Lock click emits no redirect); `.claude/skills/e2e-testing/SKILL.md` rewritten procedure-first with a 29-row verified flake ledger"
+		},
+		{
+			"dir": "e2e-stabilization",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #60, #64, #66, #67, #72",
+			"date": "2026-06-02",
+			"prs": [
+				60,
+				64,
+				66,
+				67,
+				72
+			],
+			"outcomeFile": "implementations-plan/e2e-stabilization/plan.md",
+			"hook": "E2E Stabilization Plan (2026-05-26) — Issues #58 + #59 + cold-shard"
+		},
+		{
+			"dir": "embedded-fpc-firsttx-cosmetic",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/embedded-fpc-firsttx-cosmetic/plan.md",
+			"hook": "Plan v2 — post-audit consolidation"
+		},
+		{
+			"dir": "enter-gate-and-ping",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #424",
+			"date": "2026-08-19",
+			"prs": [
+				424
+			],
+			"outcomeFile": "implementations-plan/enter-gate-and-ping/plan.md",
+			"hook": "the (BUG PIN) fixed: isStartedEditing folded into the single submit-validity source; \"ping\" added to the content validator so the SDK's liveness heartbeats reach the vendored PONG reply (two-level pin incl. the real handler); new discovery: isProfileUpdateInProgress is a loading flag, not an Enter re-entrancy guard"
+		},
+		{
+			"dir": "execution-decomposition",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S3",
+			"date": "2026-06-12",
+			"prs": [
+				83
+			],
+			"outcomeFile": "implementations-plan/execution-decomposition/plan.md",
+			"hook": "facade 2,302 → 746 lines, 3 executors + lane, zero behavior change"
+		},
+		{
+			"dir": "execution-pipeline",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #506, #507",
+			"date": "2026-09-01",
+			"prs": [
+				506,
+				507
+			],
+			"outcomeFile": "implementations-plan/execution-pipeline/plan.md",
+			"hook": "the execution money path staged under budget (111 → 100): batched-view two-arm orchestrator, the claim protocol, the tx builder pins-first, then the length splits + fee tail; codex-caught cancel-window hop closed with fault-sensitive pins"
+		},
+		{
+			"dir": "execution-pxe-injection-spike",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S7",
+			"date": "2026-06-29",
+			"prs": [
+				160
+			],
+			"outcomeFile": "implementations-plan/execution-pxe-injection-spike/plan.md",
+			"hook": "proved the integration-test layer: ExecutionService PXE injectable at the client level + an in-process cancel-mid-prove composition test (real journal FSM, no sandbox); spawned the composition-test-rollout plan"
+		},
+		{
+			"dir": "export-integrity",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #453",
+			"date": "2026-08-24",
+			"prs": [
+				453
+			],
+			"outcomeFile": "implementations-plan/export-integrity/plan.md",
+			"hook": "N-01 full-backup export re-entry latch + generation fence + sealed single-snapshot checksum via pure assembleFullBackup + per-run clients + unmount scrub; N-13 byte caps at the ingestion choke points (chunk-capped decompress, FileTooLargeError, 64 MiB shared export/import invariant recalibrated from a measured 22.4 MiB fresh-wallet artifact)"
+		},
+		{
+			"dir": "failed-send-check",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "closing index status",
+			"date": "2026-09-30",
+			"prs": [
+				721
+			],
+			"outcomeFile": "implementations-plan/failed-send-check/plan.md",
+			"hook": "a failed send that may have reached the node is checked on its own endpoint, as #721: its record says what the network answered, the popup waits for a slow proof instead of failing at 60 s, and a failed dApp send reads what happened; its open items are in follow-ups.md"
+		},
+		{
+			"dir": "fast-path-internal-views",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #57",
+			"date": "2026-05-27",
+			"prs": [
+				57
+			],
+			"outcomeFile": "implementations-plan/fast-path-internal-views/plan.md",
+			"hook": "Extend public-static fast path to internal `batchedViewSimulation` — v2"
+		},
+		{
+			"dir": "faucet-add-token",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #50",
+			"date": "2026-05-22",
+			"prs": [
+				50
+			],
+			"outcomeFile": "implementations-plan/faucet-add-token/plan.md",
+			"hook": "Faucet \"Add USDC / ETH to Wallet\" — plan-v2 (consolidated)"
+		},
+		{
+			"dir": "faucet-bridge",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #76, #78",
+			"date": "2026-06-09",
+			"prs": [
+				76,
+				78
+			],
+			"outcomeFile": "implementations-plan/faucet-bridge/plan.md",
+			"hook": "L1↔L2 Portal bridge shipped into the faucet (public PR #76, private PR #78); swap/fuel remains a future arc"
+		},
+		{
+			"dir": "fee-estimation-init-race",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/fee-estimation-init-race/plan.md",
+			"hook": "Fee-estimation init race in `FeeSettingsCard`"
+		},
+		{
+			"dir": "fee-estimation-speedup",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #347, #348, #349",
+			"date": "2026-08-07",
+			"prs": [
+				347,
+				348,
+				349
+			],
+			"outcomeFile": "implementations-plan/fee-estimation-speedup/plan.md",
+			"hook": "ACVM sims cut (send Sponsored 2→1, dApp 3→2, confirm 3→0 via reuse w/ drift ladder) + cancellable estimates + 120s TTL + SYNC-DEBUG removal; stub-vs-real gas delta measured = 0; backend-only, no UX change"
+		},
+		{
+			"dir": "firefox-arc-closeout",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #665, #666, #668",
+			"date": "2026-09-22",
+			"prs": [
+				665,
+				666,
+				668
+			],
+			"outcomeFile": "implementations-plan/firefox-arc-closeout/plan.md",
+			"hook": "merged to dev 2026-09-22 (#665 `44cfe61e`, #666 `34111b65`); all seven phases green on both browsers; codex converged three times (arc 1 ×2, arc 2 ×2, the cross-arc pass ×1: approve); the four-file canary job 7 min 35 s Chrome / 7 min 12 s Firefox on the PR — no split** (mid; plan rev 4; fable cond. approve, codex reject ×2 → cond. approve with its three conditions met; 21-row ledger) — closes the Firefox arc: a dApp call in flight (or the next call of an idle dApp) when the background dies is answered with the SDK's own `session-disconnected` from the attached content wrapper, so it fails in seconds instead of hanging 300 s, and reconnects on the same page; both execution canaries run prover-ON on Firefox in the PR lanes and nightly; the passkey canary's CI gap (it never ran with real proving) is closed and a results step makes a listed canary that did not execute a red job; a red Firefox canary holds an `@aztec` bump; the `stopBackground` residual is consciously dropped; two stacked PRs"
+		},
+		{
+			"dir": "firefox-background-kill",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #661, #666",
+			"date": "2026-09-22",
+			"prs": [
+				661,
+				666
+			],
+			"outcomeFile": "implementations-plan/firefox-background-kill/plan.md",
+			"hook": "merged to dev 2026-09-21 (#661, `60da5d66`); codex loop converged (four passes, eight findings adopted); its Ask A1 superseded by firefox-arc-closeout, which ported both canaries** (light; follow-up of pxe-timer-throttling) — the background kill is a driver method (`stopBackground` / `backgroundAlive`): Chrome keeps its unattached `closeTarget`, Firefox ends its event page through the privileged channel; the restart spec ends the background alone; six background-kill files run on Firefox, Chrome-only drops from ten files to four (Firefox will not end an event page under an open extension page); a dApp call in flight when the background died remained unanswered for 210 s in one run per browser — measured, answered by firefox-arc-closeout"
+		},
+		{
+			"dir": "firefox-first-class-spike",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [
+				"firefox-checklist"
+			],
+			"evidence": "S4",
+			"date": "2026-09-21",
+			"prs": [
+				632,
+				633,
+				634,
+				635,
+				636,
+				637,
+				646,
+				650,
+				652,
+				653
+			],
+			"outcomeFile": "implementations-plan/firefox-first-class-spike/plan.md",
+			"hook": "delivered — awaiting nightly + release evidence** (2026-09-19; all phases ticked 2026-09-20 — the owner ruled out a `web-ext lint` exception, so arc 7 shrinks the bundle under the linter's parse limit, and arc 8 fixes the owner-found popup layout in a Firefox panel; arc 9 merges dev into the stack and makes the specs dev gained meanwhile run on Firefox) (mid; plan v3; fable cond. approve, codex reject ×2 → cond. approve; 28-row ledger) — Firefox gets the Chrome treatment: the smoke and network e2e suites run on the Firefox build per PR, nightly and in the release chain (all advisory, dated promotion switches), via a browser seam under the existing fixtures with a geckodriver-owned session Puppeteer attaches to over BiDi and a classic-WebDriver virtual authenticator; fixes passkey profile creation on Firefox (PRF returned only on get); adds the Firefox manifest data-collection + minimum-version keys; nine stacked PRs (#638)"
+		},
+		{
+			"dir": "first-account-token-seeding",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #485",
+			"date": "2026-08-30",
+			"prs": [
+				485
+			],
+			"outcomeFile": "implementations-plan/first-account-token-seeding/plan.md",
+			"hook": "PR #485 open vs dev, all 33 checks green** — default tokens never seed for a profile's FIRST account: TokenService only triggers the seeder on profile/network change, both of which fire before the first account row exists, and nothing re-triggers on onAccountAdded; adds the trigger + a double-opt-in, DCE'd e2e seed-injection seam so the sandbox can prove it end-to-end, plus CI isolation so the fix doesn't point smoke/network suites at a public RPC"
+		},
+		{
+			"dir": "fix-account-generation-fence",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #399",
+			"date": "2026-08-18",
+			"prs": [
+				399
+			],
+			"outcomeFile": "implementations-plan/fix-account-generation-fence/plan.md",
+			"hook": "F-B27: store-level monotonic activation epoch + scope re-checks in `setupActiveAccount`; ABA pinned; the `(BUG PIN) void finally` unpinned"
+		},
+		{
+			"dir": "fix-cold-wake-discovery-loss",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #421",
+			"date": "2026-08-19",
+			"prs": [
+				421
+			],
+			"outcomeFile": "implementations-plan/fix-cold-wake-discovery-loss/plan.md",
+			"hook": "the F-B16 cold-wake race: module-scope content-message relay (single-listener ownership, drain-on-attach, strict admission, 5s composed-freshness budget); RED/GREEN via real worker().close() kills; strict-mode unlock-drain composition validated"
+		},
+		{
+			"dir": "fix-discovery-restart-durability",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #407",
+			"date": "2026-08-18",
+			"prs": [
+				407
+			],
+			"outcomeFile": "implementations-plan/fix-discovery-restart-durability/plan.md",
+			"hook": "F-B16 → NOT-DURABLE-BY-SDK-DESIGN; ghost-badge boot reconciliation shipped; 3 new discoveries recorded (cold-wake race · dead origin guard · popup orphaning)"
+		},
+		{
+			"dir": "fix-execution-journal",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #385",
+			"date": "2026-08-16",
+			"prs": [
+				385
+			],
+			"outcomeFile": "implementations-plan/fix-execution-journal/plan.md",
+			"hook": "B-02/03/19: dApp-send mutex slot + boot-reaper bootCutoff + exact fee-error match"
+		},
+		{
+			"dir": "fix-profile-deletion-status",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #405",
+			"date": "2026-08-18",
+			"prs": [
+				405
+			],
+			"outcomeFile": "implementations-plan/fix-profile-deletion-status/plan.md",
+			"hook": "F-B24: torn-import sweep on boot resume via restore-pending markers (marker-tuple verification under lock; 7-day age floor; torn reap retains the tombstone)"
+		},
+		{
+			"dir": "fix-pxe-offscreen",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #391",
+			"date": "2026-08-17",
+			"prs": [
+				391
+			],
+			"outcomeFile": "implementations-plan/fix-pxe-offscreen/plan.md",
+			"hook": "B-07/17/18: OPFS-wedge quarantine + offscreen lifecycle fences + double-bump purge epoch"
+		},
+		{
+			"dir": "fix-session-profile",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #384",
+			"date": "2026-08-16",
+			"prs": [
+				384
+			],
+			"outcomeFile": "implementations-plan/fix-session-profile/plan.md",
+			"hook": "B-01/10/11/12: persist-first session transition + secret zeroize/lifetime + tombstone-wedge unstick"
+		},
+		{
+			"dir": "fix-state-fences",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #386",
+			"date": "2026-08-16",
+			"prs": [
+				386
+			],
+			"outcomeFile": "implementations-plan/fix-state-fences/plan.md",
+			"hook": "B-04/05/08/20/21/29: six async state-transition races fenced by generation/incarnation checks"
+		},
+		{
+			"dir": "fix-storage-row-repair",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #406",
+			"date": "2026-08-18",
+			"prs": [
+				406
+			],
+			"outcomeFile": "implementations-plan/fix-storage-row-repair/plan.md",
+			"hook": "F-B23: purge-blindness closed via key-attributed raw second pass in 9 purge paths + raw-augmented deletion snapshot; boot/sweep repair subsystem REJECTED (no producer)"
+		},
+		{
+			"dir": "fix-transport-sessions",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #387, #390",
+			"date": "2026-08-17",
+			"prs": [
+				387,
+				390
+			],
+			"outcomeFile": "implementations-plan/fix-transport-sessions/plan.md",
+			"hook": "B-06/13/14/15/16: per-session verification isolation, guarded establish branches, timeout-spans-establishment, SDK 60s discovery staleness (restart-safety follow-up)"
+		},
+		{
+			"dir": "fix-ui-storage",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #393",
+			"date": "2026-08-17",
+			"prs": [
+				393
+			],
+			"outcomeFile": "implementations-plan/fix-ui-storage/plan.md",
+			"hook": "B-09/22/23/24/25/26/27/28/30: nine UI/storage/composable fixes (send guard, migration-idle re-check, retain-on-read, rollback retry, balance reducers, submit latches, bootstrap single-flight, disconnect leaks)"
+		},
+		{
+			"dir": "frontend-ux-fixes",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #140",
+			"date": "2026-06-22",
+			"prs": [
+				140
+			],
+			"outcomeFile": "implementations-plan/frontend-ux-fixes/plan.md",
+			"hook": "all 6 phases ✓ + user keyboard/visual sign-off (2026-06-22); PR #140 → dev** (mid; dual audit reject×2 + final fresh-context codex reject — all folded; post-impl codex `ship`) — six reported extension UX fixes: P1 Settings \"Profile\" row copy + contact double-border; P2 retire `vault` → reusable flat-grey initials `AccountAvatar`; P3 Send recipient card (name + masked `0x……tail` + **optional one-tap reveal** — informed risk-acceptance over a forced gate); P4 `AddressInput` pin-on-blur (long `0x…` can't be drag-scrolled at rest; value + e2e selector preserved); P5a tab-order ROOT fix (no positive `tabindex`; `<div>` Toggle/DropdownItem → `0` + keyboard ops; `DropdownRoot` arrow-nav decoupled to `[data-dropdown-item]`; roving method tablist; CLAUDE.md \"Keyboard & focus order\" convention) / P5b sweep + human sign-off. Audits caught: false \"verified facts\" (hashToEmoji-as-indicator, wrong onboarding file), a `<div>`-tabindex focus regression the first revision introduced, and the wrong `test:components` gate command. Plus a user-directed Send-layout polish (de-stacked paddings, smaller token picker, recipient card style D, worded red \"Invalid address\" hint)"
+		},
+		{
+			"dir": "furthering-non-network-e2e",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/furthering-non-network-e2e/plan.md",
+			"hook": "Furthering non-network e2e — implementation plan"
+		},
+		{
+			"dir": "fuzz-runner",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #523",
+			"date": "2026-09-02",
+			"prs": [
+				523
+			],
+			"outcomeFile": "implementations-plan/fuzz-runner/plan.md",
+			"hook": "the balances-store fuzz tape decomposed into a world driver, op arms and an invariants oracle, held equivalent by trace-digest pins — 43 → 41"
+		},
+		{
+			"dir": "grant-check-address-case",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "closing index status",
+			"date": "2026-09-28",
+			"prs": [
+				716
+			],
+			"outcomeFile": "implementations-plan/grant-check-address-case/plan.md",
+			"hook": "one field-address key for every contract comparison in the grant check and the Details table"
+		},
+		{
+			"dir": "harden-2026-09-remediation",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #591, #592, #594, #595, #596, #597",
+			"date": "2026-09-15",
+			"prs": [
+				591,
+				592,
+				594,
+				595,
+				596,
+				597
+			],
+			"outcomeFile": "implementations-plan/harden-2026-09-remediation/seed.md",
+			"hook": "merged to dev 2026-09-15 as stack #593 (#591 audit docs + seed `2bd32bb7`; B1 [#592](harden-2026-09-remediation/b1-mechanical/plan.md) `f9ee51d6`; B2 [#594](harden-2026-09-remediation/b2-backup-passkey/plan.md) `bb479bc8`; B3 [#595](harden-2026-09-remediation/b3-isolation/plan.md) `26e313eb`; B4 [#596](harden-2026-09-remediation/b4-approval/plan.md) `ad130aea`): four stacked batches (B1 mechanical, B2 backup+passkey, B3 isolation, B4 approval) remediating `audit/security/2026-09-13-high-prerelease/` (18 findings; F-09 deferred to the Presto arc); light/light/mid/mid. Open owner actions: provision `passkey.nulo.sh` (B2), verify the Firefox sender shapes on a Firefox build (B3)"
+		},
+		{
+			"dir": "harden-findings-remediation",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [
+				"harden-f11-scope",
+				"harden-surfaced-findings"
+			],
+			"evidence": "S9",
+			"date": "2026-07-13",
+			"prs": [
+				272,
+				278
+			],
+			"outcomeFile": "implementations-plan/harden-findings-remediation/plan.md",
+			"hook": "remediate all 14 `/harden security max` findings (`audit/security/2026-07-06-max/`) on `fix/harden-findings` as 11 per-unit PRs; deep pass on the dispatcher trust-boundary (F-01/02/08 — 3-sink name↔selector bind in execution, reject raw authwit hashes) + the crypto bearer (F-11 — session-stored wrapped-secret + storage bump); Codex-driven open Qs, local gates per unit (no GitHub CI on integration-branch PRs), one gated promote PR → dev"
+		},
+		{
+			"dir": "harden-quality-arc",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [
+				"harden-quality-q13"
+			],
+			"evidence": "S1",
+			"date": "2026-07-10",
+			"prs": [
+				220
+			],
+			"outcomeFile": "implementations-plan/harden-quality-arc/plan.md",
+			"hook": "Harden-Quality Arc — meta-plan (autonomous driver)"
+		},
+		{
+			"dir": "harness-fixtures",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #521, #522",
+			"date": "2026-09-02",
+			"prs": [
+				521,
+				522
+			],
+			"outcomeFile": "implementations-plan/harness-fixtures/plan.md",
+			"hook": "e2e fixture dedups (scoped storage/balance readers, scan-until-held + poll-by-hash helpers, the dead-RPC batch-reply planner, restore-residue probes) and the smoke global-setup split into stage coordinators — 49 → 43"
+		},
+		{
+			"dir": "holdings-loading-sync",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #619, #620, #622",
+			"date": "2026-09-17",
+			"prs": [
+				619,
+				620,
+				622
+			],
+			"outcomeFile": "implementations-plan/holdings-loading-sync/plan.md",
+			"hook": "merged to dev 2026-09-18 as stack #621 (#619 arc 1 `44fd0190`, #620 arc 2 `92922b6a`); all 10 phases ✓ (mid; UX approved on a design canvas; fable conditional approve + codex reject ×3 → scan-floor shortcut removed by the owner; 13-decision ledger; post-impl codex loops in lessons/phase-5.md and lessons/phase-10.md) — Home holdings never shows the empty state while loading: default-token placeholder rows from a new seed-status RPC, skeleton hero capped at 12 s, the per-row catching-up dot removed; the incoming scan gets outcome-based health with a single \"may be missing · Retry\" line after 10 min of failure, and token metadata is read once instead of three times; two stacked PRs. Follow-up proposed: `incoming-tip-first-scan`"
+		},
+		{
+			"dir": "home-holdings-pin",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #562, #563, #564",
+			"date": "2026-09-07",
+			"prs": [
+				562,
+				563,
+				564
+			],
+			"outcomeFile": "implementations-plan/home-holdings-pin/plan.md",
+			"hook": "four tabs HOME · HOLDINGS · HISTORY · SETTINGS, Home capped at three value-ordered token rows with \"View all\", a Holdings page with sticky search / value-name sort / one empty+dust fold, \"Pin to Home\" (cap 3, contract-keyed per chain, informational popup at the cap) from the token menu, the Send picker on the same order, the unreachable balance-display popup retired; three stacked PRs"
+		},
+		{
+			"dir": "home-refresh",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #363, #366",
+			"date": "2026-08-13",
+			"prs": [
+				363,
+				366
+			],
+			"outcomeFile": "implementations-plan/home-refresh/plan.md",
+			"hook": "owner-locked home-screen refresh: threshold-gated sync dot, lock/globe split, name subtitles, compact density, 2dp fee juice, \"dRPC\" endpoint label, header avatar/name/address-copy split, cursor:copy→pointer; test-surface-first plan (recon-mapped component + e2e updates)"
+		},
+		{
+			"dir": "hygiene",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "closing index status",
+			"date": "2026-09-30",
+			"prs": [
+				723
+			],
+			"outcomeFile": "implementations-plan/hygiene/plan.md",
+			"hook": "ux-feedback's technical follow-ups that change no screen: retry-safe token specs, cold imports out of timed unit tests on the default hook budget, Home's hero read once priced, a dead script deleted, and comments, docs and skills made true of the tree; its open items are in follow-ups.md"
+		},
+		{
+			"dir": "import-stage-deadlines",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #409, #410, #414",
+			"date": "2026-08-18",
+			"prs": [
+				409,
+				410,
+				414
+			],
+			"outcomeFile": "implementations-plan/import-stage-deadlines/plan.md",
+			"hook": "the importFullBackup-300s settled design executed: 30-import stratified envelopes (both proving modes), stage-aware trajectory diagnostics in the shared wait (labels only, no exits, 300s unchanged as sole criterion), classification yielded no e2e deadline; consoleErrors blind spot root-caused + closed permanent-by-design (console-sniffer reroute, 3-channel probe)"
+		},
+		{
+			"dir": "incoming-public-transfers",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S7",
+			"date": "2026-07-23",
+			"prs": [
+				315,
+				318
+			],
+			"outcomeFile": "implementations-plan/incoming-public-transfers/plan.md",
+			"hook": "index incoming PUBLIC token transfers via tag-indexed `Transfer` events (cursor-paginated, checkpointed + reorg reconciliation, full-history) as a 2nd IncomingTransferService arm; same trust machine; discriminated-union record identity; causal task-anchored balance-refresh outbox (both arms); standard-token node-direct class gate; USD dust filter. Fable + 6 codex passes, all conditions folded."
+		},
+		{
+			"dir": "incoming-sync-indicator",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #316",
+			"date": "2026-07-23",
+			"prs": [
+				316
+			],
+			"outcomeFile": "implementations-plan/incoming-sync-indicator/plan.md",
+			"hook": "Incoming sync indicator — \"Catching up…\" on the token card"
+		},
+		{
+			"dir": "incoming-trust-state-machine-refactor",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #75",
+			"date": "2026-06-08",
+			"prs": [
+				75
+			],
+			"outcomeFile": "implementations-plan/incoming-trust-state-machine-refactor/plan.md",
+			"hook": "global service Lock serializing the incoming-transfer trust FSM; race class closed"
+		},
+		{
+			"dir": "isolated-linker-store",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #454, #455",
+			"date": "2026-08-25",
+			"prs": [
+				454,
+				455
+			],
+			"outcomeFile": "implementations-plan/isolated-linker-store/plan.md",
+			"hook": "vite configs load `@nulo/resolve-asset`'s raw `.ts` under ambient Node, <23.6 lacks type stripping) — Arc B: @nulo/resolve-asset unifies 6 walkers, 8 phantoms eliminated (2 source + 4 CI-found source + 1 build-injected + 1 type-only), isolated linker (globalStore off), wallet-grade lock regen 40→23 advisories; committed default not faster (measured), opt-in store 4×; [wrap-up](isolated-linker-store/wrap-up.md)"
+		},
+		{
+			"dir": "journal-reaper",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #467",
+			"date": "2026-08-25",
+			"prs": [
+				467
+			],
+			"outcomeFile": "implementations-plan/journal-reaper/plan.md",
+			"hook": "dual audit with a genuine N-07 design fork (codex amended-(b) vs fable minimal-(a′), adjudicated (a′) on verified facts), round-2 consensus, then the fresh-context final gate REJECTED the consensus (unbounded vouching re-created the forever-shield hazard) → bounded-lease rev 4/5 APPROVE; max review proved one plan-mandated CAS discriminator missing; codex final-diff SIGN-OFF) — N-07 pre-claim wait heartbeat (queuedWaiters map, 90-min cap-sized lease, ownership migration at mutex enqueue, cancel pruning, extracted vouching chain with placement pins) + CAS transitionIfStage in the reaper AND failQueuedIfUnclaimed; N-16 waitForTx bounded at 120 s with typed honest timeout + settle-exactly-once + WrappedTask.exists; N-25 both-key controller cleanup before slot release"
+		},
+		{
+			"dir": "journal-stage-restructure",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S15",
+			"date": "2026-06-02",
+			"prs": [
+				72
+			],
+			"outcomeFile": "implementations-plan/journal-stage-restructure/plan.md",
+			"hook": "Restructure to journal-stage assertions"
+		},
+		{
+			"dir": "justified-baseline",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #526, #528, #531",
+			"date": "2026-09-02",
+			"prs": [
+				526,
+				528,
+				531
+			],
+			"outcomeFile": "implementations-plan/justified-baseline/plan.md",
+			"hook": "every surviving directive rewritten to the fail-closed `accepted at … — <why>` form; generator marker, `--adopt` only on a Biome bump, exact rescore audit in test:ci-gating — manifest stays 35"
+		},
+		{
+			"dir": "key-model-v2-hardening",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S7",
+			"date": "2026-08-22",
+			"prs": [
+				419,
+				426,
+				427,
+				431
+			],
+			"outcomeFile": "implementations-plan/key-model-v2-hardening/plan.md",
+			"hook": "imported-key DEK isolation, duplicate-phrase guard, passkey 512-bit reduce, missing account e2e (arcs 4–5 on stack #420)"
+		},
+		{
+			"dir": "key-model-v2",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S5",
+			"date": "2026-08-22",
+			"prs": [
+				417,
+				418,
+				419
+			],
+			"outcomeFile": "implementations-plan/key-model-v2/plan.md",
+			"hook": "recovery-phrase-centric key model + NULO-ACCOUNT-KDF v2 (pre-launch baseline redefinition)"
+		},
+		{
+			"dir": "keyboard-guards",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "closing index status",
+			"date": "2026-09-29",
+			"prs": [
+				720
+			],
+			"outcomeFile": "implementations-plan/keyboard-guards/plan.md",
+			"hook": "Enter does what the focused control says on five pages and the dApp confirm, as #720: each page answers only Enter in its own fields, and a held or composing Enter acts once or not at all; its open items are in follow-ups.md"
+		},
+		{
+			"dir": "layout-polish",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "closing index status",
+			"date": "2026-09-30",
+			"prs": [
+				724,
+				730
+			],
+			"outcomeFile": "implementations-plan/layout-polish/plan.md",
+			"hook": "the layout around batch 4's surfaces, on `feat/layout-polish`: activity rows 10px apart, History's and Settings' titles at their drawn height, \"Recent activity\" and \"View history\", and Home's hero waiting for its first price answer, each decided by the owner's delegated panel; its open items are in follow-ups.md"
+		},
+		{
+			"dir": "legal-terms",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #627, #628, #649",
+			"date": "2026-09-20",
+			"prs": [
+				627,
+				628,
+				649
+			],
+			"outcomeFile": "implementations-plan/legal-terms/plan.md",
+			"hook": "`/terms` + `/privacy` published from `legal/*.md` via `@nulo/legal`; an unchecked I-agree gate in onboarding and a re-acceptance sheet in the popup write a device-local versioned record; a declined state is enforced at the single broadcast line (`ExecutionCoordinator.sendTxTask`) and the dApp ingress while view and every export keep working; smoke S1–S9 + network N1; lessons in `lessons/arc-a.md`, `lessons/arc-b.md`. Arc C (third-party notices) waits on the Presto MIT versions reaching the lockfile and `@aztec/sqlite3mc-wasm` licence provenance"
+		},
+		{
+			"dir": "light-theme-fix",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S10",
+			"date": "2026-06-26",
+			"prs": [
+				179,
+				180
+			],
+			"outcomeFile": "implementations-plan/light-theme-fix/plan.md",
+			"hook": "all 6 phases ✓ on `fix/light-theme` (12 commits), awaiting PR + manual light-mode smoke** (3 independent plans + contradiction-check + double audit + final fresh codex pass [reject→fixed→re-review conditional-approve] + approval [direction A]; post-impl: Opus code-review [L1 fixed, no high/crit] + codex audit). Gates: audit:vue green (extension 2598), design 270 (contrast 18/18 both themes + undefined-var guards), faucet 422, build-storybook, smoke e2e 67 +1 pre-existing wallet-lock flake. Direction A warm-chromatic (accent #a8480c, WCAG-AA gate-verified); 3 ghost tokens caught+fixed by the guard; FOUC killed via CSP-safe external boot script + localStorage; dark frozen (only +color-scheme) — fix the COMPLETELY broken extension light theme + add a faucet Dark/Light/System toggle. Root cause: `[theme=\"light\"]` in `@nulo/design/base.css` OMITS 8 brand tokens (→ ~555 sites silently inherit DARK) + a `--border` mis-alias + ~37 hardcoded dark literals & undefined-var landmines (`--nulo-primary`/`--nulo-bg`/`--surface-*`/`--warn`) across ~30 files. Theme mechanism (`<html theme>` + `[theme]` blocks, default `system`) already works. Plan: honest contrast token-pairing gate + undefined-var guard FIRST (red→green; NOT a cascade resolver — repo's own app.css.parity declares that infeasible), palette-agnostic tokenize via `color-mix` (ZERO new tokens; precedent `Spinner.vue:27`) + a real synchronous localStorage paint-hint FOUC fix (the cheap `new Config()` port still flashed), then land a signed-off **CHROMATIC** light palette (ink REJECTED by audit — `--nulo-accent` doubles as links/active-tab/Toggle-ON across 43 sites → near-black = affordance hazard in a wallet), faucet toggle (localStorage allowlist-validated), validation. Dark FROZEN except 2 named exceptions (`--nulo-primary` focus-ring + additive `color-scheme`). base.css is SHA-256-pinned; the design gate runs OUTSIDE `audit:vue` (extension-only) so phases invoke it explicitly. Q-answers: derive+sign-off palette · faucet matches extension 3-way · Storybook+manual+WCAG-AA · extension+faucet (playground passive)"
+		},
+		{
+			"dir": "lock-ownership",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #461",
+			"date": "2026-08-25",
+			"prs": [
+				461
+			],
+			"outcomeFile": "implementations-plan/lock-ownership/plan.md",
+			"hook": "3-round gate incl. final-pass reject→approve, 12 findings adopted, 1 cross-auditor disagreement resolved unanimously; independent max review 6 findings + codex final-diff reject→approve) — N-11 Lock is ownership-ticketed (handoff-minted branded tickets, check-first stale-leave no-op, watchdog-own-ticket; network lock watchdog disabled for the by-design 30-min clearChainState hold; p1-1 adopted as the inverted deferral pin); N-12 session artifact fence (private watchdog-null mutex, bump-last commit point, identity guard, rejection compensation preserving memory-first degraded success; f1-1 adopted as 8 ordered fence pins); N-17 note-CS post-park epoch re-checks with composed real-watchdog-handoff pins (both branches revert-probed red)"
+		},
+		{
+			"dir": "mac-identity-binding",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #446",
+			"date": "2026-08-24",
+			"prs": [
+				446
+			],
+			"outcomeFile": "implementations-plan/mac-identity-binding/plan.md",
+			"hook": "MAC v3 closes F-1/F-2 from the adversarial review (envelope MAC binds the row's own storage id + the plaintext fingerprint; EntityStorage key-identity guard kills the embedded-id bypass + authwit aliasing; passkey fingerprint recompute at open/export/finalize); codex loop r1 BREAKS → r5 APPROVE, phase-2 loop r7 BREAKS → r9 APPROVE; phase 2 root-caused + fixed the four pre-existing post-unlock navigation races behind the red smoke gate"
+		},
+		{
+			"dir": "method-metadata-registry",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #91",
+			"date": "2026-06-15",
+			"prs": [
+				91
+			],
+			"outcomeFile": "implementations-plan/method-metadata-registry/plan.md",
+			"hook": "merged via PR #91 (2026-06-15)** (deep; 3 plans + double audit + final codex pass + post-impl audit) — Q1 quality arc: folded six scattered wallet-method-metadata tables in @nulo/wallet-bridge into one MethodDescriptor registry; derive the tables; build-time exhaustiveness + runtime dispatch-entry guard kill the F1 silent-authz-hole class. (#91 also mooted Q21.)"
+		},
+		{
+			"dir": "migration-lifecycle",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #457",
+			"date": "2026-08-24",
+			"prs": [
+				457
+			],
+			"outcomeFile": "implementations-plan/migration-lifecycle/plan.md",
+			"hook": "final fresh codex pass REJECTED rev 2 then approved rev 3; post-impl codex reject→approve over 2 fix rounds) — N-02 ambient wakes can no longer burn the migration retry budget (fail-closed boot gate, one-tap durable gesture claims + Retry button with claim-hold, single pre-gesture backstop, manifest-version invalidation that voids terminal verdicts AND resets the budget on update); N-18 kill-loops count exactly once and bound out (counted-journal marker, per-version counter, stand-down); N-27 probe reads the journal's real storage area"
+		},
+		{
+			"dir": "monorepo-restructure",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S5",
+			"date": "2026-06-30",
+			"prs": [
+				186
+			],
+			"outcomeFile": "implementations-plan/monorepo-restructure/plan.md",
+			"hook": "FLAT layout** (deep; 3 parallel plans [main+codex+opus-1M] + double hostile audit + final codex → all `conditional approve`; 10 findings folded + a structural completeness-grep gate) — FLAT `apps/` + `packages/` + `contracts/bridge/{aztec,evm}` move in ONE atomic history-preserving `git mv` PR (names stay `@nulo/*`; Bun resolves by name → no import changes). Central risk: a silent CI-gate filter gap (the just-rebuilt graph-derived dorny gates); defended by the `behavior-gating.test.ts` guard + literal workflow-grep + forced e2e labels + confirmed-fired `Decide` logs + a repo-wide moved-path completeness grep (G9). The audit rounds found 10 couplings the briefing missed (incl. the B1 `setForceLocal` required-gate hole, F5 Cloudflare dashboard build-roots [external], the F1 silent ABI-pin skip, 8 `bridge-core/scripts` readers). Release validated via a rehearsal cut in `nulo-release-rehearsal`. Impl branch `refactor/monorepo-layout` → **✅ MERGED via PR #186 (2026-06-30, squash `8e919f6`, plain auto-merge, no --admin; folded dev #187); CF dashboard build-roots flip pending (F5, user-owned)**"
+		},
+		{
+			"dir": "network-e2e-required",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S7",
+			"date": "2026-09-05",
+			"prs": [
+				97,
+				98,
+				115,
+				116,
+				117,
+				549
+			],
+			"outcomeFile": "implementations-plan/network-e2e-required/plan.md",
+			"hook": "Network e2e green on every PR + flip required, fixing roots: de-retry the masked suite (~8 retry:1/2 + 1 test.skip), measure-then-fix F1 authwits page, post-send authwit trust point (pending+reconcile, cap pre-send), boot-failure sentinel (exit 86), widen paths-filter; supersedes the proverless-e2e-{fix,diagnosis} follow-ups"
+		},
+		{
+			"dir": "network-e2e-unquarantine",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #67, #72",
+			"date": "2026-06-02",
+			"prs": [
+				67,
+				72
+			],
+			"outcomeFile": "implementations-plan/network-e2e-unquarantine/plan.md",
+			"hook": "Un-quarantine + unskip network-e2e tests"
+		},
+		{
+			"dir": "network-followups",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #46, #61, #67, #72",
+			"date": "2026-06-02",
+			"prs": [
+				46,
+				61,
+				67,
+				72
+			],
+			"outcomeFile": "implementations-plan/network-followups/plan.md",
+			"hook": "Network E2E Follow-ups — Consolidated Plan (v1)"
+		},
+		{
+			"dir": "network-playground-testing",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/network-playground-testing/plan.md",
+			"hook": "Plan v3 — Network E2E via local playground"
+		},
+		{
+			"dir": "network-test-triage",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/network-test-triage/plan.md",
+			"hook": "Network test triage — RECONCILED plan (post-audit)"
+		},
+		{
+			"dir": "nightly-release",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S7",
+			"date": "2026-08-21",
+			"prs": [
+				434
+			],
+			"outcomeFile": "implementations-plan/nightly-release/plan.md",
+			"hook": "scheduled nightly prereleases from dev (`v<ver>-nightly.<YYDDD>` tags, hard all-suites gate, quiet-day skip); first `schedule:` workflow in the repo"
+		},
+		{
+			"dir": "on-camera-landing",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #558",
+			"date": "2026-09-06",
+			"prs": [
+				558
+			],
+			"outcomeFile": "implementations-plan/on-camera-landing/plan.md",
+			"hook": "PR #558 open — rebuild `apps/landing` as the approved \"On Camera\" feed page: character-rendered CCTV hero, plates for every readable element, plain-language copy about the user's control, `@nulo/design/base.css` tokens, pure renderer with unit tests; single PR to dev"
+		},
+		{
+			"dir": "onboarding-extraction",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #8",
+			"date": "2026-05-20",
+			"prs": [
+				8
+			],
+			"outcomeFile": "implementations-plan/onboarding-extraction/plan.md",
+			"hook": "Onboarding-tab Follow-up — Extraction Plan v2"
+		},
+		{
+			"dir": "onboarding-fees-history-arc",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #74",
+			"date": "2026-06-05",
+			"prs": [
+				74
+			],
+			"outcomeFile": "implementations-plan/onboarding-fees-history-arc/plan.md",
+			"hook": "Onboarding + Fees + History arc — plan v2"
+		},
+		{
+			"dir": "onboarding-tab",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #7",
+			"date": "2026-05-20",
+			"prs": [
+				7
+			],
+			"outcomeFile": "implementations-plan/onboarding-tab/plan.md",
+			"hook": "Onboarding HTML Page — Implementation Plan v2"
+		},
+		{
+			"dir": "onboarding-width-unification",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #40",
+			"date": "2026-05-21",
+			"prs": [
+				40
+			],
+			"outcomeFile": "implementations-plan/onboarding-width-unification/plan.md",
+			"hook": "Onboarding width unification"
+		},
+		{
+			"dir": "operator-gates",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #524, #525",
+			"date": "2026-09-02",
+			"prs": [
+				524,
+				525
+			],
+			"outcomeFile": "implementations-plan/operator-gates/plan.md",
+			"hook": "bridge-core live-intent verify/promote as named gates over a default-deny pin harness (41 cases), test-soak summary validators — 41 → 35"
+		},
+		{
+			"dir": "origin-guard-truth",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #422",
+			"date": "2026-08-19",
+			"prs": [
+				422
+			],
+			"outcomeFile": "implementations-plan/origin-guard-truth/plan.md",
+			"hook": "the pin FALSIFIED the recon: content-script matches do NOT grant tabs-API URL visibility → the onUpdated origin guard is dead for ordinary origins (belt-and-suspenders regardless; boundary = realm teardown, not sessionId secrecy); two-sided visibility pin + blind-test fix; `\"tabs\"` permission recommendation OWNER-GATED, not shipped; getTokenInterface deleted from the RPC surface (owner-authorized)"
+		},
+		{
+			"dir": "owned-client-teardown",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #613, #618",
+			"date": "2026-09-17",
+			"prs": [
+				613,
+				618
+			],
+			"outcomeFile": "implementations-plan/owned-client-teardown/plan.md",
+			"hook": "codex r1, Opus, fresh codex, Fable, codex r3 — all conditional approves folded in; 33-decision ledger, codex closure check approve; owner answered A1–A5: follow-ups / yes / fold in / accept / none) — every popup/onboarding/offscreen service client builds a private `LoggerServiceClient` whose port nothing closes, so page mounts, profile switches and backup imports leak one logger port per client for the life of the document; design (both audits): one borrowed logger per document via `documentLogger(context)` with the class unexported, a red-then-green port-count test, and a CI-mirroring local network run; Ask A3 folds in three outer account-client leaks; one PR"
+		},
+		{
+			"dir": "parallel-e2e-isolation",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/parallel-e2e-isolation/plan.md",
+			"hook": "Parallel-Safe E2E — Per-Agent Isolation (v2, post-audits)"
+		},
+		{
+			"dir": "passkey-display-name",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #138",
+			"date": "2026-06-22",
+			"prs": [
+				138
+			],
+			"outcomeFile": "implementations-plan/passkey-display-name/plan.md",
+			"hook": "brand the iCloud Keychain / password-manager label of NEW passkeys from opaque `profile-<id>` to `nulo-{name}-{id}`: pure sanitizing `passkey-label.ts` threaded through both create paths (incl. the PATH B `acquireRecovery→createForNewProfile→createKey` chain codex caught) into the one WebAuthn `buildCreateOptions`; cosmetic-only (no key/address change), extension-only (faucet has no passkeys); codex post-impl `no high/critical`; manual iCloud smoke confirmed"
+		},
+		{
+			"dir": "passkey-e2e",
+			"class": "closed",
+			"status": "relocated — its one file now lives in apps/extension/tests/e2e/",
+			"followUps": [],
+			"evidence": "S2",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": null,
+			"hook": "passkey-e2e"
+		},
+		{
+			"dir": "passkey-in-page-modal",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/passkey-in-page-modal/plan.md",
+			"hook": "Passkey in-page modal — implementation plan (post-codex revision)"
+		},
+		{
+			"dir": "passkey-modal-export-import",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/passkey-modal-export-import/plan.md",
+			"hook": "Passkey Modal Migration — Export + Import Backup Flows (v3, post-audit + user steer)"
+		},
+		{
+			"dir": "paths-filter-negation-fix",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #181, #185",
+			"date": "2026-06-29",
+			"prs": [
+				181,
+				185
+			],
+			"outcomeFile": "implementations-plan/paths-filter-negation-fix/plan.md",
+			"hook": "whole-repo CI gating derived from the dependency graph. Root cause: hand-curated dorny paths-filters drifted — OVER-triggering via the `!`-negation footgun (a bare `!path` under default `predicate-quantifier: some` matches the COMPLEMENT → filter ≈ `**`, fires every PR) AND UNDER-gating two real surfaces: network e2e never ran on `wallet-core`/`wallet-crypto`/`extension-messaging` changes; faucet build never rebuilt on `bridge-core`/`wallet-crypto`. Fix: derive each gate from its target's transitive `@nulo/*` graph — whole-package (`packages/<target>/**`) for built targets (extension/faucet/playground; can't miss a build input), `src/**`+`package.json` for dep libs; ZERO `!` negations repo-wide; + `patches/**` + per-suite harness/workflow files. Anti-rot guard `scripts/ci-cd/behavior-gating.test.ts` (Bun.YAML two-level parse) recomputes each target's graph from package.json + fails CI on drift or a re-added `!`, **wired via `test:ci-gating` in `_unit-tests.yml`** (the independent reviewer caught it would otherwise never run on a PR). Accepted: src-nested `*.test.ts`/`*.stories.ts` edits over-trigger the e2e suites (safe direction — errs toward running). Whole-package convergence ended a 5-round input-completeness whack-a-mole."
+		},
+		{
+			"dir": "phase-2-followup-affordances-v4",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/phase-2-followup-affordances-v4/plan.md",
+			"hook": "Phase 2 follow-up v4 — drop retry, persist amount, keep terminal forever, fix dupe + clash"
+		},
+		{
+			"dir": "phase-2-followup-card-affordances",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/phase-2-followup-card-affordances/plan.md",
+			"hook": "Phase 2 follow-up — card affordances: icons + Cancel + Retry"
+		},
+		{
+			"dir": "phase-2-followup-feesettings",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/phase-2-followup-feesettings/plan.md",
+			"hook": "Phase 2 follow-up: aztec_sendTx feeSettings undefined crash"
+		},
+		{
+			"dir": "phase-2-followup-terminal-cards",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/phase-2-followup-terminal-cards/plan.md",
+			"hook": "Phase 2 follow-up: journal terminal-state cards + log cleanup"
+		},
+		{
+			"dir": "phase-2-plus",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/phase-2-plus/plan.md",
+			"hook": "Phase 2+ — durable-jobs follow-on (plan v4, implementation target)"
+		},
+		{
+			"dir": "phase-2",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": null,
+			"hook": "phase-2"
+		},
+		{
+			"dir": "plans-scaffolding",
+			"class": "active",
+			"status": "ACTIVE",
+			"followUps": [],
+			"evidence": "live plan",
+			"date": "2026-09-25",
+			"prs": [
+				696
+			],
+			"outcomeFile": "implementations-plan/plans-scaffolding/plan.md",
+			"hook": "bring `implementations-plan/` to the scaffolding standard: transcripts and drafts untracked behind hygiene files, closed plans archived with Outcome blocks, a curated `lessons.md` and `follow-ups.md`, an active-only index, and a CI gate that keeps it that way; five stacked PRs (A0, A, J, C, D)"
+		},
+		{
+			"dir": "playwright-migration",
+			"class": "closed",
+			"status": "abandoned — Puppeteer retained",
+			"followUps": [],
+			"evidence": "S2",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/playwright-migration/plan.md",
+			"hook": "Puppeteer → Playwright migration plan (consolidated, post-Codex review)"
+		},
+		{
+			"dir": "popup-enter-handler-unification",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #423",
+			"date": "2026-08-19",
+			"prs": [
+				423
+			],
+			"outcomeFile": "implementations-plan/popup-enter-handler-unification/plan.md",
+			"hook": "the last 3 any-Enter popups (endpoint/profile/sender) unified onto usePopupEntity/isPopupSubmitKey; 22 pins incl. async-window + a new (BUG PIN): EditProfile's Enter submits the unchanged name pre-edit (isStartedEditing gates only the button) — tracked for a separate fix; authwits popups stay excluded"
+		},
+		{
+			"dir": "popup-entity-consolidation",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #432",
+			"date": "2026-08-20",
+			"prs": [
+				432
+			],
+			"outcomeFile": "implementations-plan/popup-entity-consolidation/plan.md",
+			"hook": "usePopupEntity is the one self-cleaning Enter lifecycle (onScopeDispose + Vue-channel async handlers + submitWaitsForShow with rejection-keeps-closed); 4 hand-rolled watchers migrated timing-preserved; guaranteed afterEach nets in 8 suites + the unmount canary; CLAUDE.md C1 carve-out (option a); named exceptions NewToken/authwits"
+		},
+		{
+			"dir": "popup-escape-closes",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #675, #678",
+			"date": "2026-09-23",
+			"prs": [
+				675,
+				678
+			],
+			"outcomeFile": "implementations-plan/popup-escape-closes/plan.md",
+			"hook": "merged to dev 2026-09-23 (#675, `5b447f45`) on the owner's authorisation, after the owner's manual smoke passed in Chrome and Firefox** (light; rev 3 approved 2026-09-23; plan audit conditional approve ×2 folded; post-impl loop conditional approve → approve in 2 rounds) — follow-up of send-publish-ledger: every registry popup closes on Escape the way it closes on the outside tap (the top popup only, focus back to its opener); `Popup.vue`'s `closeOnEscape` default flips to true, the Send sheet drops its opt-in, the shell captures the opener as the trap's return target and an opt-out holds the trap; a smoke e2e proves two Escapes on the accounts → new_account stack and a network e2e the menu-inside-a-popup layering; no exclusions (owner, 2026-09-22); the owner's manual smoke found a menu letting Escape close the whole toolbar popup (dev too), fixed in `DropdownRoot`; follow-ups in popup-escape-followups (below)"
+		},
+		{
+			"dir": "popup-escape-followups",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #678, #681",
+			"date": "2026-09-23",
+			"prs": [
+				678,
+				681
+			],
+			"outcomeFile": "implementations-plan/popup-escape-followups/plan.md",
+			"hook": "merged to dev 2026-09-23 (#678, `f8bf0aa6`)** (light; owner-scoped: one PR and a codex loop, no plan audit; the loop converged in 3 rounds, a fresh codex PR review in 2) — the three follow-ups popup-escape-closes left: the ownership test waits for a spawned child's marker (Bun's spawn returns mid-execve, with an empty environ) and teardown needs two empty scans; every extension PR builds Firefox, so the preview comment links both targets; the passkey dialog marks its Escape handled, so cancelling no longer closes the toolbar popup; teardown deletes a profile only once its stop loop has seen the launch gone"
+		},
+		{
+			"dir": "popup-handshake",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/popup-handshake/plan.md",
+			"hook": "Popup-Handshake Fast-Path — Design + Implementation Plan"
+		},
+		{
+			"dir": "popup-shell-state",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #514, #515",
+			"date": "2026-09-01",
+			"prs": [
+				514,
+				515
+			],
+			"outcomeFile": "implementations-plan/popup-shell-state/plan.md",
+			"hook": "closes the round at 49) — contact import/export, the app store's setup split into factories, the recent-activity + activity-row builders, the unlock handler, the new-network popup, the route guard; then Dropdown / design Input / file picking — 62 → 49"
+		},
+		{
+			"dir": "popup-submit-reentrancy",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #430",
+			"date": "2026-08-19",
+			"prs": [
+				430
+			],
+			"outcomeFile": "implementations-plan/popup-submit-reentrancy/plan.md",
+			"hook": "the invariant \"every async submit handler self-checks a full-lifetime latch, every firing control disables on it\" across 12 popups + the authwit pair + the capabilities window; 3 latch-lifetime repairs, NewAccount's missing latch + dupe-account race closed, Option B saving-state visual; RED-first pins throughout"
+		},
+		{
+			"dir": "port-client-connect",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #618, #622",
+			"date": "2026-09-17",
+			"prs": [
+				618,
+				622
+			],
+			"outcomeFile": "implementations-plan/port-client-connect/plan.md",
+			"hook": "`ServiceClient.connect()` retries a synchronous `chrome.runtime.connect` throw every 1 s forever although such a throw is permanent (context invalidated), and three ad-hoc port fakes disagree on what a port does; design: a synchronous open failure is terminal (the request rejects with `RpcConnectError`, `connect()` still never rejects, the `Connecting` state and the 300 ms poll go), and one `PortRegistry` in `@nulo/extension-messaging/testing` behind the existing `capturePortMessage`/`emitPortMessage`/`emitPortDisconnect` names; one PR"
+		},
+		{
+			"dir": "pr-8c-mixed-and-fee",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": null,
+			"hook": "pr-8c-mixed-and-fee"
+		},
+		{
+			"dir": "pr-8c-rehydration",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/pr-8c-rehydration/plan.md",
+			"hook": "PR 8c re-implementation — proper class rehydration"
+		},
+		{
+			"dir": "pre-a11-ux-cleanup",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/pre-a11-ux-cleanup/plan.md",
+			"hook": "Pre-A11 UX cleanup arc — plan v4"
+		},
+		{
+			"dir": "prerelease-rollout",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #36",
+			"date": "2026-05-21",
+			"prs": [
+				36
+			],
+			"outcomeFile": "implementations-plan/prerelease-rollout/plan.md",
+			"hook": "Prerelease rollout — plan v2"
+		},
+		{
+			"dir": "presto-migration",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #600, #601",
+			"date": "2026-09-15",
+			"prs": [
+				600,
+				601
+			],
+			"outcomeFile": "implementations-plan/presto-migration/plan.md",
+			"hook": "merged to dev 2026-09-15 as stack #602 (#600 arc 1 `f3548826`, #601 arc 2 `976e189e`); follow-ups: min-age excludes removal after 2026-09-16T14:49Z, Ask A3 (Presto repo), A6 Firefox, logger-port teardown (mid; UX approved on a design canvas; codex r1 reject + fable conditional approve → v2; three fresh-context codex passes → v3, v4, and two acceptance items surfaced as owner Asks A8/A9; 24-decision ledger) — Aztec Accelerator → Presto: SDK + CI headless-prover swap, a correlated prove-phase event with source-derived backend evidence so the activity card says where each proof ran and Settings can show a declined approval, onboarding rebuilt on Presto's states (LNA denial, encrypted-connection failure) with the re-tokened `<presto-banner>` card, Settings → Proving; two stacked PRs"
+		},
+		{
+			"dir": "primitive-adoption-closure",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #408",
+			"date": "2026-08-18",
+			"prs": [
+				408
+			],
+			"outcomeFile": "implementations-plan/primitive-adoption-closure/plan.md",
+			"hook": "F-Q05 AlarmDispatcher ×3 + F-Q07 (3 rejections + the missed token-balance adoption) + sweep (3 id-allocator adoptions; popup Enter-handlers flagged as an owner follow-up)"
+		},
+		{
+			"dir": "private-fuel-fee-fix",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #122",
+			"date": "2026-06-21",
+			"prs": [
+				122
+			],
+			"outcomeFile": "implementations-plan/private-fuel-fee-fix/plan.md",
+			"hook": "child of fuel-portal-v5-fix. After the portal fix, the PRIVATE fueled claim reverted `amount >= max_gas_cost` in Wonderland's PrivateFPC. 3 codex agents (019ee66b) proved NOT a Wonderland/5.0 bug (FPC matches 5.0 getFeeLimit). Root cause: the wallet's embedded-FPC maxFeesPerGas drifted (post-sim refetch×multiplier inflated the FPC ceiling). Fix: (P1) finalizeGasLimits pins the pre-sim cap for embedded payments (no refetch); (P2) fuel-testnet gained a true private-FPC variant (register-only, salt 0 — no deploy per 019ee697) + reprice-per-retry + 1.5× pad — which CAUGHT the inclusion-reject codex predicted (static cap fell below risen base fee) and fixed it; (P3) calibrated minFuelFj from the real getFeeLimit (~2.5 FJ ceiling → 4× = 10.17 FJ, grounded vs the V4-era 11 FJ guess). PROVEN live: 3 private-FPC self-paying claims SETTLED on V5. Codex plan 019ee67b (reject→conditional-approve, headroom-in-committed-cap) + post-impl 019ee6e0 (no high/critical; 3 LOW hardened: component-wise predicted fees, narrowed fallback, 4× margin). Settlement gate reframed (live proof > sandbox e2e; bridge-on-sandbox e2e = follow-up). Validated the user's \"multiply for leeway\" instinct. NOTE: commits local-only — push blocked on SSH key."
+		},
+		{
+			"dir": "private-fuel",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S11",
+			"date": "2026-06-15",
+			"prs": [
+				89
+			],
+			"outcomeFile": "implementations-plan/private-fuel/plan.md",
+			"hook": "private Fee Juice via Wonderland PrivateFPC; gas-follows-token, B-presets, fee-method matrix"
+		},
+		{
+			"dir": "profile-fenced-execution",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S7",
+			"date": "2026-09-17",
+			"prs": [
+				610,
+				611
+			],
+			"outcomeFile": "implementations-plan/profile-fenced-execution/plan.md",
+			"hook": "fable + codex approved after 6 rounds; owner D8–D10: design, UI copy with a dialog pre-title override, A1 = `min(TTL, 10 min)`; seeds final; phases 0–7 ✓; both arc reviews and the cross-arc codex pass converged; in review as two stacked PRs into dev, merged by the owner as a unit) — bind every send to the session that authorized it: fence captured on both dApp entries, threaded to every profile read, asserted before the mutex, the build and the broadcast, per-session serial in the fence, synchronous check in the broadcast tick, typed `SessionEndedError` → `failed/session_ended`; a lock or switch cancels in-flight sends (SW sweep), the lock button warns first, inactivity auto-lock defers while approved sends run (capped). Prerequisite for the parked approval-scope-follow (D6); two stacked PRs"
+		},
+		{
+			"dir": "profile-flow-dedup-q2",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S7",
+			"date": "2026-06-18",
+			"prs": [
+				100
+			],
+			"outcomeFile": "implementations-plan/profile-flow-dedup-q2/plan.md",
+			"hook": "post-impl codex audit: conditional approve (0 high/critical; 2 low test-coverage gaps addressed). Q2 quality arc: extract useProfileImportFlow/useProfileCreateFlow from the duplicated popup/onboarding profile import+create flows + relocate PasskeyCeremonyDialog/runPasskeyCeremony to neutral paths; behavior-preserving except 2 ratified quirk fixes (onboarding double-bootstrap, popup-create Enter guard)"
+		},
+		{
+			"dir": "profile-name-parity",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #37, #39",
+			"date": "2026-05-21",
+			"prs": [
+				37,
+				39
+			],
+			"outcomeFile": "implementations-plan/profile-name-parity/plan.md",
+			"hook": "Profile-name Parity — Plan v2"
+		},
+		{
+			"dir": "profile-service-dedup",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #492",
+			"date": "2026-08-31",
+			"prs": [
+				492
+			],
+			"outcomeFile": "implementations-plan/profile-service-dedup/plan.md",
+			"hook": "arc 1 of the complexity burn-down: collapsed profile/service.ts's 13 clone families into …HoldingLock helpers + phase splits, burned its 11 baseline directives (230 → 219), behavior-preserving with equivalence pins"
+		},
+		{
+			"dir": "proverless-network-stabilization",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [
+				"proverless-remaining-phases"
+			],
+			"evidence": "S6",
+			"date": "2026-06-16",
+			"prs": [
+				94
+			],
+			"outcomeFile": "implementations-plan/proverless-network-stabilization/plan.md",
+			"hook": "get network e2e reliably green on every PR (zero flakiness) then make it required; root-cause + fix the proverless timing-races (#86) + #85's additions; journal-truth assertions, real-runner soak gate, broadened CI filter, retry:1 live"
+		},
+		{
+			"dir": "pxe-network-boundary",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #505",
+			"date": "2026-09-01",
+			"prs": [
+				505
+			],
+			"outcomeFile": "implementations-plan/pxe-network-boundary/plan.md",
+			"hook": "six PXE/network-boundary functions staged under budget (117 → 111); 25 audit-condition pins incl. fetch.ts's first coverage"
+		},
+		{
+			"dir": "pxe-timer-throttling",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #659, #661",
+			"date": "2026-09-21",
+			"prs": [
+				659,
+				661
+			],
+			"outcomeFile": "implementations-plan/pxe-timer-throttling/plan.md",
+			"hook": "merged to dev 2026-09-21 (#659, `2540271a`); the restart mechanism + background-kill port continue in firefox-background-kill** (light; follow-up of firefox-first-class-spike) — Firefox clamps the minimized PXE window's timers to 1 s and the upstream JSON-RPC client batches on `setTimeout(0)`, so a dApp `sendTx` takes 18–28 s; hosting the same page as a frame of the background page (`visible`, unthrottled) brings it to 1.4–5.7 s with no timer shim; the three masking prefs go; spike + confidence round in `spike/`"
+		},
+		{
+			"dir": "q3-transport-unification",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S3",
+			"date": "2026-06-21",
+			"prs": [
+				121
+			],
+			"outcomeFile": "implementations-plan/q3-transport-unification/plan.md",
+			"hook": "all 6 phases ✓, post-impl audit resolved; merged dev (aztec 5.0); PR #121 awaiting final-network + review** (deep; 3 plans + double audit [both reject R1] + final codex pass [reject v2 → approve v3] + post-impl codex audit [changes-required → 5 findings fixed]) — Q3 quality arc: de-forked the two parallel RPC transport stacks in @nulo/extension-messaging (Port background vs sendMessage offscreen) into one shared `BaseServiceClient` correlator + `BaseService` core via template-method hooks; offscreen errors flipped string → typed WalletError with stable leak-free `toWalletResponseError` Rpc* cases; callable-any-method closed by an exhaustiveness-checked `rpcMethods` registry across 21 services + PxeService; + onDisconnect→reconnect unit coverage. Per-phase network green (jobs confirmed run, not skipped); exactly-once unit-proven, lifecycle real-Chrome-e2e. Codex: D10 guard design (option A) + post-impl audit (2 HIGH/2 MED/1 LOW all fixed). See `lessons/wrap-up.md`"
+		},
+		{
+			"dir": "qa-feedback-batch-1",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #48",
+			"date": "2026-05-22",
+			"prs": [
+				48
+			],
+			"outcomeFile": "implementations-plan/qa-feedback-batch-1/plan.md",
+			"hook": "QA feedback batch #1 — faucet + extension polish"
+		},
+		{
+			"dir": "quality-arc-completion",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #139, #148",
+			"date": "2026-06-22",
+			"prs": [
+				139,
+				148
+			],
+			"outcomeFile": "implementations-plan/quality-arc-completion/plan.md",
+			"hook": "merged to dev via #148 (2026-06-22)** (meta-orchestration) — batch 1 of the `/harden quality` arc (run 2026-06-11-ultra-50b45d): 8 contained findings (Q12 e2e-fixtures · Q15 purge-cascade · Q17 ContractResolver · Q6 activity-feed · Q8 popup-forms · Q13 PXE-subset · Q9 service-readiness · Q18 execution-tuples), each re-verified→blueprinted→implemented inline→units+smoke+FULL network-e2e (jobs-run)→squash-merged. Q8 carried a codex-found display-reset regression (fixed `c41a2928`). **4 post-integration audits across 2 model families (3 codex + 1 Claude) converged on that single bug**; + a token-balance purge-cascade test (#139). Capstone full-network sweep GREEN."
+		},
+		{
+			"dir": "quality-arc-deferred",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S5",
+			"date": "2026-06-29",
+			"prs": [
+				160
+			],
+			"outcomeFile": "implementations-plan/quality-arc-deferred/plan.md",
+			"hook": "the 6 DEFERRED architectural/authz/concurrency findings: Q4 (ExecutionService hotspot — likely moot post-#83) · Q5 (lifecycle tail — likely moot post-#83) · Q11 (WalletSdkDispatcher) · Q10 (composition-root migration) · Q23 (claim/cancel temporal coupling — concurrency-critical) · Q19 (active-profile guards — authz-critical, LAST). Methodology upgraded: re-verify-first → `/blueprint deep` → **dual-model decisions (codex AND claude)** → inline impl preserving invariants verbatim → `/code-review max --fix` + codex post-impl (+ fresh-claude hostile audit on Q19/Q23) → units+smoke+FULL network-e2e (jobs-run) → squash-merge. Q19/Q23 dual-model DISAGREEMENT on a critical call → surface to user."
+		},
+		{
+			"dir": "quality-dedup-adoption",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #395",
+			"date": "2026-08-17",
+			"prs": [
+				395
+			],
+			"outcomeFile": "implementations-plan/quality-dedup-adoption/plan.md",
+			"hook": "Q-07 restoreRows/id + isPopupSubmitKey · Q-08 KeyedLock (opt-out watchdog) · Q-09 patchSession · Q-10 SingleShotTtlCache · Q-11 DappApprovalFooter; documented deferrals per finding"
+		},
+		{
+			"dir": "quality-dedup-quick-wins",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #105, #108, #111, #112, #113, #114, #115, #118",
+			"date": "2026-06-19",
+			"prs": [
+				105,
+				108,
+				111,
+				112,
+				113,
+				114,
+				115,
+				118
+			],
+			"outcomeFile": "implementations-plan/quality-dedup-quick-wins/plan.md",
+			"hook": "all 5 arcs merged to dev** (mid; dual audit re-scoped 7→5 against current dev; R3=normalize) — Q16 dead-code (#105) · Q22 serializer (#108) · Q20 CAIP (#111) · Q14 restore-loop+R3 (#112) · Q7 config-sprawl+e2e:all-drift-fix (#113); one PR per arc, auto-merge --admin on verified-green. Network-gated arcs (Q22,Q7) initially red on a base-staleness bug — branches were synced to dev@#114, BEFORE #115's network-e2e de-flake; re-syncing onto #115 turned the suite green (the failing tests — authwit-lifecycle/incoming-transfers — were exactly what #115 fixed). Follow-ups: Q21 dropped (mooted by #91); **Q19 → own plan** (90 getActiveProfile sites, ~37 deliberate non-throwers, authz-sensitive)"
+		},
+		{
+			"dir": "quality-first-extractions",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #396",
+			"date": "2026-08-17",
+			"prs": [
+				396
+			],
+			"outcomeFile": "implementations-plan/quality-first-extractions/plan.md",
+			"hook": "Q-01 PxeLifecycleCoordinator (epoch-fence dedup, scoped) + Q-02 validateAndMigrateBackup (restore stage 1, staged); Q-04 codex-agreed deferral; god-service decomposition = owner follow-up"
+		},
+		{
+			"dir": "quality-quick-wins",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #394",
+			"date": "2026-08-17",
+			"prs": [
+				394
+			],
+			"outcomeFile": "implementations-plan/quality-quick-wins/plan.md",
+			"hook": "Q-03 EventHandler onError + Q-06 messaging/bridge cycle + Q-12 sanitizer parity test + Q-05 thin AlarmDispatcher (narrowed per verified.md)"
+		},
+		{
+			"dir": "refresh-balances-disconnect",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #449",
+			"date": "2026-08-24",
+			"prs": [
+				449
+			],
+			"outcomeFile": "implementations-plan/refresh-balances-disconnect/plan.md",
+			"hook": "balance warm-up disconnected its client with refresh RPCs still in flight (cancelling them) and leaked the connection on a thrown read; allSettled-before-disconnect in try/finally + 3 red-first pins"
+		},
+		{
+			"dir": "registry-stealth-notes",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/registry-stealth-notes/plan.md",
+			"hook": "Three-pronged refactor — plan v3 (final pre-execution)"
+		},
+		{
+			"dir": "reimport-pxe-fence",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #372",
+			"date": "2026-08-14",
+			"prs": [
+				372
+			],
+			"outcomeFile": null,
+			"hook": "reimport-pxe-fence"
+		},
+		{
+			"dir": "release-dev-to-main",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S7",
+			"date": "2026-06-22",
+			"prs": [
+				142
+			],
+			"outcomeFile": "implementations-plan/release-dev-to-main/plan.md",
+			"hook": "executing (agent-driven)** — coordinated dev→main stable release of all 3 surfaces (extension GitHub Release + faucet auto-deploy + landing) via existing automation as-is. Decisions: **v0.23.0** (`Release-As`, NOT the 1.0.0 release-please defaults to), faucet contracts NOT redeployed (drips dead until follow-up — A5), accept the cross-fork window (A6), re-run on e2e flake (A7), agent drives every step. 3 independent runbooks converged; 2 conditional-approves + a final fresh-codex **reject** (5 findings: landing-wiring, unwired A6/A7, A1↔ledger contradiction, loose gates, DAG error) — all folded. v4 manual unstick accepted; post-step = prerelease-manifest re-baseline (stale 0.20.2 → 0.23.0)"
+		},
+		{
+			"dir": "release-dx-hardening",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #149",
+			"date": "2026-06-24",
+			"prs": [
+				149
+			],
+			"outcomeFile": "implementations-plan/release-dx-hardening/plan.md",
+			"hook": "see [audit-codex-postimpl.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/release-dx-hardening/audit-codex-postimpl.md)] + /harden token least-privilege). Phase 4 (throwaway test repo) skipped per the fallback → the staged real-release rollout is the rehearsal. **Post-merge action: flip `AUTO_UNSTICK_ENABLED=on` after the 1st flag-off release, then add `verify-live` to the status aggregator.** — made dev→main near one-click after the painful v0.23.0 cut. 8 phases (harness → cheap-config → faucet chain-identity → test-repo → deploys+live-smoke → auto main→dev sync → in-run auto-unstick → docs). Scope: `bump-minor-pre-major:true` (no more accidental 1.0.0), commitlint title-lint on promotes, **drop the faucet `VITE_CHAIN_*` env path** (`.env.example:32` shipped the stale `4127419662` that broke prod), fail-closed post-deploy verify against an emitted `build.json`, auto-sync (open-PR-let-GitHub-conflict), and the v4 auto-unstick **in-run + behind `vars.AUTO_UNSTICK_ENABLED`** (codex's race-avoiding design + Plan-sub's kill-switch). Validated via unit-tested `scripts/release/*.ts` + `dry_run` + a throwaway test repo; closing gate = next real release runs push-button. NOT marketplace. Both independent audits conditional-approve (conditions folded); `/harden security` queued post-impl"
+		},
+		{
+			"dir": "release-pipeline-hardening",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #256",
+			"date": "2026-07-03",
+			"prs": [
+				256
+			],
+			"outcomeFile": "implementations-plan/release-pipeline-hardening/plan.md",
+			"hook": "fix the stale-`nulo.sh` root cause: `refresh-landing` + `deploy-faucet` (`release.yml:348/377`) lack the `always()` guard the upstream jobs have, so a skipped ancestor on the `workflow_dispatch` path silently skips them → the landing never redeploys after a manual-unstick publish. + a break-glass `workflow_dispatch` `refresh-landing.yml` (one-command hook curl) + flip `AUTO_UNSTICK_ENABLED` ON (var-only, code-default OFF). codex **conditional approve** — dropped a `verify-live` \"strengthening\" that would've *hidden* the skip-regression class; re-labeled the live-repro as a production republish; added `!cancelled()`."
+		},
+		{
+			"dir": "release-please-rollout",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #12, #18, #34",
+			"date": "2026-05-21",
+			"prs": [
+				12,
+				18,
+				34
+			],
+			"outcomeFile": "implementations-plan/release-please-rollout/plan.md",
+			"hook": "release-please rollout — plan v2.2"
+		},
+		{
+			"dir": "release-prerelease-fix",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #189, #221, #223, #224, #225, #226, #228",
+			"date": "2026-07-01",
+			"prs": [
+				189,
+				221,
+				223,
+				224,
+				225,
+				226,
+				228
+			],
+			"outcomeFile": "implementations-plan/release-prerelease-fix/plan.md",
+			"hook": "v0.24.0-rc.0 PUBLISHED** (prerelease Release + chrome/firefox zips + SHASUMS; CF deploys skipped) — all 3 phases, **zero --admin** on any dev merge (#221 rc.0+sync-flip · ruleset +merge · #223 commitlint-skip · #224 ancestry · #189 cut→tag→publish). Publish hit a stale-path failure (`--ref main` = main's pre-#186 `packages/extension` build vs the tag's `apps/extension`; re-fired `--ref dev`, runbook fixed). Follow-up: App-API-verified sync commit. — fix the release-please prerelease (rc) flow: it cut the WRONG version (`0.23.0`, not `0.24.0-rc.0`) + a genesis (186-commit) changelog because `v0.23.0`'s commit isn't in `dev`'s ancestry — the post-release main→dev sync was SQUASHED, dropping the release-commit link, so release-please genesis-scanned + a stale `Release-As: 0.23.0` pinned the version. Fix: `prerelease-type: rc→rc.0` + a history-preserving (merge, NOT squash) main→dev sync (one-time ancestry fix + flip the forward `sync-main-to-dev` squash→merge). Phase 1 in `nulo-release-rehearsal` proved rc.0→rc.1→stable end-to-end (v4 abort + manual unstick reproduced) AND **overturned the mechanism**: a squash-only ruleset HARD-blocks merge commits (not bypassable by `--admin` OR a bypass actor; only a direct push or allowing `merge` works) → chose **2a (allow squash+merge on dev)**. codex conditional-approve (5 findings folded) + caught a 3-commit-stale-checkout error (the #186 `apps/` restructure had landed; `extra-files` path is correct)"
+		},
+		{
+			"dir": "remediation-followups",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #398, #399, #416",
+			"date": "2026-08-18",
+			"prs": [
+				398,
+				399,
+				416
+			],
+			"outcomeFile": "implementations-plan/remediation-followups/plan.md",
+			"hook": "closure tables appended to both `audit/*/2026-08-16-extension-mid/remediation.md`; arc 9 + god-services recommendation at [arc9-recommendation.md](remediation-followups/arc9-recommendation.md) (OWNER-GATED, not started); the REJECTED list stands"
+		},
+		{
+			"dir": "required-check-mismatch",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S3",
+			"date": "2026-06-24",
+			"prs": [
+				169,
+				170,
+				171,
+				173,
+				176,
+				177
+			],
+			"outcomeFile": "implementations-plan/required-check-mismatch/plan.md",
+			"hook": "dev+main re-pointed to bare names; #171 merged with plain `gh pr merge` (no --admin), #172 deliberate-red correctly blocked, main #173 + flake re-run** (mid; codex + opus-Plan dual audit [both conditional-approve] + final fresh-context codex pass [**reject** → all 5 findings folded]) — **root cause of \"every PR needs `--admin`\"**: branch protection required `Quality / Status` ×3 but GitHub Actions produces bare `Status` ×4 (only `uses:` jobs get a `{workflow}/{job}` prefix; the `Quality /` form was a hand-typed phantom) → required gates hang `Expected` forever → orange → forced `--admin` repo-wide. Verified live on #169/#160/#137 (PROOF 1–5; no merge queue; main `strict:true`/dev `strict:false`). Fix: rename the 3 required aggregator jobs to unique bare names → re-point `required_status_checks.checks` (NOT deprecated `contexts`; app_id-pinned, read-modify-write preserving `strict`) union-first, **dev fully then promote→main then re-point main** (pre-rename main PRs would re-hang); positive AND negative acceptance on dev. Retracts the raw-merge-API \"clean path\" claim (admin-bypass); fixes the `--admin` docs to the two-gates truth (name-mismatch verified cause; `required_signatures` separate, author-only-squash scoped); Smoke stays required (stale \"advisory\" doc corrected)"
+		},
+		{
+			"dir": "restart-lock-truth",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #556",
+			"date": "2026-09-06",
+			"prs": [
+				556
+			],
+			"outcomeFile": "implementations-plan/restart-lock-truth/plan.md",
+			"hook": "an explicit lock always emits `onActiveProfileChanged` even over a restarted worker (`close()` reports whether it emitted, `lockActiveProfile` emits when it did not); a locked reconnect boot under an auth-required page locks the popup, fenced against the event path with capture-and-compare (never a bump); one post-stop liveness helper across seven e2e callers; the passkey canary asserts the automatic lock landing; new open-popup restart pin"
+		},
+		{
+			"dir": "restore-stage-2",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #413",
+			"date": "2026-08-18",
+			"prs": [
+				413
+			],
+			"outcomeFile": "implementations-plan/restore-stage-2/plan.md",
+			"hook": "F-Q02: stages C+D extracted separately, the `importedChainAddress` allow-set threaded explicitly; false-coverage hole in the chain-equality check closed; B+G (`createdNetworks`) recorded as the next stage"
+		},
+		{
+			"dir": "row-service-method-families",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #412",
+			"date": "2026-08-18",
+			"prs": [
+				412
+			],
+			"outcomeFile": "implementations-plan/row-service-method-families/plan.md",
+			"hook": "F-Q09: persistToken with discriminated metadata source; token 9-way REJECTED (`getTokenInterface` has zero production callers — owner ask: delete it); endpoint pipeline REJECTED; updateEndpoint + getTokenInterface pinned from zero coverage"
+		},
+		{
+			"dir": "runtime-edges",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #469",
+			"date": "2026-08-25",
+			"prs": [
+				469
+			],
+			"outcomeFile": "implementations-plan/runtime-edges/plan.md",
+			"hook": "codex plan gate ×5 all adopted (incl. the N-28 unhandled-rejection premise overturned: Promise.all handles all inputs, pin became settle-before-throw); max review ×5 incl. an empirically-proven DEAD envelope branch (executor failures flatten to strings pre-dispatcher); codex final-diff CHANGES ×3 → CHANGES ×2 → SIGN-OFF) — N-15 typed duplicate-init classification at send time, provenance-gated (initializesAccount threaded build→coordinator→wire `code` re-materialization→journal kind→honest UI copy; reuse caches carry the flag; blanket WalletError pass-through deliberately rejected with a negative pin); N-21 passkey window budget derived from the ceremony constant (2×PASSKEY_TIMEOUT + 60 s, consumer pin); N-28 ServiceCollection.start() settles each phase and throws AggregateError naming every failure with root causes folded into the message"
+		},
+		{
+			"dir": "runtime-start-single-flight",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #425",
+			"date": "2026-08-19",
+			"prs": [
+				425
+			],
+			"outcomeFile": "implementations-plan/runtime-start-single-flight/plan.md",
+			"hook": "start() is a failure-resetting single-flight memo; retry vetoed on migration-blocked (durable-budget protection), BB init (upstream latch), and the registration zone; RED/GREEN 10 pins; solo e2e green"
+		},
+		{
+			"dir": "security-audit-remediation",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #77",
+			"date": "2026-06-10",
+			"prs": [
+				77
+			],
+			"outcomeFile": "implementations-plan/security-audit-remediation/plan.md",
+			"hook": "Remediation Plan — security audit (2026-06-08)"
+		},
+		{
+			"dir": "self-pay-setup-fix",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #549, #557",
+			"date": "2026-09-06",
+			"prs": [
+				549,
+				557
+			],
+			"outcomeFile": "implementations-plan/self-pay-setup-fix/plan.md",
+			"hook": "the wallet-bridge dispatcher ran `simulateTx`/`profileTx` as the session's first account (PR #110 fixed `sendTx` only), so a two-account self-paid bridge claim classified as external and never ended setup; the fix plus a playground-driven network gate: `mint_to_private` (the hub claim's inner call) as each of two granted accounts, never-sent and deployed, under self-pay / PrivateFPC fuel / PrivateFPC credit with validation on, a negative control drawing the node's `Setup function not on allow list`, and a pre-fix reversal failing inside the token"
+		},
+		{
+			"dir": "send-amount-exact",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "closing index status",
+			"date": "2026-09-30",
+			"prs": [
+				725,
+				730
+			],
+			"outcomeFile": "implementations-plan/send-amount-exact/plan.md",
+			"hook": "the Send page sends a million or more, and a typed or Max amount stays exact once the field is left; the balance beside Max is cut at 8 places, never rounded up; a paste keeps only digits and the point; the field at rest and the review sheet show every digit, on #718's fit; the unit switch sits on the amount's baseline and Max leaves the amount at rest, as delegated; its open items are in follow-ups.md"
+		},
+		{
+			"dir": "send-fee-privacy-notice",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #631, #643, #644",
+			"date": "2026-09-21",
+			"prs": [
+				631,
+				643,
+				644
+			],
+			"outcomeFile": "implementations-plan/send-fee-privacy-notice/plan.md",
+			"hook": "on Send the fee source follows the transfer origin (private origin: Private Fee Juice → own Fee Juice → Sponsored; public origin: Fee Juice → Private → Sponsored), a private-origin send that pays from the account's own public Fee Juice shows one inline warning naming what leaks plus a \"Get private gas\" link, and nothing is shown when the payer already matches; the public fallback is defaulted only on a positively read zero after a forced mount read, otherwise the card holds; Send remembers its pick per account and origin under its own storage key; smoke + network e2e; one PR. Follow-up proposed: `send-publish-ledger`"
+		},
+		{
+			"dir": "send-publish-ledger",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #660, #670, #675",
+			"date": "2026-09-23",
+			"prs": [
+				660,
+				670,
+				675
+			],
+			"outcomeFile": "implementations-plan/send-publish-ledger/plan.md",
+			"hook": "round 2 option B + the fee-source tag) — a constant one-line strip above the Send button (You · To · Amount: hidden / public / fee payer) that opens a review sheet; the sheet is mandatory (\"Review send\") only when the origin is private and the account's own Fee Juice pays, every other send stays one tap; the fee card's warning row becomes a tag on \"Fee Source\" and its sentences move into the sheet; HIDDEN is claimed only for a protocol-derived payer; closes the off-screen-notice gap the notice plan accepted"
+		},
+		{
+			"dir": "send-states",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "closing index status",
+			"date": "2026-09-30",
+			"prs": [
+				728
+			],
+			"outcomeFile": "implementations-plan/send-states/plan.md",
+			"hook": "the two Send follow-ups #718 left, on `feat/send-states`: the fee card knows before the proof when a sponsor can't pay this fee (the kernel's payer, read once at 5 s), and Send's token card says when the tokens failed to load, with a Retry; its UI calls were delegated to a panel, and the merge waits for the owner; its open items are in follow-ups.md"
+		},
+		{
+			"dir": "service-fences",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #466",
+			"date": "2026-08-25",
+			"prs": [
+				466
+			],
+			"outcomeFile": "implementations-plan/service-fences/plan.md",
+			"hook": "codex plan REJECT ×5 (two capture-ordering flaws) then approve-with-changes; independent max review proved a hostile-null whole-import abort; codex final-diff CHANGES ×2 (e2e-gate-before-capture, null-unsafe collision precheck) → SIGN-OFF) — N-03 account creation captures the deletion fence BEFORE the secret await and asserts flush against the write; N-14 all nine slice-restore writers fence via restore-fence.ts entry-captured epochs (created-profile id threaded as a required RPC param for authwits/balances/txs with typed client overrides + fail-closed validation; per-site scripted revert probes); N-10 balance syncBatch captures a REQUIRED getGeneration and bails before both write dispatches"
+		},
+		{
+			"dir": "shell-identity-fences",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #463",
+			"date": "2026-08-25",
+			"prs": [
+				463
+			],
+			"outcomeFile": "implementations-plan/shell-identity-fences/plan.md",
+			"hook": "3-round gate with BOTH round-1 conservative adjudications OVERTURNED at the final fresh-context pass; independent max review 9 findings incl. an empirically-probed listener-killing TypeError; codex final-diff CHANGES→CHANGES→SIGN-OFF over 3 rounds) — N-05 network switch is an identity-fenced extracted handler (createRunFence generation fence, once-captured scope, per-await compound guard); N-08 bounded failure-joined unlock wait (awaitProfileActivation single watcher, typed timeout/bootstrap errors, seq-fenced shell outcome channel via runFencedBootstrap, immediate + post-persist drift checks); N-22 family-standard rename rejection toast; N-23 scope-triple activity containment (per-loader fences, collapse-to-empty key, executor-stamped TransferContent.networkId); N-09 owner-authorized aztecReset/sentinel removal (composable, core helpers, 4 call sites, build define, package field, e2e assertions; auto-import types clean-regenerated to zero references)"
+		},
+		{
+			"dir": "single-sim-estimates",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #351, #352, #353",
+			"date": "2026-08-11",
+			"prs": [
+				351,
+				352,
+				353
+			],
+			"outcomeFile": "implementations-plan/single-sim-estimates/plan.md",
+			"hook": "B1 live-testnet: 0.00% stub delta, both canaries mined; dApp Sponsored+fj 2→1, PrivateFPC 3→2, admission clamp, e2e arming fix, + the never-engaging stub-override bug found & fixed. Owner-pending: A2 fragmented-note gate deviation"
+		},
+		{
+			"dir": "stable-release-0.24.0",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #249, #255",
+			"date": "2026-07-10",
+			"prs": [
+				249,
+				255
+			],
+			"outcomeFile": "implementations-plan/stable-release-0.24.0/plan.md",
+			"hook": "the FIRST stable release on the rebuilt pipeline, shipped **zero `--admin`**: promote dev→main → cut **0.24.0** (aztec 5.0.0-rc.2 + new testnet from #248) → manual unstick (AUTO_UNSTICK OFF) → publish `--ref main` → prod deploy → manual self-signed sync back. **All 4 goal elements verified:** Release `isPrerelease:false` + chrome/firefox zips + SHASUMS; `nulo.sh` serves v0.24.0; `faucet.nulo.sh` on the new testnet (chainId 2793892258); `main→dev` synced (manifest `{\".\":\"0.24.0\"}`, next rc previews 0.24.1-rc.0). Live-proved: the manual-unstick flag-OFF path, the merge-not-squash self-signed sync, `--ref main` heal (#186 apps/ on main → no ENOENT). Gotchas → `lessons/`: network-e2e flake→re-run (never neutralized); empty-Release window reds every landing build until attach-assets; the landing needs a **manual CF-API prod deploy** — `refresh-landing` skips on `workflow_dispatch` by design (`phase-2.md`). codex **reject** → 5 findings folded incl. Phase 0 blockers (F1 single-source the `verify-live` chain-guard from `chain-constants.ts`; F2 delete the stale `release-please--branches--main`)."
+		},
+		{
+			"dir": "stable-release-0.26.0",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S3",
+			"date": "2026-07-24",
+			"prs": [
+				323
+			],
+			"outcomeFile": "implementations-plan/stable-release-0.26.0/plan.md",
+			"hook": "v0.26.0 live, all 6 phases ✓** (light; codex reject→conditional-approve, 4 conditions folded [RELEASE_SHA≠TAG_SHA, atomic `--match-head-commit`, faucet freshness via testnet.tools.nulo.sh buildId, assetless-recovery gated on tag-integrity]) — promote dev→main (21 PRs since v0.25.0: public transfers, USD prices, account-identity freeze, bridge Permit2, alpha-mainnet 5.0.1) → auto-unstick tag+build+publish → landing+faucet deploy → sync-back, driven end-to-end at pinned dev SHA `4e5435b`. 3 merge-commits (2-parent verified): promote `e61849c` · release-please 0.26.0 `bffaad2`(=TAG_SHA) · sync `1da3377`. Release: chrome+firefox zips + SHASUMS, isPrerelease=false, tag→TAG_SHA. Live: nulo.sh v0.26.0 + faucet `buildId 0.1.0+bffaad26`. **Gotchas → lessons/**: network-e2e shard-3 flake (`backup-restore-sw-restart` 240s recovery-timeout) → re-run once→green (never neutralized); #321 first CI batch CANCELLED/superseded (2 batches on one SHA) — diagnosed as artifact not breakage, waited for live batch. \"Playground deployment\" ask was a false premise (test harness, no deploy target). No --admin, no force-push, no marketplace publish."
+		},
+		{
+			"dir": "stable-release-0.27.0",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #340",
+			"date": "2026-07-29",
+			"prs": [
+				340
+			],
+			"outcomeFile": "implementations-plan/stable-release-0.27.0/plan.md",
+			"hook": "v0.27.0 live, all 6 phases ✓** (light; codex reject→conditional-approve, all findings folded [annotated-tag peeling via `rev-list -n1`, state-based recovery table + dispatch⇒manual-sync rule, fail-closed gate assertions, per-host freshness, dev freeze through sync]) — promote dev→main (two-network tools, activity siloing, fee-cap predicted-worst hardening, 5-bug pre-release sweep #335) → auto-unstick tag+build+publish → landing+tools deploy → sync-back, at pinned dev SHA `c00598a`. 3 merge-commits (2-parent verified): promote `e3a3c61` · release 0.27.0 `d4c0e97`(=TAG_SHA) · sync `184f390`. Release: chrome+firefox zips + SHASUMS (sha256sum -c OK), isPrerelease=false, peeled tag→TAG_SHA. Live: nulo.sh v0.27.0 + testnet tools `buildId 0.1.0+d4c0e97a`; mainnet tools owner-verified (Access-gated). **Gotchas → lessons/**: `set -e` ineffective under the session shell — gate harness printed PASSED while assertions failed; GitHub's server-side gate held (no --admin); gates rewritten as `&&`-chains. Release-PR triple-batch on one SHA: Quality npm-ECONNRESET (renovate validator npx) + Smoke backup-roundtrip 90s timeout (2nd occurrence — flaky-test follow-up) → re-ran, green. No gate weakened, no marketplace publish."
+		},
+		{
+			"dir": "storage-migration-backup",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #246, #274",
+			"date": "2026-07-12",
+			"prs": [
+				246,
+				274
+			],
+			"outcomeFile": "implementations-plan/storage-migration-backup/plan.md",
+			"hook": "all 6 phases ✓** (deep; 3 plans + double audit + 5-round final codex, all folded) — migrate imported full-backups forward through the #246 engine; C-scoped (real Migrator over an in-memory scratch); finite-DSL `defineRowMapMigration` (data-only, WeakSet-branded + frozen) with footprint-coverage + metamorphic guardrails; compat-epoch/backup-schema-version split + checksum-first trust gates; pre-finalize rollback hardening; smoke + NETWORK round-trip e2e (real export → doctored v1 → migrate → restore → on-chain balance). **The round-trip harness caught a real shipping bug on its first run**: full.vue keyed every export slice as literal `\"undefined\"` (clients have no `.name`) — fixed with explicit service-name constants. Lessons in `lessons/phase-{1..6}.md`"
+		},
+		{
+			"dir": "storage-migration-framework",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S5",
+			"date": "2026-07-06",
+			"prs": [
+				246
+			],
+			"outcomeFile": "implementations-plan/storage-migration-framework/plan.md",
+			"hook": "all 5 phases ✓ + /code-review (1 Critical + 3 High fixed) + codex post-impl reject→reject→APPROVE; awaiting push/PR (SSH-agent unlock)** — REAL data-preserving production migrator (transform JSON on release), NOT a wipe. Single global version; narrow-slice footprint-declaring migrations; pure wallet-core engine (injected data-source seam) + impure extension persistence; crash-safe journal (running-first barrier, atomic backup+sentinel, batched-diff+tombstones, restore-before-retry); fail-closed + durable-bounded-retry + `breaking` block-vs-degrade; STATICALLY-enforced facade coverage (closes the direct-reader race); crypto/KDF = re-encrypt-on-unlock-or-reset; no wipe / init-at-max / corrupt-or-stale-marker fail-closed. 5 phases. MetaMask+Rabby studied (research/). Audit trail: v1–v3 wipe scrapped; v4 codex-REJECT+Opus-conditional; v5 unified-backup codex-REJECT surfaced the backup-representation mismatch → v6 splits backup out, all 4 rounds' foldables incorporated. (Paths re-mapped to the #186 `apps/` layout.)"
+		},
+		{
+			"dir": "sw-wallet-protocol",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #510, #511",
+			"date": "2026-09-01",
+			"prs": [
+				510,
+				511
+			],
+			"outcomeFile": "implementations-plan/sw-wallet-protocol/plan.md",
+			"hook": "the service-worker boot + wallet protocol staged under budget (87 → 74): runtime.ts boot phases, the bridge dispatcher guard ladder, capability negotiation, discovery handler, schema patch, execute window; lessons: the dedupe-window rule (lookup-to-registration is one continuation)"
+		},
+		{
+			"dir": "swap-fuel",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S11",
+			"date": "2026-06-15",
+			"prs": [
+				84,
+				89
+			],
+			"outcomeFile": "implementations-plan/swap-fuel/plan.md",
+			"hook": "bridge-and-fuel: atomic AZLO deposit + V4 two-hop slice→FeeJuice (live fee-987 pools), fjwc self-paying claim + inclusion-grade recovery; fuel withheld on private bridges until private FeeJuice ships"
+		},
+		{
+			"dir": "third-party-notices",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #639, #640, #641, #642, #649",
+			"date": "2026-09-20",
+			"prs": [
+				639,
+				640,
+				641,
+				642,
+				649
+			],
+			"outcomeFile": "implementations-plan/third-party-notices/plan.md",
+			"hook": "reworked legal-terms arc C into arcs a review could finish: Presto on its MIT versions with no min-age exclude left open, 37 test modules out of the production routes (690 kB), the notices policy library with hash-bound font claims and MPL-2.0 off the allowlist, then build wiring + CI floor check + the About row; both targets ship byte-identical notices (122 components); every Codex loop closed within two rounds of three under an \"honest dependencies\" standard; wasm inventories, final-zip reconciliation and nested-licence discovery are declined with reopen triggers in `follow-ups.md`; an upstream issue draft is in `lessons/upstream-issue.md`"
+		},
+		{
+			"dir": "token-identity",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S10",
+			"date": "2026-06-11",
+			"prs": [
+				82
+			],
+			"outcomeFile": "implementations-plan/token-identity/plan.md",
+			"hook": "NULO/OLUN/AZLO live, isTokenRegistered + contracts field-diff re-consent"
+		},
+		{
+			"dir": "token-prices",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #309",
+			"date": "2026-07-22",
+			"prs": [
+				309
+			],
+			"outcomeFile": "implementations-plan/token-prices/plan.md",
+			"hook": "phases 1-6 ✓, PR open** — live CoinGecko USD prices (unlock-gated PriceService + static (chainId,address)→coingeckoId map incl. cUSD→usd-coin, FeeJuice→aztec) across header/rows/send/fees (A1/B1/C3/D2) + lazy default-token seeding (cUSD on mainnet 2934756904 + testnet 4229590296 via single-pass pinned-class-id snapshot; blocking live preflight in Phase 2). Audit catches: stale pre-fork testnet chainId, C3 quote-freeze policy, seed TOCTOU, deletion tombstones."
+		},
+		{
+			"dir": "tools-extraction",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #690, #691, #692, #693, #694, #695, #697, #706, #707, #708, #709, #710, #711, #713, #714",
+			"date": "2026-09-28",
+			"prs": [
+				690,
+				691,
+				692,
+				693,
+				694,
+				695,
+				697,
+				706,
+				707,
+				708,
+				709,
+				710,
+				711,
+				713,
+				714
+			],
+			"outcomeFile": "implementations-plan/tools-extraction/plan.md",
+			"hook": "nulo #690–#692, #697, #706–#711, #713; alejoamiras/unleashed#1–#4, #7, #8; npm 0.1.0; three Workers live, the tools names dark, every Pages project deleted; P1, the next promote, is in `follow-ups.md`) — split `apps/tools`, `packages/bridge-core` and `contracts/bridge` out to `alejoamiras/unleashed` with history; publish three narrow shared packages to npm with provenance; both repos move from Cloudflare Pages to Workers static assets; nulo becomes wallet-only"
+		},
+		{
+			"dir": "tools-readiness",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #582, #583, #584",
+			"date": "2026-09-10",
+			"prs": [
+				582,
+				583,
+				584
+			],
+			"outcomeFile": "implementations-plan/tools-readiness/plan.md",
+			"hook": "account widening on both sides (a repeat `accounts` request opens the popup with granted rows locked; tools \"Add accounts…\" + a visibility re-read), the six multi-account tools cells, the extension live-session switch, and the readiness § 1 cells pinning today's recovery behaviour; three stacked PRs"
+		},
+		{
+			"dir": "tools-rename",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #516, #517, #520",
+			"date": "2026-09-02",
+			"prs": [
+				516,
+				517,
+				520
+			],
+			"outcomeFile": "implementations-plan/tools-rename/plan.md",
+			"hook": "`apps/tools` → `apps/tools` end to end + the Faucet tab → Drip; owner-executed Pages root-dir flip pending (Phase 5) — rename `apps/tools` → `apps/tools` (workspace, CI, release, e2e harness, docs) + the in-app Faucet tab → Drip; two stacked PRs; owner-executed Pages root-dir flip after merge; implements after `faucet-cluster` lands"
+		},
+		{
+			"dir": "tools-self-testing",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #575, #576, #577, #581, #584",
+			"date": "2026-09-10",
+			"prs": [
+				575,
+				576,
+				577,
+				581,
+				584
+			],
+			"outcomeFile": "implementations-plan/tools-self-testing/plan.md",
+			"hook": "tools-self-testing"
+		},
+		{
+			"dir": "transport-ready-handshake",
+			"class": "parked",
+			"status": "PARKED",
+			"followUps": [],
+			"evidence": "S16",
+			"date": "2026-08-18",
+			"prs": [
+				409
+			],
+			"outcomeFile": "implementations-plan/transport-ready-handshake/plan.md",
+			"hook": "the ledgered Ready-handshake transport rework + SW-death debt (canary real-kill, tombstone supersede); 4-scout recon preserved in recon.md; the flake-ledger entries + fix-plan row 1 stay OPEN as the spec"
+		},
+		{
+			"dir": "typecheck-cleanup",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/typecheck-cleanup/plan.md",
+			"hook": "Plan — Typecheck cleanup (113 → 0 errors)"
+		},
+		{
+			"dir": "ux-feedback",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "closing index status",
+			"date": "2026-09-28",
+			"prs": [
+				699,
+				700,
+				701,
+				702,
+				703,
+				704,
+				712
+			],
+			"outcomeFile": "implementations-plan/ux-feedback/plan.md",
+			"hook": "the user-testing proposal (items 1–12 and the tooltip map) in five batches, merged 2026-09-28 as #699 to #704; its open items are in follow-ups.md"
+		},
+		{
+			"dir": "ux-owner-picks",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "closing index status",
+			"date": "2026-09-29",
+			"prs": [
+				718
+			],
+			"outcomeFile": "implementations-plan/ux-owner-picks/plan.md",
+			"hook": "ux-feedback's follow-ups D1 to D5 as #718: compact known-token amounts, one token lookup for Home and History, Send's loading token card, Nulo's sponsor as the default, a failed wallet send's own label, and both heroes shrinking to fit their line; its open items are in follow-ups.md"
+		},
+		{
+			"dir": "v3-followups",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [
+				"v3-followups-p2"
+			],
+			"evidence": "S1",
+			"date": "2026-06-02",
+			"prs": [
+				73
+			],
+			"outcomeFile": "implementations-plan/v3-followups/plan.md",
+			"hook": "v3 follow-ups — execution-mutex queue cap (P1) + NO_FROM concurrency e2e (P2)"
+		},
+		{
+			"dir": "vitest-on-bun",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #459",
+			"date": "2026-08-25",
+			"prs": [
+				459
+			],
+			"outcomeFile": "implementations-plan/vitest-on-bun/plan.md",
+			"hook": "Arc C: every unit/component Vitest suite on the Bun runtime via per-script `bun --bun`; the ONE Bun failure class (vitest `interopModule` + Bun's namespace `__esModule`, fixed upstream in vitest 5 beta — #10363) stopgapped by `deps.interopDefault: false`; fail-closed soak matrix at `e10cc91e` (12 suites × 30 runs × both runtimes, retry-0, all `COMPARE OK`; `test:all` ×5; real-runner dispatch `quality-status` green); e2e + `test:watch` stay on Node"
+		},
+		{
+			"dir": "vitest-vite-bumps",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/vitest-vite-bumps/plan.md",
+			"hook": "Vitest 4 + Vite 8 — plan (post-hardening-PR follow-up)"
+		},
+		{
+			"dir": "vitest-vite8-dedupe",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S5",
+			"date": "2026-06-24",
+			"prs": [
+				169
+			],
+			"outcomeFile": "implementations-plan/vitest-vite8-dedupe/plan.md",
+			"hook": "one vite@8.x in the tree by **DELETING the unused vite-plugin-vue-devtools chain** (codex caught it's dead — not a version bump) + deduping vitest via root `overrides:{vite:^8.0.0}` + extension `test`→`vitest run`; behavior-neutral (test:all counts identical to vite 7). Audits: codex reject→delete-don't-bump · Sonnet conditional · final codex conditional · post-impl codex conditional (index fix)"
+		},
+		{
+			"dir": "vue-router-renovate",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/vue-router-renovate/plan.md",
+			"hook": "vue-router 5 + Renovate — consolidated plan"
+		},
+		{
+			"dir": "vue-shell-composites",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #500",
+			"date": "2026-09-01",
+			"prs": [
+				500
+			],
+			"outcomeFile": "implementations-plan/vue-shell-composites/plan.md",
+			"hook": "arc 5 of the complexity/duplication burn-down: jscpd's html top-pairs proven Vue-template tokenizer noise (reporter now splits per-format + demotes html); extracted the collapsing-hero layout migration (4 auth pages onto the renamed CollapsingHeroLayout), ListStatusMessage (6 sites), contact form-fields twins; wallet-panel merge + approval-window layout measured and recorded LEAVE; dup trend 5.06% → 4.84%"
+		},
+		{
+			"dir": "wallet-error-resilience",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #606, #607",
+			"date": "2026-09-16",
+			"prs": [
+				606,
+				607
+			],
+			"outcomeFile": "implementations-plan/wallet-error-resilience/plan.md",
+			"hook": "the stale-anchor retry now composes with presto's `activeProve` phase-tracking at `proveTx`; resync-and-retry once on the stale-anchor family with a typed `PXE_STALE_ANCHOR` error, `CONTRACT_NOT_REGISTERED` for unregistered contracts, bounded balance-chunk reschedule, the four console-noise fixes; tools gates sends on registration and re-registers once on the new code"
+		},
+		{
+			"dir": "wallet-safety-fixes",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "closing index status",
+			"date": "2026-09-28",
+			"prs": [
+				717
+			],
+			"outcomeFile": "implementations-plan/wallet-safety-fixes/plan.md",
+			"hook": "ux-feedback's safety follow-ups A1 to A5 as #717: only the focused Revoke or Send button confirms the two authwit popups, fixed-text `createAuthWit` refusals, trust writes fenced by session and incarnation, profile-keyed UI keys purged at deletion, the journal id comment; its open items are in follow-ups.md"
+		},
+		{
+			"dir": "wallet-sdk-implicit-account-grant",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #27",
+			"date": "2026-05-21",
+			"prs": [
+				27
+			],
+			"outcomeFile": "implementations-plan/wallet-sdk-implicit-account-grant/plan.md",
+			"hook": "wallet-sdk-implicit-account-grant — plan v3 (post-user-pivot)"
+		},
+		{
+			"dir": "wallet-ux-fixes",
+			"class": "closed",
+			"status": "completed",
+			"followUps": [],
+			"evidence": "S1: merged #313",
+			"date": "2026-07-22",
+			"prs": [
+				313
+			],
+			"outcomeFile": "implementations-plan/wallet-ux-fixes/plan.md",
+			"hook": "backup permission + import default-network + active-network restore (1b) + network-list active-badge (4B); item 3 → separate PR-D"
+		},
+		{
+			"dir": "zod-puppeteer",
+			"class": "closed",
+			"status": "historical — pre-open-source import (2026-05-19)",
+			"followUps": [],
+			"evidence": "S2: only the import touched it",
+			"date": "2026-05-19",
+			"prs": [],
+			"outcomeFile": "implementations-plan/zod-puppeteer/plan.md",
+			"hook": "Zod 4 + Puppeteer 25 — consolidated plan"
+		}
+	]
+}

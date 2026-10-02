@@ -107,7 +107,13 @@ import {
 import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
 import { OriginType, type LocalTxOrigin } from "./transaction-origin"
 import type { SessionContext } from "./types"
-import { CapabilityNotGrantedError, JobCancelledError, ValidationError, walletErrorFromPayload } from "@nulo/extension-messaging/errors"
+import {
+	CapabilityNotGrantedError,
+	ChainNotSupportedError,
+	JobCancelledError,
+	ValidationError,
+	walletErrorFromPayload,
+} from "@nulo/extension-messaging/errors"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import { describeExternalId } from "./external-id"
@@ -1746,7 +1752,9 @@ export class WalletSdkDispatcher {
 		// accountless mutation write into the newly active profile's world.
 		const networks = await this.networkService.getNetworksRaw(ctx.profileId, ctx.chainId)
 		if (networks.length === 0) {
-			throw new Error(`No network configured for chainId ${ctx.chainId}`)
+			// Typed, so the dApp can tell "this session's chain is gone" from a wallet fault: an
+			// untyped throw reaches it as the unclassified constant.
+			throw new ChainNotSupportedError()
 		}
 		return networks[0]!
 	}

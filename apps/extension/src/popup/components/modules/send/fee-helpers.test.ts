@@ -313,7 +313,7 @@ describe("fee-helpers — sponsors a verdict found short", () => {
 
 describe("fee-helpers/FEE_JUICE_BRIDGE_URL", () => {
 	test("defaults to unleashed's testnet app", () => {
-		expect(FEE_JUICE_BRIDGE_URL).toBe("https://unleashed-testnet.alejo-amiras.workers.dev")
+		expect(FEE_JUICE_BRIDGE_URL).toBe("https://testnet.app.unleashed.systems")
 	})
 })
 

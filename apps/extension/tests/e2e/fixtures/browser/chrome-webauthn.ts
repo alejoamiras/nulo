@@ -9,7 +9,7 @@ import type { VirtualAuthenticator } from "./index"
  * `chrome.windows.create` popup is a fresh root and sees none of its siblings'. So the anchor page
  * gets one, and every passkey window gets its own as its target appears. A credential dies with
  * the window that made it, and PRF state does not survive CDP `getCredentials`/`addCredential` —
- * see `implementations-plan/passkey-e2e/PRF-NON-PORTABLE.md`.
+ * see `apps/extension/tests/e2e/PRF-NON-PORTABLE.md`.
  *
  * Attaching on `targetcreated` wins the race with the ceremony: the window makes a round trip to
  * the background before it calls `navigator.credentials`.

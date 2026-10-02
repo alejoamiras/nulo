@@ -19,6 +19,7 @@
 import {
 	AccountAddressInconsistencyError,
 	CapabilityNotGrantedError,
+	ChainNotSupportedError,
 	ContractNotRegisteredError,
 	JobCancelledError,
 	PxeStaleAnchorError,
@@ -64,6 +65,16 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 			code: 4900,
 			message: error.message,
 			data: { walletErrorCode: SessionEndedError.CODE },
+		}
+	}
+	if (error instanceof ChainNotSupportedError) {
+		// EIP-1193 4901: the provider is not connected to the requested chain. The session's chain
+		// lost its network in the wallet, which only the dApp's own chain choice can work around.
+		// Constant message: it names neither the session's chain nor any chain the wallet serves.
+		return {
+			code: 4901,
+			message: ChainNotSupportedError.MESSAGE,
+			data: { walletErrorCode: ChainNotSupportedError.CODE },
 		}
 	}
 	if (error instanceof TermsAcceptanceRequiredError) {

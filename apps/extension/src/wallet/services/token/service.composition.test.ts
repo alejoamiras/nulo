@@ -43,6 +43,7 @@ const FIXTURE_SEED = vi.hoisted(() => ({
 	contract: `0x${"0c".repeat(32)}`,
 	expectedClassId: "0xc1a55",
 	expectedSymbol: "cUSD",
+	expectedDecimals: 6,
 	displayName: "Compressed USD",
 }))
 vi.mock("./default-tokens", () => {

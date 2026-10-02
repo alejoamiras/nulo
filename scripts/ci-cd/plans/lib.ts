@@ -85,6 +85,8 @@ export interface Ctx {
 	dirs: Set<string>
 	/** Each tracked path's git mode: `REGULAR_MODES`, 120000 for a symlink, 160000 for a gitlink. */
 	modes: Map<string, string>
+	/** Each tracked path's staged object id. */
+	oids: Map<string, string>
 	git(...args: string[]): GitResult
 	/** The staged blob as text; "" for an untracked path, a symlink or a gitlink. */
 	read(path: string): string
@@ -106,7 +108,7 @@ function indexEntries(cwd: string): Map<string, Entry> {
 	return entries
 }
 
-function readBlobs(cwd: string, oids: readonly string[]): Map<string, string> {
+export function readBlobs(cwd: string, oids: readonly string[]): Map<string, string> {
 	const res = spawnSync("git", ["cat-file", "--batch"], {
 		cwd,
 		env: GIT_ENV,
@@ -130,7 +132,7 @@ function readBlobs(cwd: string, oids: readonly string[]): Map<string, string> {
 	return blobs
 }
 
-function ancestorDirs(files: Iterable<string>): Set<string> {
+export function ancestorDirs(files: Iterable<string>): Set<string> {
 	const dirs = new Set<string>()
 	for (const file of files) {
 		for (let at = file.indexOf("/"); at !== -1; at = file.indexOf("/", at + 1)) dirs.add(file.slice(0, at))
@@ -161,6 +163,7 @@ export function createCtx(opts: { cwd?: string; env?: Env } = {}): Ctx {
 		tracked,
 		dirs: ancestorDirs(tracked),
 		modes: new Map([...entries].map(([path, entry]) => [path, entry.mode])),
+		oids: new Map([...entries].map(([path, entry]) => [path, entry.oid])),
 		git: (...args) => runGit(cwd, args),
 		load,
 		read(path) {
@@ -216,11 +219,22 @@ export function parseIndex(src: string): { entries: IndexEntry[]; malformed: num
 	return { entries, malformed }
 }
 
+/**
+ * A plain `<dir>/<file>` path: no dot segment, escape, encoding, query or fragment. Only then do the
+ * target's text, its rendered href and the path a browser opens agree (`\.` renders as `.`, `%2e%2e` opens as `..`).
+ */
+const ENTRY_TARGET_RE = /^[\w-][\w.-]*(?:\/[\w-][\w.-]*)+$/
+
+/** The plan dir an index target names; null unless the target is a plain path inside one dir beside the index. */
+export function entryDir(target: string): string | null {
+	return ENTRY_TARGET_RE.test(target) ? target.slice(0, target.indexOf("/")) : null
+}
+
 /** Top-level plan dirs the active index lists, or null before the archive split, when there is no active set yet. */
 export function activePlanDirs(ctx: Ctx): Set<string> | null {
 	if (!ctx.tracked.has(ARCHIVE_INDEX)) return null
 	const { entries } = parseIndex(ctx.read(ACTIVE_INDEX))
-	return new Set(entries.map((e) => e.target.split("/")[0]))
+	return new Set(entries.flatMap((e) => entryDir(e.target) ?? []))
 }
 
 /** Names of the directories directly below `parent` that hold tracked files. */
@@ -241,11 +255,7 @@ export function mode(env: Env = process.env): "enforce" | "report" {
 	return PULL_REQUEST_EVENTS.has(env.GITHUB_EVENT_NAME ?? "") ? "enforce" : "report"
 }
 
-/**
- * Rules whose findings fail an enforcing run. The others only report: `path-token` still has code
- * mentions of untracked files to repoint, and the index and archive rules have no active set until
- * the archive split.
- */
+/** Rules whose findings fail an enforcing run. The index and archive rules find nothing before the archive split. */
 export const ENFORCED: ReadonlySet<RuleId> = new Set<RuleId>([
 	"tracked-artifact",
 	"hygiene-files",
@@ -257,6 +267,9 @@ export const ENFORCED: ReadonlySet<RuleId> = new Set<RuleId>([
 	"permalink-shape",
 	"permalink-base",
 	"permalink-ancestry",
+	"path-token",
+	"index-structure",
+	"archive-structure",
 	"curated-budget",
 	"local-path",
 ])

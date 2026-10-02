@@ -12,8 +12,9 @@ import { CHAIN_IDS } from "@/utils/chain-ids"
 import { QUOTE_TTL_MS, type PriceState } from "@/wallet/services/price/spec"
 import type { PriceServiceClient } from "@/wallet/services/price/client"
 import { usePrices } from "./usePrices"
+import { TESTNET_TOKENS } from "@/wallet/services/token/default-tokens"
 
-const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
+const TEST_USDC = TESTNET_TOKENS.USDC
 
 function quoteState(now: number, overrides?: Partial<PriceState>): PriceState {
 	return {
@@ -114,16 +115,16 @@ describe("composables/usePrices", () => {
 	test("quoteFor resolves mapped tokens through the price map", async () => {
 		const client = fakeClient(quoteState(Date.now()))
 		const { api } = await withPrices(client)
-		expect(api.quoteFor(CHAIN_IDS.TESTNET, CUSD)?.coingeckoId).toBe("usd-coin")
+		expect(api.quoteFor(CHAIN_IDS.TESTNET, TEST_USDC)?.coingeckoId).toBe("usd-coin")
 		// Case-insensitive contract match.
-		expect(api.quoteFor(CHAIN_IDS.TESTNET, CUSD.toUpperCase().replace("0X", "0x"))?.coingeckoId).toBe("usd-coin")
+		expect(api.quoteFor(CHAIN_IDS.TESTNET, TEST_USDC.toUpperCase().replace("0X", "0x"))?.coingeckoId).toBe("usd-coin")
 	})
 
 	test("quoteFor is undefined for unmapped tokens and missing args", async () => {
 		const client = fakeClient(quoteState(Date.now()))
 		const { api } = await withPrices(client)
 		expect(api.quoteFor(CHAIN_IDS.TESTNET, "0xdeadbeef")).toBeUndefined()
-		expect(api.quoteFor(12345, CUSD)).toBeUndefined()
+		expect(api.quoteFor(12345, TEST_USDC)).toBeUndefined()
 		expect(api.quoteFor(undefined, undefined)).toBeUndefined()
 	})
 
@@ -136,7 +137,7 @@ describe("composables/usePrices", () => {
 	test("tokenFiatMicro computes bigint fiat for a priced token, undefined otherwise", async () => {
 		const client = fakeClient(quoteState(Date.now()))
 		const { api } = await withPrices(client)
-		const token = { chainId: CHAIN_IDS.TESTNET, contract: CUSD, decimals: 18 }
+		const token = { chainId: CHAIN_IDS.TESTNET, contract: TEST_USDC, decimals: 18 }
 		expect(api.tokenFiatMicro(token, 1_250n * 10n ** 18n)).toBe(1_249_821_250n)
 		expect(api.tokenFiatMicro({ chainId: 1, contract: "0x1", decimals: 18 }, 10n ** 18n)).toBeUndefined()
 		expect(api.tokenFiatMicro(undefined, 10n ** 18n)).toBeUndefined()
@@ -145,7 +146,7 @@ describe("composables/usePrices", () => {
 	test("tokenFiatLabel renders the ≈-prefixed display string", async () => {
 		const client = fakeClient(quoteState(Date.now()))
 		const { api } = await withPrices(client)
-		const token = { chainId: CHAIN_IDS.TESTNET, contract: CUSD, decimals: 18 }
+		const token = { chainId: CHAIN_IDS.TESTNET, contract: TEST_USDC, decimals: 18 }
 		expect(api.tokenFiatLabel(token, 1_250n * 10n ** 18n)).toBe("≈ $1,249.82")
 		expect(api.tokenFiatLabel({ chainId: 1, contract: "0x1", decimals: 18 }, 1n)).toBeUndefined()
 	})

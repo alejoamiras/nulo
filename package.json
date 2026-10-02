@@ -33,6 +33,7 @@
     "baseline:rescore": "bun scripts/complexity-baseline/rescore.ts",
     "audit:dup": "bun scripts/dup-trend/report.ts",
     "check:imports": "biome check apps/ packages/",
+    "check:plans": "bun scripts/ci-cd/plans/check.ts",
     "audit:vue": "bun run --parallel typecheck:all test lint && bun run build",
     "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true"
   },

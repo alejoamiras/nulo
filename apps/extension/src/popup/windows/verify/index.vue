@@ -239,10 +239,6 @@ onUnmounted(() => {
 /* ── Footer ────────────────────────────────────────────────────── */
 
 .footer {
-	flex-shrink: 0;
-
-	padding: 16px;
-	border-top: 1px solid var(--nulo-border);
-	background: var(--nulo-surface);
+	composes: footer from "../window-shell.module.css";
 }
 </style>

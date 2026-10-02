@@ -152,12 +152,13 @@ export async function deployTestToken(
 	feeOptions: { paymentMethod: SponsoredFeePaymentMethod },
 	symbol = "TST",
 	name = symbol === "TST" ? "TestToken" : `${symbol} Token`,
+	decimals = 18,
 ): Promise<string> {
 	const { contract } = await TokenContract.deployWithOpts(
 		{ method: "constructor_with_minter", wallet },
 		name,
 		symbol,
-		18,
+		decimals,
 		minterAddress,
 		// 5.0.1 standards added a 5th `auth_contract` param to constructor_with_minter — pass ZERO
 		// (no transfer-authorization gating) for the plain test token.

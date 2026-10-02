@@ -28,6 +28,31 @@ export const AccessLevel = {
 
 export type AccessLevelValue = (typeof AccessLevel)[keyof typeof AccessLevel]
 
+/** The chain id of every session row stored for exactly `origin`, as persisted: one entry per row. */
+export async function sessionChainsForOrigin(ctx: ExtensionContext, origin: string): Promise<string[]> {
+	const page = await openPopup(ctx)
+	try {
+		return await page.evaluate(
+			async ({ exact, prefix }: { exact: string; prefix: string }) => {
+				const chains: string[] = []
+				for (const [key, value] of Object.entries(await chrome.storage.local.get(null))) {
+					if (!key.startsWith(prefix)) continue
+					try {
+						const session = JSON.parse(value as string)
+						if (session?.dappMetadata?.url === exact) chains.push(String(session.chainId))
+					} catch {
+						// not a JSON session record
+					}
+				}
+				return chains.sort()
+			},
+			{ exact: origin, prefix: SESSION_KEY_PREFIX },
+		)
+	} finally {
+		await page.close()
+	}
+}
+
 /** Scan all session keys, return the id whose dappMetadata.url starts with origin. */
 export async function getSessionIdForOrigin(ctx: ExtensionContext, origin: string): Promise<string> {
 	const page = await openPopup(ctx)

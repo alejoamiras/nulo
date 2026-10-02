@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 /**
  * The plan-tree gate: `checkTree()` runs every rule over the git index. From the command line,
- * `bun scripts/ci-cd/plans/check.ts [--report]` prints one line per finding, marking those of a rule
- * that only reports, and exits by `verdict()`: 1 on an enforced finding in an enforcing mode, else 0.
+ * `bun scripts/ci-cd/plans/check.ts [--report]` (`bun run check:plans`) prints one line per finding,
+ * marking those that only report, and exits by `verdict()`: 1 on an enforced finding in an enforcing
+ * mode, else 0.
  * `--report` always exits 0.
  */
 import { createCtx, countByRule, type Env, type Finding, formatFinding, isEnforced, verdict } from "./lib"
@@ -30,7 +31,7 @@ export function checkTree(opts: { cwd?: string; env?: Env } = {}): Finding[] {
 		...documentTypeFindings(ctx),
 		...linkFindings(ctx, docs),
 		...opaqueFindings(docs),
-		...pathTokenFindings(ctx),
+		...pathTokenFindings(ctx, bases),
 		...permalinkFindings(docs, bases),
 		...permalinkAncestryFindings(ctx, bases),
 		...indexStructureFindings(ctx, docs),
