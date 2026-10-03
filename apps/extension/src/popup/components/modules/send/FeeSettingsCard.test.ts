@@ -2503,28 +2503,43 @@ describe("FeeSettingsCard — the identity guards, field by field", () => {
 	test("a switch to an embedded payment during a recovery recommit discards the late commit", async () => {
 		let before = 0
 		let holder: { release: () => void } | undefined
-		const w = await recommitAcross(async (_live, card) => {
-			before = settingsEmitted(card).length
-			// Another subscriber on the key (a second operation card, say) keeps the recovered entry
-			// alive after this card releases its lease.
-			holder = useBalancesStore().subscribe(
-				{ profileId: profile.id, networkId: network.id, chainId: network.chainId, accountAddress: account.address },
-				{ legs: ["gas"], retry: false, txRefresh: false, peek: false },
-			)
-			await card.setProps({ modelValue: { paymentMethod: { kind: "embedded" } } })
+		let mounted: ReturnType<typeof mount> | undefined
+		try {
+			const w = await recommitAcross(async (_live, card) => {
+				mounted = card
+				before = settingsEmitted(card).length
+				// Another subscriber on the key (a second operation card, say) keeps the recovered entry
+				// alive after this card releases its lease.
+				holder = useBalancesStore().subscribe(
+					{ profileId: profile.id, networkId: network.id, chainId: network.chainId, accountAddress: account.address },
+					{ legs: ["gas"], retry: false, txRefresh: false, peek: false },
+				)
+				await card.setProps({ modelValue: { paymentMethod: { kind: "embedded" } } })
+				await vi.advanceTimersByTimeAsync(0)
+			})
+			expect(w.find('[data-testid="send-fee-embedded"]').exists()).toBe(true)
+			expect(settingsEmitted(w).slice(before)).toEqual([])
+			// The failed read below arms the card's retry; fake timers keep it from outliving the test.
+			vi.useFakeTimers()
+			// Still degraded, so opting out of the embedded payment reads afresh; that read fails here.
+			const reads = mocks.getGasBalances.mock.calls.length
+			mocks.getGasBalances.mockRejectedValue(new Error("still down"))
+			// A native click: test-utils' `trigger` on this wrapper left `useOwnMethod` unset.
+			;(w.get('[data-testid="send-fee-override"]').element as HTMLElement).click()
 			await vi.advanceTimersByTimeAsync(0)
-		})
-		expect(w.find('[data-testid="send-fee-embedded"]').exists()).toBe(true)
-		expect(settingsEmitted(w).slice(before)).toEqual([])
-		// Still degraded, so opting out of the embedded payment reads afresh; that read fails here.
-		const reads = mocks.getGasBalances.mock.calls.length
-		mocks.getGasBalances.mockRejectedValue(new Error("still down"))
-		// A native click: test-utils' `trigger` on this wrapper left `useOwnMethod` unset.
-		;(w.get('[data-testid="send-fee-override"]').element as HTMLElement).click()
-		await flushPromises()
-		expect(mocks.getGasBalances.mock.calls.length).toBe(reads + 1)
-		expect(degraded(w)).toBe(true)
-		holder?.release()
+			expect(mocks.getGasBalances.mock.calls.length).toBe(reads + 1)
+			expect(degraded(w)).toBe(true)
+			expect(vi.getTimerCount()).toBeGreaterThan(0)
+			w.unmount()
+			mounted = undefined
+			holder?.release()
+			holder = undefined
+			expect(vi.getTimerCount()).toBe(0)
+		} finally {
+			mounted?.unmount()
+			holder?.release()
+			vi.useRealTimers()
+		}
 	})
 
 	test("Send: a pending selection keeps its cached result while unread identity fields change", async () => {

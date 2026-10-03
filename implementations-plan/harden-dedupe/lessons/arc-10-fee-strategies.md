@@ -67,3 +67,11 @@ Codex confirmed its three plan blockers resolved, and re-verified 112/112 base-a
 - **Mutants:** the V2 and V3 `72a4b8a7` shapes, P3's presence line and eager P1 are each killed by exactly one test.
 - **Test files touched:** `strategies-lifecycle.test.ts` gains the access-order pin; `FeeSettingsCard.test.ts` gains the two card pins, and its `recommitAcross` helper now also hands its callback the wrapper, awaited.
 
+
+### Round 2: one should-fix in test code (adopted)
+
+Codex confirmed every round-1 finding resolved: V2 and V3 match the base's access expressions and timing, the second subscription is realistic, the native click reaches the handler, and the eager-P1 pin is sound.
+
+- **The P3 pin leaked a live retry timer.** `recommitAcross` restores real timers before it returns; the override click then resubscribes the card, and the failed read arms a real 5 s retry that only the card's own retry-capable subscription can stop. Releasing `holder` alone left it running into later tests' shared mocks.
+  - Fix: the test runs its post-recommit section under fake timers, asserts a timer is armed, unmounts the card and releases the holder, then asserts `vi.getTimerCount()` is 0. A `finally` unmounts and releases on any failure, including one inside the helper after the card is mounted.
+  - Verified: P3's presence-line mutant still killed (1); the file passes 140/140 under three shuffled seeds; lint clean.
