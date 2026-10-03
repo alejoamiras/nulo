@@ -59,3 +59,7 @@ What each composing class keeps locally, and which shared longhands it meets on 
   3. **Comments:** the wrap rule's "instead of truncating" claim was false, since the clamp truncates. It now states only its ordering invariant, and the toolbar module lost a narrating line.
   4. **The plan embedded the harness's local path.** It now names the local screenshot harness without one.
 - After round 1: lint, `typecheck:all` and `test:all` (8656 passed) are green; base against head 40d10344 and `--stability` are each 132 of 132 identical.
+
+## Merge-ready evidence
+
+- After the restack onto 61260efc (arc 5 merged), base 61260efc against head c045a703, Chrome and Firefox, dark and light: 132 of 132 identical (72 shots, 60 computed-style records with every round-1 addition). Local `audit:vue`, `test:all` and `test:ci-gating` are green on the same head.
