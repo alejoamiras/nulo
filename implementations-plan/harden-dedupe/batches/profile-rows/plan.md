@@ -223,7 +223,9 @@ Read on `harden-dedupe` at `7450928c`. The file is byte-identical to recon's rea
   - Finalize's type refusal still retains the entry (`(BUG PIN)`, see Drift).
 - **Await and microtask order:**
   - The password builder awaits the same `subtle.sign` the inline call awaits, and the passkey builder is synchronous.
-  - The tail helper adds one async frame. The caller's `finally` runs one microtask later, still inside the facade lock: cleanup is delayed, and it never crosses the lock.
+  - The tail helper adds one async frame, so the caller's `finally` runs one microtask later. Every wipe keeps its original position relative to the lock release:
+    - password unlock's wipes, and passkey unlock's master wipe, still run after `runExclusive` returns, as on base;
+    - every other wipe still runs inside the lock.
   - No span here must finish in one tick (lesson from approval-scope-follow).
 - **Engine-generated error text.** No malformed value reaches a moved expression:
   - The builders read fresh, typed `seal` and `sealDek` outputs.
@@ -321,7 +323,7 @@ The "observed" column records the run at the Phase 2 head: every mutant went red
 | builder MACs `sourceDek` | P3 vector, oracle, T3 healthy twin | 6, including the P3 vector and the T3 healthy twin |
 | P4 MACs the old `dekSealed` | P4 vector and oracle | 2, including the P4 vector |
 | master and DEK swapped in `envelopeMacFor` | every password vector, oracle, every healthy twin | 25 |
-| two slots swapped in `macEnvelopeV3` | every password vector | 4: the four password vectors. Compute and verify share the projection, so only the literal vectors see a consistent swap |
+| two slots swapped in `macEnvelopeV3` | every password vector | 4: the four password vector cases. Compute and verify share the projection, so the round-trip tests miss the swap. The vectors and the independent oracle in the same cases both catch it; the vector assertion runs first |
 | one passkey literal key reordered | the passkey vectors | 4: the four passkey vectors |
 | a tail returns without `await` (T2, T3, T4 separately) | that tail's healthy twin (zeroed DEK) | 1, 4 and 2, each including its healthy twin |
 | the tail emits before the open | the tail table | 7 |
