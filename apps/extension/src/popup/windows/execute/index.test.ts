@@ -812,3 +812,69 @@ describe("execute window — approval envelope", () => {
 		expect(previewOperationAuthwitsMock).toHaveBeenCalledExactlyOnceWith("req-123", 1, "tok-b", "flow-b")
 	})
 })
+
+// ── The two send kinds as a dApp's wire carries them: 32-byte hex fields, CAIP accounts. Each draft
+//    is pinned whole, so neither kind can drop a field or fall through to the unknown-kind throw. ──
+describe("execute window — send drafts from wire-shaped requests", () => {
+	const NETWORK = { id: "n1", chainId: 1, name: "TestNet" }
+	const OWNER = `0x${"0a".repeat(32)}`
+	const OTHER = `0x${"0b".repeat(32)}`
+	const FPC = `0x${"0f".repeat(32)}`
+	const CALL = {
+		name: "transfer_in_private",
+		to: `0x${"1c".repeat(32)}`,
+		selector: "0x9a3b2c1d",
+		args: [`0x${"00".repeat(31)}05`, `0x${"2d".repeat(32)}`],
+	}
+	const acct = (address: string) => ({ address, chainId: 1, name: `acct-${address.slice(0, 6)}` })
+	const resolvable = () => {
+		accountServiceCtorMock.mockImplementationOnce(function () {
+			return {
+				getAccount: vi.fn(async (_p: string, _c: number, address: string) => acct(address)),
+				connect: vi.fn(),
+				disconnect: vi.fn(),
+			}
+		})
+		networkServiceCtorMock.mockImplementationOnce(function () {
+			return { getNetworks: vi.fn(async () => [NETWORK]), connect: vi.fn(), disconnect: vi.fn() }
+		} as never)
+	}
+	const EMBEDDED = { paymentMethod: { kind: "embedded" } }
+	const REQUESTS = [
+		{
+			kind: "aztec_sendTx",
+			account: `aztec:1:${OWNER}`,
+			exec: { calls: [CALL] },
+			opts: { from: OWNER },
+			executionMode: "default_entrypoint",
+		},
+		{ kind: "aztec_sendTx", account: `aztec:1:${OWNER}`, exec: { calls: [CALL], feePayer: FPC }, opts: { from: OWNER } },
+		{ kind: "aztec_sendTx", account: `aztec:1:${OTHER}`, exec: { calls: [CALL], feePayer: OTHER }, opts: { from: OTHER } },
+		{ kind: "send_transaction", account: `aztec:1:${OWNER}`, calls: [CALL], fee: { embeddedFeePayment: { address: FPC } } },
+		{ kind: "send_transaction", account: `aztec:1:${OTHER}`, calls: [CALL] },
+	]
+
+	test("each request drafts with its network, account and fee settings; the signers are deduplicated", async () => {
+		resolvable()
+		payloadToLoad = {
+			session: { profileId: "p1", dappMetadata: { name: "Test DApp", url: "https://example.com" } },
+			params: { operations: REQUESTS },
+		}
+		w = factory()
+		await completeInit()
+		const vm = w.vm as unknown as ExecVm & { accounts: unknown[] }
+		expect(vm.initComplete).toBe(true)
+		const drafted = (request: (typeof REQUESTS)[number], feeSettings: unknown) => {
+			const address = request.account.slice("aztec:1:".length)
+			return { ...request, network: NETWORK, networkId: "n1", account: acct(address), accountAddress: address, feeSettings }
+		}
+		expect(vm.operations).toEqual([
+			drafted(REQUESTS[0], EMBEDDED),
+			drafted(REQUESTS[1], EMBEDDED),
+			drafted(REQUESTS[2], undefined),
+			drafted(REQUESTS[3], EMBEDDED),
+			drafted(REQUESTS[4], undefined),
+		])
+		expect(vm.accounts).toEqual([acct(OWNER), acct(OTHER)])
+	})
+})
