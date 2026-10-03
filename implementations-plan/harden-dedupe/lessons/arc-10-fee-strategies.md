@@ -79,3 +79,7 @@ Codex confirmed every round-1 finding resolved: V2 and V3 match the base's acces
 ### Round 3: one should-fix in test code (adopted)
 
 - **Cleanup missed a failure before the callback.** The test learned of the card only from `recommitAcross`'s callback, so the helper's own degraded assertion, which runs after the mount, could throw with nothing for the outer `finally` to unmount. Fix: the helper keeps its wrapper and unmounts it in a `catch` before rethrowing; the test takes the card from the helper's return, and its `finally` covers the later failures and releases the holder. Proved with a deleted scratch copy whose degraded assertion was forced to fail: one `unmount` call with the `catch`, none without. The file passes 140/140 under three shuffled seeds; lint and typecheck clean.
+
+### Code review round 4: CONVERGED
+
+No findings, high confidence. Codex probed failures in setup, in the callback and in the assertions: each path unmounts the card once, releases the holder, restores storage and timers, and rethrows the identical error.
