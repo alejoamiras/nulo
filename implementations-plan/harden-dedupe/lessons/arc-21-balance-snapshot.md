@@ -32,7 +32,7 @@
   - **C20 and A12 survived because the effect tests only edited `chainId` in place.** A built object reads the `network` property, which only a replacement of the network object triggers. Each effect test now also replaces the network object while a foreign row is in play; the rerun kills both, through the three components' "reads the network only once the account matches" tests.
   - **A4 and A5 are equivalent.** `disconnect()` (`packages/extension-messaging/src/background/client.ts:80-92`) removes the port listeners, rejects pending requests as microtasks and calls `onDisconnected`, which neither view listens to. It never calls `onConnected` or sends a request, so nothing between it and `dispose()` can reach the composable.
 - **Gates at `6a0db7de`, and again at the restacked code head `e4b5822d`:** lint, typecheck:all, test:all, test:ci-gating and audit:vue all passed.
-- **Screenshots: 64 of 64 identical, base `1a08fa52` vs head `e4b5822d`, and 64 of 64 under `--stability`** (17 surfaces × 2 themes × Chrome and Firefox). Every failed run before that was the surface file, never the code:
+- **Screenshots: 64 of 64 identical, base `1a08fa52` vs head `e4b5822d`, and 64 of 64 under `--stability`** (16 surfaces × 2 themes × Chrome and Firefox). Every failed run before that was the surface file, never the code:
   - holdings counted five rows, not six;
   - the Send picker shows its search box past Home's three rows, so the plain-list surface carries three;
   - the token page refreshes its row on mount, and the real service rejects a fixed row's id ("unknown token balance id" page errors), so the spec answers `refreshTokenBalance` too;
@@ -47,3 +47,11 @@
   - **The mutation script counted any nonzero exit as a kill and overwrote its report.** The claimed "38 killed on the first run" was 36. The script now judges from vitest's JSON report (kill = a named failed test; nonzero exit without one = error) and appends to `results.jsonl`. Lesson: a mutation verdict needs the failing test's name on record, or a crash reads as a kill.
   - **Drift 6 is visible**: the list's refresh dot reads `isUpdating`, so it can be wrong until B's own fetch lands. Reworded; no production change.
 - **Restacked onto `1a08fa52`** (arcs 10, 12, 15, 11, 19, 22, 19b and 15b landed) without conflict; no manifest changed. With arc 15 landed, `dispose()` now calls `fence.invalidate()`.
+
+## Code review round 2: NOT CONVERGED
+
+- **Codex found the new harness assertions too loose, not the code.** No production regression, and it re-verified every image pair byte for byte.
+  - The call check skipped ports with no calls and accepted `[2]`, so it passed with only the hero retrying while the list still awaited its tasks. It now requires the counts to be exactly `[2, 2]`.
+  - `!heroLoading` also matches the unknown dash, so the recovery surface would pass a hero that never recovered. It now requires `$10.00`.
+  - Lesson: an assertion written as "no wrong value seen" passes when nothing was seen. Name the exact value expected, and prove each check with a negative probe on the wrong state.
+- **Evidence:** the two checks live in an import-free block of the surface file, and `scratchpad`'s `probe-r2.ts` runs them alone: 9 of 9 cases as expected (the four wrong port counts and three wrong heroes rejected, the right ones accepted). The three retry surfaces: 12 of 12 identical base vs head, and 12 of 12 under `--stability`.

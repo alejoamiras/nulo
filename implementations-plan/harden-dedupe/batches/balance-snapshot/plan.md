@@ -309,7 +309,7 @@ Detail in `../../lessons/arc-21-balance-snapshot.md`.
 - Mutation: 40 mutants; 38 killed, 2 equivalent (A4, A5). The first run killed 36. C20 and A12 (a predicate over a built object) survived because the effect tests only edited `chainId` in place; the tests now also replace the network object. A4 and A5 (`dispose` after `disconnect()`) are equivalent for these consumers by probe of the messaging client: `disconnect()` never fires `onConnected` or sends a request, and neither view listens to `onDisconnected`. After code review round 1, the script records a kill only for a named failed test (an exit without one is an error), and the full set was rerun at the restacked code head: 38 killed, each with its failing tests on record, 0 errors.
 - Restacked onto `harden-dedupe` at `1a08fa52` without conflict; no manifest changed.
 - Gates green at `6a0db7de`, and again at the restacked code head `e4b5822d`.
-- Screenshots, base `1a08fa52` vs head `e4b5822d`: 17 surfaces × 2 themes × 2 browsers, 64 of 64 identical; `--stability` 64 of 64 identical.
+- Screenshots, base `1a08fa52` vs head `e4b5822d`: 16 surfaces × 2 themes × 2 browsers, 64 of 64 identical; `--stability` 64 of 64 identical.
 
 ## Post-implementation
 
@@ -400,3 +400,13 @@ No production regression in 20 base/head probes. A4 and A5 held equivalent for t
 1. **Should-fix: the screenshots omitted the retry states.** Added `home-rejected-pre-cap` (each view's first snapshot and its timed retry rejected, before the cap) and `home-retry-recovered` (each view's first snapshot rejects, its retry answers, the rows land). Both, and `home-rejected-past-cap`, assert that every token-balance port the mount opened asked exactly twice, before and after the shot.
 2. **Should-fix: the mutation evidence did not enforce the kill criterion.** Any nonzero exit counted as a kill, the report was overwritten per run, and the first run had 36 kills, not 38. The script now reads vitest's JSON report, records a kill only for a named failed test, keeps load failures as errors, and appends every result to one log. The full set was rerun: 38 killed, 2 equivalent, 0 errors.
 3. **Nit: drift 6 is not invisible.** Reworded as a preserved, temporary refresh-indicator drift (the list's refresh dot reads `isUpdating`).
+
+### Code review round 2, Codex: NOT CONVERGED
+
+Round 1's findings 2 and 3 resolved. No production regression; `invalidate()` keeps the synchronous invalidation and microtask timing; the price broadcast follows the production quote-event path and cannot repair a stale balance landing. Codex re-verified all 64 base/head and 64 stability pairs byte for byte. All findings adopted:
+
+1. **Should-fix: the retry check did not prove both views took part.** It skipped ports with no calls and accepted `[2]`. The retry surfaces now require the participating ports' counts to be exactly `[2, 2]` as a multiset, before and after each capture.
+2. **Should-fix: `home-retry-recovered` accepted an unknown hero past the cap.** It now requires the hero to show `$10.00`, with neither the skeleton nor the unknown dash.
+3. **Nit:** 16 surfaces, not 17.
+
+A negative probe runs the two new checks alone: they reject `[2]`, `[]`, `[2, 1]` and `[2, 2, 2]`, and a hero of `—`, `$0.00` or the skeleton; they accept `[2, 2]` and `$10.00`. The three retry surfaces, rerun base `1a08fa52` vs head `e4b5822d` on Chrome and Firefox in both themes: 12 of 12 identical, and 12 of 12 under `--stability`.
