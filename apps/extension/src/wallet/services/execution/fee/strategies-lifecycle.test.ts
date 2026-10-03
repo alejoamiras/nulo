@@ -395,3 +395,55 @@ describe("committed fees for an explicit multiplier", () => {
 		expect(feesOf(result.txRequest as never)).toEqual([555n, 666n])
 	})
 })
+
+describe("account reads at V2 and V3", () => {
+	const ORDER: Record<"fjwc" | "embedded", string[]> = {
+		fjwc: ["built.account", "gasSettings set", "account.address", "simulate"],
+		embedded: ["built.account", "gasSettings set", "getCurrentMinFees", "gasSettings set", "account.address", "simulate"],
+	}
+
+	test.each(["fjwc", "embedded"] as const)(
+		"%s: the account is taken before the gas limits, its address at the simulation",
+		async (path) => {
+			const h = harness(path)
+			const order: string[] = []
+			const built = makeBuilt({})
+			const { address } = built.account
+			const txContext = built.txRequest.txContext
+			let gasSettings = txContext.gasSettings
+			Object.defineProperty(txContext, "gasSettings", {
+				get: () => gasSettings,
+				set: (next: GasSettings) => {
+					order.push("gasSettings set")
+					gasSettings = next
+				},
+			})
+			const account = {
+				get address() {
+					order.push("account.address")
+					return address
+				},
+			}
+			Object.defineProperty(built, "account", {
+				enumerable: true,
+				get: () => {
+					order.push("built.account")
+					return account
+				},
+			})
+			built.node.getCurrentMinFees.mockImplementation(async () => {
+				order.push("getCurrentMinFees")
+				return new GasFees(555n, 666n)
+			})
+			h.buildStandard.mockResolvedValueOnce(built)
+			h.simulateTxTask.mockImplementationOnce(async () => {
+				order.push("simulate")
+				return sentinelSim()
+			})
+			const op = h.ctx.op as { fee?: Record<string, unknown> }
+			op.fee = { ...op.fee, gasLimits: { daGas: 9, l2Gas: 9 } }
+			await h.strategy.buildAndEstimate(h.ctx)
+			expect(order.slice(0, order.indexOf("simulate") + 1)).toEqual(ORDER[path])
+		},
+	)
+})

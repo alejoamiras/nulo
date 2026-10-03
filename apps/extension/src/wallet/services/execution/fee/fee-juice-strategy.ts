@@ -48,7 +48,7 @@ export class FeeJuiceStrategy implements FeeStrategy {
 						task,
 					)
 					suggestGasLimits(built.txRequest, ctx.op.fee)
-					simulatedTx = await this.deps.simulateTxTask(built.pxe, built.txRequest, validatedSimOpts(built), task)
+					simulatedTx = await this.deps.simulateTxTask(built.pxe, built.txRequest, validatedSimOpts(built.account.address), task)
 				}
 			}
 			await finalizeGasLimits(

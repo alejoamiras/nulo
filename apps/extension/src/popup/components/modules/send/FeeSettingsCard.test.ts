@@ -2457,7 +2457,7 @@ describe("FeeSettingsCard — the identity guards, field by field", () => {
 	})
 
 	/** A degraded init, then a recovery recommit held on its storage read; `mutate` runs while it is held. */
-	const recommitAcross = async (mutate: (i: Identity) => void) => {
+	const recommitAcross = async (mutate: (i: Identity, w: ReturnType<typeof mount>) => void | Promise<void>) => {
 		vi.useFakeTimers()
 		// biome-ignore lint/suspicious/noExplicitAny: test-only global stub
 		const chromeAny = (globalThis as any).chrome
@@ -2480,7 +2480,7 @@ describe("FeeSettingsCard — the identity guards, field by field", () => {
 				return origGet(keys)
 			}
 			await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0] + 50)
-			mutate(live)
+			await mutate(live, w)
 			gate.resolve()
 			await vi.advanceTimersByTimeAsync(0)
 			return w
@@ -2498,6 +2498,51 @@ describe("FeeSettingsCard — the identity guards, field by field", () => {
 	test.each(IN_PLACE)("an in-place $field change during a recovery recommit discards the late commit", async ({ mutate }) => {
 		const w = await recommitAcross(mutate)
 		expect(degraded(w)).toBe(true)
+	})
+
+	test("a switch to an embedded payment during a recovery recommit discards the late commit", async () => {
+		let before = 0
+		let holder: { release: () => void } | undefined
+		const w = await recommitAcross(async (_live, card) => {
+			before = settingsEmitted(card).length
+			// Another subscriber on the key (a second operation card, say) keeps the recovered entry
+			// alive after this card releases its lease.
+			holder = useBalancesStore().subscribe(
+				{ profileId: profile.id, networkId: network.id, chainId: network.chainId, accountAddress: account.address },
+				{ legs: ["gas"], retry: false, txRefresh: false, peek: false },
+			)
+			await card.setProps({ modelValue: { paymentMethod: { kind: "embedded" } } })
+			await vi.advanceTimersByTimeAsync(0)
+		})
+		expect(w.find('[data-testid="send-fee-embedded"]').exists()).toBe(true)
+		expect(settingsEmitted(w).slice(before)).toEqual([])
+		// Still degraded, so opting out of the embedded payment reads afresh; that read fails here.
+		const reads = mocks.getGasBalances.mock.calls.length
+		mocks.getGasBalances.mockRejectedValue(new Error("still down"))
+		// A native click: test-utils' `trigger` on this wrapper left `useOwnMethod` unset.
+		;(w.get('[data-testid="send-fee-override"]').element as HTMLElement).click()
+		await flushPromises()
+		expect(mocks.getGasBalances.mock.calls.length).toBe(reads + 1)
+		expect(degraded(w)).toBe(true)
+		holder?.release()
+	})
+
+	test("Send: a pending selection keeps its cached result while unread identity fields change", async () => {
+		let live: Identity | undefined
+		const w = await sendAcross((i) => {
+			live = i
+		})
+		if (!live) throw new Error("no identity")
+		const vm = w.vm as unknown as { sendSelection: { kind: string } }
+		expect(vm.sendSelection.kind).toBe("selected")
+		live.profile.id = "p2"
+		await flushPromises()
+		const pending = vm.sendSelection
+		expect(pending.kind).toBe("pending")
+		live.network.chainId = 222
+		live.network.id = "n2"
+		await flushPromises()
+		expect(vm.sendSelection).toBe(pending)
 	})
 
 	/** Send's settled selection, then `mutate`. */

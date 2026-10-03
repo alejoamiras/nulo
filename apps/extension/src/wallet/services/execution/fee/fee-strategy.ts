@@ -159,8 +159,8 @@ export function probedFirstSimOpts(
 	probe: DiscoveryProbe | undefined,
 	built: { account: { address: AztecAddress } },
 ): Parameters<SimulateTxFn>[2] {
-	if (!probe) return validatedSimOpts(built)
 	const address = built.account.address
+	if (!probe) return validatedSimOpts(address)
 	return {
 		simulatePublic: true,
 		skipFeeEnforcement: true,
@@ -170,10 +170,9 @@ export function probedFirstSimOpts(
 	}
 }
 
-/** Options for a simulation that verifies everything: never the stub or the skipped validation.
- *  `built` must be the build the simulation runs, so the scope is that build's account. */
-export function validatedSimOpts(built: { account: { address: AztecAddress } }): Parameters<SimulateTxFn>[2] {
-	return { simulatePublic: true, skipFeeEnforcement: true, scopes: [built.account.address] }
+/** Verifies witnesses and transaction validity while skipping fee enforcement; scope must match the simulated build. */
+export function validatedSimOpts(scope: AztecAddress): Parameters<SimulateTxFn>[2] {
+	return { simulatePublic: true, skipFeeEnforcement: true, scopes: [scope] }
 }
 
 /** True when the build wraps the account's own deployment (first tx): the
