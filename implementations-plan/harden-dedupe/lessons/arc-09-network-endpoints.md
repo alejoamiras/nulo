@@ -67,6 +67,12 @@
     - `test:release` exits 0, 164 pass, with a user-local `zip`: the Ubuntu `zip` .deb was fetched with `apt-get download` and unpacked with `dpkg -x` into a scratch dir on PATH for that run only, with no sudo and no system install.
     - `THIRD-PARTY-NOTICES.txt` is identical on both browsers.
     - Shots: base `169bed04` vs the new head, 44/44 identical; stability on the head, 44/44 identical. The same fixture and port discipline was used, and no registry row or process was left.
+- **Round 2** (Codex): CONVERGED, with no blocker and no should-fix.
+  - With the pure helpers expanded, both status bodies match `7450928c` and `169bed04`.
+  - 8,777 transport inputs show zero differences, error bytes and URL parse counts included.
+  - Shots: 44/44 and 44/44.
+  - **Provenance note:** the head stability run overwrote the base captures in the shared shots dir, so the base-vs-head comparison rests on its saved `report.md`.
+  - **One nit, adopted:** the plan still described the deleted helper and its `localKind` flip. Section (b), the B-09 drift entry and the mutation table now describe the inline bodies as built.
 
 ## Screenshots
 

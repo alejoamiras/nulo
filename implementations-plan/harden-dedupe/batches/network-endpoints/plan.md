@@ -9,9 +9,9 @@ eli5_mode: none (the program Artifact replaces per-batch ELI5 pages; see the pro
 branch: hd/09-network-endpoints, stacked on harden-dedupe
 ---
 
-# network-endpoints: one primary-endpoint lookup, one status skeleton, one transport rule
+# network-endpoints: one primary-endpoint lookup, shared status helpers, one transport rule
 
-Finding Q-04 (a) service and popup sites, (b), (c), (d) and (e), from `audit/quality/2026-09-30-dedup-high/`. The primary endpoint is looked up by hand at 11 sites outside execution, the two node-status methods share a drifted skeleton, the endpoint identity guard is written twice, the RPC transport allowlist exists in the extension and again in aztec-runtime, and the two endpoint popups carry the same error ladder. This batch states each once. Every site keeps its exact acceptance set, missing-primary policy, error text and copy. B-09 stays live behind a named argument. Q-04 (a)'s four execution sites belong to estimate-reuse.
+Finding Q-04 (a) service and popup sites, (b), (c), (d) and (e), from `audit/quality/2026-09-30-dedup-high/`. The primary endpoint is looked up by hand at 11 sites outside execution, the two node-status methods share a drifted body, the endpoint identity guard is written twice, the RPC transport allowlist exists in the extension and again in aztec-runtime, and the two endpoint popups carry the same error ladder. This batch states each once. Every site keeps its exact acceptance set, missing-primary policy, error text and copy. B-09 stays live, as at base. Q-04 (a)'s four execution sites belong to estimate-reuse.
 
 Paths below are under `apps/extension/src/` unless they start with `packages/` or `implementations-plan/`.
 
@@ -20,7 +20,7 @@ Paths below are under `apps/extension/src/` unless they start with `packages/` o
 - **For whom:** whoever next changes endpoint policy: a new transport rule, a new missing-primary case, a status fix such as B-09. Today the transport rule is two copies that already disagree on userinfo, and the status methods disagree on the local carve-out.
 - **Excellent:**
   - One `findPrimaryEndpoint`; each caller keeps its own missing-primary policy, and a test pins each policy.
-  - One status skeleton, where B-09 is a single argument the alignment arc can flip.
+  - Status bodies that share their pure helpers and keep their await shape, with B-09 a one-argument change the alignment arc can make.
   - One transport rule in a wallet-core leaf. Each site keeps its own wrapper: the schema still refuses userinfo, the adapter still accepts it, and the adapter's refusal reasons stay byte-identical.
   - The popups' copy is byte-identical, pinned per popup and per error before the refactor, and the endpoint popups are pixel-identical in the zero-diff harness.
 - **Good enough:** the add/update preambles (peek, probe outside the lock, locked re-read) stay inline, and so does `getNode`'s own throw.
@@ -45,7 +45,7 @@ export function findPrimaryEndpoint(network: Network): NetworkEndpoint | undefin
 | `network/service.ts:340` (`activateSeededLocked`) | `…find(…)!` | non-null assertion | `findPrimaryEndpoint(active)!` |
 | `:415` (`resolveVerifiedL1ChainId`) | `…find(…) ?? network.endpoints[0]` | fall back to the first endpoint | `findPrimaryEndpoint(network) ?? network.endpoints[0]` |
 | `:587` (`setActiveNetwork`) | `if (primaryEndpoint)` cache the node | skip the cache, still emit | `findPrimaryEndpoint(network)` |
-| `:737`, `:753` (status) | `if (!primary) return Inactive` | `Inactive`, no node built | inside the shared skeleton, (b) |
+| `:737`, `:753` (status) | `if (!primary) return Inactive` | `Inactive`, no node built | `findPrimaryEndpoint(network)`, each body inline, (b) |
 | `:775` (`getNode`) | throws `Network ${id} has no primary endpoint` | same throw, same text | `findPrimaryEndpoint(network)`, throw line kept |
 | `:849-855` (`getNetworkInfo`) | verbatim copy of `networkInfoFrom` | same throw text | `return networkInfoFrom(await this.getNetwork(networkId))`, after the existing `ensureInitialized` |
 | `spec.ts:92-96` (`networkInfoFrom`) | throws | same | `findPrimaryEndpoint(network)` |
@@ -58,7 +58,7 @@ export function findPrimaryEndpoint(network: Network): NetworkEndpoint | undefin
 - **`EditNetworkPopup`'s URL field is vestigial.** Nothing renders `urlTerm` (`:42`), so the swap is invisible, and only a throw at `onShow` could break it.
 - **Not sites:** `popup/pages/settings/networks/[id].vue:84, 96, 201, 202, 219` compare ids; `network/service.ts:787` (`readPublicStorageOnce`) already calls `primaryEndpointUrl`. The four execution sites (`execution/transfer-executor.ts:377`, `dapp-send-executor.ts:470`, `operation-estimate-reuse.ts:141`, `transfer-estimate-reuse.ts:181`) are estimate-reuse's, and they adopt `findPrimaryEndpoint` there.
 
-### (b) Node status: one skeleton, B-09 behind an argument
+### (b) Node status: shared pure helpers, both bodies inline
 
 Today (`network/service.ts:732-765`), the two methods differ in three ways:
 
@@ -73,21 +73,12 @@ Both validate their params, call `ensureInitialized`, require the active profile
 **What changes:**
 
 - A module function `isLocalNetworkTarget(rpcUrl, kindHint)`: `kindHint === "local" || sameLocalNetworkUrl(rpcUrl, LOCAL_NETWORK_RPC_URL)`. `_probeChainIdentity`'s two `if`s (`:1014-1015`) become one, with the same short-circuit order.
-- A private skeleton:
-
-  ```ts
-  private async primaryEndpointStatus(
-  	networkId: string,
-  	chainIdAt: (rpcUrl: string, kindHint: ChainKind | undefined) => Promise<number>,
-  	localKind: "applied" | "ignored",
-  ): Promise<NodeStatus>
-  ```
-
-  Its body: active profile, owned row, `findPrimaryEndpoint` (none → `Inactive`), all outside the `try` so their rejections propagate as today; then `try { chainIdAt(primary.rpcUrl, localKind === "applied" ? network.kind : undefined) }`. Equal → `Active`, different → `InvalidChain`, a throw from the probe → `Inactive`.
-- `getNodeStatus` keeps `validateParams` and `ensureInitialized`, then calls `primaryEndpointStatus(networkId, (url, hint) => this._getChainId(url, hint), "ignored")`. `"ignored"` is B-09, kept.
-- `probeNodeStatus` does the same with an async probe: `await this.nodeFactory.probeChainId(url, timeoutMs)` first, then `isLocalNetworkTarget(url, hint) ? 0 : probed`. So `"applied"` is today's behaviour, and a dead local node is still `Inactive`.
-- The alignment arc's B-09 commit is one token: `"ignored"` → `"applied"` in `getNodeStatus`.
-- **Required at both callers, no default** (panel's call): it puts the knob where B-09 lives. Today's behaviour is the value each caller passes.
+- **As built, both async bodies stay inline,** each with today's await shape. Only the synchronous helpers are shared:
+  - `findPrimaryEndpoint` (none → `Inactive`), after the profile and owned-row checks and outside the `try`, so their rejections propagate as today;
+  - `isLocalNetworkTarget`, used in `probeNodeStatus` as `isLocalNetworkTarget(primary.rpcUrl, network.kind) ? 0 : probed`, after the probe.
+- `getNodeStatus` still calls `_getChainId(primary.rpcUrl)` with no kind hint, so B-09 is kept, and a one-line comment marks it.
+- **Why no shared async skeleton.** An earlier build extracted a `primaryEndpointStatus` helper whose `localKind` argument was required at both callers. Code review round 1 measured the extra settlement hops it added: 4 → 5 and 2 → 4 microtasks after the probe resolves. Under the program's rule that counts as behaviour, so the helper was deleted.
+- **The alignment arc's B-09 commit** passes `network.kind` as the hint in `getNodeStatus`: `_getChainId(primary.rpcUrl, network.kind)`.
 
 ### (c) Endpoint identity guard
 
@@ -163,7 +154,7 @@ The service (`addEndpoint` and the rest) passes the raw string, not zod's trimme
 
 ### Complexity
 
-Nothing touched is in `scripts/complexity-baseline/manifest.json`. Every new function is a few flat lines; `primaryEndpointStatus` has one ternary and one `try`.
+Nothing touched is in `scripts/complexity-baseline/manifest.json`. Every new function is a few flat lines.
 
 ### Coupling with neighbouring arcs
 
@@ -214,7 +205,7 @@ Nothing touched is in `scripts/complexity-baseline/manifest.json`. Every new fun
 **Inferences:**
 
 - The acceptance table holds on Chrome and Firefox as on Bun for every bolded row: those rows exercise spec-defined WHATWG behaviour. Equivalence after the change does not depend on engine, since both before and after read the same `URL` object.
-- The extra microtask hop through `primaryEndpointStatus` is unobservable: both methods are popup RPCs or awaited reads, and no span depends on their timing.
+- ~~The extra microtask hop through a shared status helper is unobservable.~~ This was rejected in code review round 1: the program counts settlement order as behaviour, so both status bodies stay inline (§ (b)).
 
 **Asks:** none open. The panel answered both (see Decisions).
 
@@ -280,8 +271,8 @@ The phase is green against the unchanged code, in its own commit, so the test fi
 
 | mutation | the test that fails |
 |---|---|
-| `getNodeStatus` passes `"applied"` | the BUG PIN row |
-| `probeNodeStatus` passes `"ignored"` | the local probe row |
+| `getNodeStatus` passes `network.kind` as the hint | the BUG PIN row |
+| `probeNodeStatus` drops `network.kind` from the carve-out | the local probe row |
 | the carve-out runs before the probe | the local-unreachable row |
 | the probes are swapped | the spies |
 | the identity checks' order is swapped | the both-mismatch row |
@@ -364,7 +355,7 @@ None by design.
 
 ## Drift left for the alignment arc
 
-- **B-09 (owner call 1):** `getNodeStatus` ignores `network.kind`, so an edited Local Network endpoint reads `InvalidChain` on the header badge and is left out of backups (`account-state/service.ts:221`). The fix is the one-token `localKind` flip above. Its evidence covers the badge and a restored backup's contents.
+- **B-09 (owner call 1):** `getNodeStatus` ignores `network.kind`, so an edited Local Network endpoint reads `InvalidChain` on the header badge and is left out of backups (`account-state/service.ts:221`). The fix is one argument: `getNodeStatus` passes `network.kind` to `_getChainId`, as § (b) says. Its evidence covers the badge and a restored backup's contents.
 - **Userinfo:** the schema refuses it and the adapter accepts it. This is the program's "kept as today, no call" policy, excluded from the safer-fix route.
 - **Duplicate-URL wording** differs per popup: kept as a parameter, no call.
 - **Zod trims, the service does not:** a leading NBSP, or one right after the host, passes the schema, then fails the adapter as "RPC didn't respond". A trailing NBSP after a path or query passes both, and the stored URL carries it as path or query data. No transport is bypassed; a robustness and URL-consistency follow-up.
@@ -382,7 +373,7 @@ Codex verified against `bb014f77`: an in-memory `rpcTransportVerdict` candidate 
 All adopted:
 
 1. **Ask 2: build a fake local node.** No proxy evidence: the wrong-chain and duplicate states are shot in both popups, on both browsers and themes, base against head, with a stability pass. The fixture answers `aztec_getNodeInfo` (not `node_getNodeInfo`) in the SDK's batch format, on a registry-claimed loopback port that one session keeps throughout. Its process group is owned and torn down by pgid. All shown data is credential-free and local, the rename shot included. If it proves infeasible, all of (e) is deferred (§ Phase 3).
-2. **Ask 1: `localKind` required at both callers, no default.** `"ignored"` for `getNodeStatus` keeps B-09; `"applied"` for `probeNodeStatus`. The wording now puts initialization, the profile and ownership checks and the primary lookup outside the probe's `catch`, where today's rejections come from (§ (b)).
+2. **Ask 1: `localKind` required at both callers, no default.** `"ignored"` for `getNodeStatus` keeps B-09; `"applied"` for `probeNodeStatus`. The wording now puts initialization, the profile and ownership checks and the primary lookup outside the probe's `catch`, where today's rejections come from (§ (b)). The `localKind` argument was later removed along with the shared helper, in code review round 1; the checks-outside-the-catch half stands.
 3. **Pin the lazy chain-id read before extracting:** deferred-rejection rows with the network gone, mutation-checked against an eager getter and a `?.`/`.` swap (§ Phase 1).
 4. **NBSP wording qualified,** with the path and query rows that pass both gates added as characterization. It is a robustness follow-up with no transport bypass (§ (d), Drift).
 5. **Engine error text:** local names kept, or the expression left inline, wherever malformed stored data could reach it, plus a three-engine probe (§ Assumptions).
