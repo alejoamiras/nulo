@@ -60,14 +60,30 @@ The program's local harness compared base `0a9e48f9` with head `77969642`. It ra
     - `send_transaction` with an embedded fee, and without one (the selectable fee card).
 - **Batch `dapp-windows-queue`: 4 of 4 identical, and 4 of 4 stable,** on the real worker against a served playground.
   - **Setup:** the playground origin holds both verify windows on chain 0 and queues four reconnects. A tab asking for the Testnet chain then gets the connect window, which is the shot.
-  - **The assertion ran in all 12 captures:** after Allow, the window closes within 10 s, the verify-window count stays at 2, and the tab never connects.
-  - **The refusal reason is inferred, not observed.** `rejectDiscovery` sends the dApp nothing it can read, and the worker's Warn line is reachable only through the log viewer. The other exits are ruled out:
-    - an admitted connection opens a third verify window;
-    - `expired` cannot fire inside a 55 s deadline;
-    - the waiting window closes only in the worker's `finally`.
+  - **The assertion ran in all 12 captures** (base, head and base again, each on two browsers in two themes). After Allow:
+    - the window closes within 10 s;
+    - the verify-window count stays at 2;
+    - the tab never connects;
+    - the log viewer (`#/windows/logger`) gains exactly one new line, `WARN: Discovery rejected (verify-window queue full): request ext-N`. That is `ext-7` in the first theme and `ext-14` in the second, the seventh request of each pass.
+  - **The refusal is observed, not inferred.** Closure alone does not prove it: an attach failure reaches the same `finally`, and `rejectDiscovery` sends the dApp nothing it can read. The Warn level is kept with every toggle off, so no production instrumentation was needed.
+  - **This batch's head is `9e532274`.** Code review round 1 changed only a TSDoc sentence.
 - **Head images were opened by eye, not trusted from the report.** They show the punycode warning, the busy Allow, the fee card's chevron on `send_transaction` without a fee, and the reconnect's "Account 1" strip.
 - **Harness gotchas:**
   - **`innerText` applies `text-transform`.** The identity strip's "Account 1" reads `ACCOUNT 1`, so a text check reads `textContent` instead.
   - **`inject("playgroundUrl")` returns `undefined` under the smoke config.** It does not throw, so `openPlayground`'s env fallback never runs. The queue surface builds its URL from `PLAYGROUND_URL` itself.
   - **A relative log path breaks a child with its own `cwd`.** The playground child runs in `PG_DIR`, so its relative stdout path fails as `ENOENT … posix_spawn 'bun'`, which looks like a missing binary.
   - **A 60 s lock retry loses to other agents' runs.** A 5 s retry took the lock on the next free slot.
+  - **The log viewer's editor renders only the lines in view.** Its search box filters the source and level lists, not log text, so the whole document is read from the CodeMirror view on `.cm-content` (`cmTile.root.view` in 6.43, `findFromDOM`'s own lookup).
+  - **The viewer's first live line joins the last loaded one.** The loaded document has no trailing newline, so one Firefox read saw `…request ext-6[06:57:40.167] [wallet-sdk] WARN: …`. This is pre-existing viewer behavior; the check matches on a substring and is unaffected.
+
+## Code review
+
+- **Round 1 (Codex, GPT-6 Astra, xhigh): not converged, one should-fix and one nit, both fixed.** Everything else passed with high confidence:
+  - the hostname table on four engines;
+  - the order of the window close;
+  - the worker's request fields and refusal order;
+  - the microtask literals and both new mutants;
+  - the equivalence of dropping `immediate: true`.
+- **Should-fix:** the queue-full refusal was only inferred from the window closing. The harness now observes the worker's Warn line in the log viewer (see Screenshots).
+- **Nit:** the `untilSessionChecked` TSDoc said prod "never settles", which is false: a later false→true transition still resolves. The doc and the plan now state only the precondition, because otherwise the immediate callback reads `stop` before it is initialized.
+- **Gates at `9e532274`:** `lint`, `typecheck:all`, `test:all`, `test:ci-gating` and `audit:vue` all exit 0.
