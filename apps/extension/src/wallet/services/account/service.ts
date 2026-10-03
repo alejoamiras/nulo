@@ -152,11 +152,13 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		const accounts = (await this.liveRows()).filter((x) => x.profileId === profileId && x.chainId === chainId)
 		await purgeRows(
 			accounts,
-			async (account) => {
-				await this.storage.delete(accountRowIdOf(account))
-				// An imported account's key row shares the account's chain scope — purge it too.
-				if (account.type === AccountType.Imported) await this.importedKeys.delete(profileId, chainId, account.address)
-			},
+			// Under the row's lock, so a rename parked on its read cannot write the row back.
+			(account) =>
+				this.tupleLocks.withLock(accountRowIdOf(account), async () => {
+					await this.storage.delete(accountRowIdOf(account))
+					// An imported account's key row shares the account's chain scope — purge it too.
+					if (account.type === AccountType.Imported) await this.importedKeys.delete(profileId, chainId, account.address)
+				}),
 			(account) => this.emit("onAccountDeleted", account),
 		)
 	}
@@ -628,7 +630,8 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		// their emit; only the profile-wide purge goes silent.
 		await purgeRows(
 			accounts,
-			(account) => this.storage.delete(accountRowIdOf(account)),
+			// Under the row's lock, so a rename parked on its read cannot write the row back.
+			(account) => this.tupleLocks.withLock(accountRowIdOf(account), () => this.storage.delete(accountRowIdOf(account))),
 			() => {},
 		)
 		// Purge this profile's imported-account signing keys alongside its account rows.

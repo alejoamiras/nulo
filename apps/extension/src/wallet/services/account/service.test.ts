@@ -499,6 +499,68 @@ describe("AccountService — same-row field editors serialize", () => {
 	})
 })
 
+describe("AccountService purges wait for a rename holding the same row", () => {
+	const rowKey = `nulo:core:accounts@${accountRowId("p1", 1, "0xaa")}`
+	const keyRowKey = `nulo:core:imported-account-keys@${accountRowId("p1", 1, "0xaa")}`
+
+	async function makeHarness() {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const services = new ServiceCollection()
+		services.add(
+			svc(PROFILE_SERVICE_NAME, { onProfileDeleted: new EventHandler(), getDeletionState: () => new ProfileDeletionState() }),
+		)
+		services.add(svc(NETWORK_SERVICE_NAME, { registerChainPurgeSubscriber: () => {} }))
+		const service = new AccountService(new LoggerStore(new ConfigStore()), api)
+		services.add(service)
+		await services.start()
+		await api.storage.local.set({
+			[rowKey]: JSON.stringify(mkAccount("0xaa", { type: 1 })),
+			[keyRowKey]: JSON.stringify({ profileId: "p1", chainId: 1, address: "0xaa", encryptedSigningKey: "s" }),
+		})
+		return { api, service }
+	}
+
+	/** Parks the first keyed read of the row after it returns, as a rename's read. */
+	function parkRowRead(api: FakeBrowserApi): { release: () => void; parked: Promise<void> } {
+		const realGet = api.storage.local.get.bind(api.storage.local)
+		let release!: () => void
+		let reached!: () => void
+		const parked = new Promise<void>((r) => {
+			reached = r
+		})
+		let armed = true
+		api.storage.local.get = (async (key: unknown) => {
+			const value = await realGet(key as never)
+			if (armed && key === rowKey) {
+				armed = false
+				reached()
+				await new Promise<void>((r) => {
+					release = r
+				})
+			}
+			return value
+		}) as typeof api.storage.local.get
+		return { release: () => release(), parked }
+	}
+
+	test.each([
+		["clearChainState", (s: AccountService) => s.clearChainState("p1", 1)],
+		["purgeForProfile", (s: AccountService) => s.purgeForProfile("p1")],
+	])("%s: the renamed row is not written back after the delete", async (_name, purge) => {
+		const { api, service } = await makeHarness()
+		const gate = parkRowRead(api)
+		const rename = service.changeAccountName("p1", 1, "0xaa", "renamed")
+		await gate.parked
+		const purging = purge(service)
+		await new Promise((r) => setTimeout(r, 0))
+		gate.release()
+		await Promise.all([rename, purging])
+		const keys = Object.keys(await api.storage.local.get(null))
+		expect(keys.filter((k) => k === rowKey || k === keyRowKey)).toEqual([])
+	})
+})
+
 describe("AccountService.provisionDefaultAccount — unattended rule", () => {
 	async function makeHarness(resolve: (opts?: { unattended?: boolean }) => Promise<number>) {
 		const api = new FakeBrowserApi()
