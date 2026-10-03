@@ -46,24 +46,39 @@ Read on `harden-dedupe` at `61260efc`.
 | E2 | dApp-supplied `chainInfo` (`Fr` or string, any size) | none. A malformed string throws `SyntaxError`. At `:71` it runs before the handler's `try`, so the throw escapes before any marker read | the whole function |
 | E3 | same as E2 | runs after the active-profile and stamp checks (`:116-121`) and the epoch capture (`:126`), inside the `try` whose catch logs and returns `undefined` (`:222-225`) | `:128` |
 
-The formula holds no guard, so unifying it cannot drop or loosen one. The only risk is wiring: passing the wrong field, or moving the call across a guard. The per-site literal tests below catch both.
+The formula holds no guard, so unifying it cannot drop or loosen one. The risks are wiring (a wrong or duplicated operand, or a call moved across a guard or into a `try`) and type (a signed, bigint or hex result). The per-site tests below catch each.
+
+**Other consumers of the composite, none edited:** they read the value these sites produce, which is unchanged:
+
+- account rows and their locks and integrity digest (`account/service.ts:300`, `account-integrity/types.ts:27`);
+- the PXE database scopes (`packages/aztec-runtime/src/pxe/chain-coordinates.ts:19-30`, persisted);
+- the discovery queue and coalescing keys and revocation matching (`background.ts:761, 646`);
+- the default-token seeds, price-map keys and explorer selection (`default-tokens.ts:22`, `price-map.ts:16`, `explorers.ts:2`, all through `CHAIN_IDS`);
+- auth-registry scopes (`auth-registry/service.ts:515`);
+- the backup e2e fixtures (`tests/e2e/network/backup-import-stalled-network.test.ts:21`).
 
 ### What changes
 
-1. **New leaf `packages/wallet-core/src/utils/chain-id.ts`:** `walletChainId`, moved verbatim, with one TSDoc sentence stating the invariant: it is the persisted storage-scoping and dApp-session key, so its value is frozen (unsigned 32-bit, a `number`). `packages/wallet-core/src/utils/index.ts` gains `export * from "./chain-id"` (alphabetical, after `arrays`). The README's pure-helpers file-map row adds `chain-id.ts`.
-2. **`apps/extension/src/utils/chain-ids.ts`:** delete `:12-14`, then `import { walletChainId } from "@nulo/wallet-core/utils"` and `export { walletChainId }`. That keeps `CHAIN_IDS`, `fake-node-factory.ts`, `chain-ids.test.ts` and the auto-import entry unedited. `unimport` 6.4.0's `scanExports` records a named re-export under the re-exporting file, so `auto-imports.d.ts` stays byte-identical; Phase 2 proves it with a build.
-3. **A1, A2:** `walletChainId(info.l1ChainId, info.rollupVersion)` and `walletChainId(nodeInfo.l1ChainId, nodeInfo.rollupVersion)`, imported from `@nulo/wallet-core/utils`. aztec-runtime already depends on wallet-core.
+1. **New leaf `packages/wallet-core/src/utils/chain-id.ts`:** `walletChainId`, moved verbatim, with one TSDoc sentence stating the invariant: it is the persisted storage-scoping and dApp-session key, so its value is frozen (unsigned 32-bit, a `number`). `packages/wallet-core/src/utils/index.ts` gains `export * from "./chain-id"` (alphabetical, after `arrays`). The README's pure-helpers file-map row adds `chain-id.ts`. A two-row `chain-id.test.ts` (the high-bit and above-u32 pairs) sits beside it. This is the only test file Phase 2 adds; it edits none.
+2. **`apps/extension/src/utils/chain-ids.ts` stays the extension-side entry point:** extension code imports `walletChainId` from `@/utils/chain-ids`, never from wallet-core directly. Delete `:12-14`, then `import { walletChainId } from "@nulo/wallet-core/utils"` and `export { walletChainId }`. That keeps `CHAIN_IDS`, `fake-node-factory.ts`, `chain-ids.test.ts` and the auto-import entry unedited. `unimport` 6.4.0's `scanExports` records a named re-export under the re-exporting file, so `auto-imports.d.ts` stays byte-identical; Phase 2 proves it with a build.
+3. **A1, A2:** `walletChainId(info.l1ChainId, info.rollupVersion)` and `walletChainId(nodeInfo.l1ChainId, nodeInfo.rollupVersion)`, imported from `@nulo/wallet-core/utils`. aztec-runtime already depends on wallet-core. In A1's file header, the `F-011 / Phase 5:` workflow prefix (`:11`) is removed and the sentence kept.
 4. **E1:** `walletChainId(info.l1ChainId, info.rollupVersion)`, added to the existing `@/utils/chain-ids` import at `:24`. Everything else in `_probeChainIdentity` stays.
-5. **E2:** `return walletChainId(chainId, version)` replaces `:20`, imported from `@/utils/chain-ids`. The two decode lines (`:18-19`) stay verbatim. That keeps `Number(BigInt(...))` precision loss above 2^53, `ToInt32` wrapping above u32, `chainId` decoding before `version` (so which malformed field throws first), and the signature.
+5. **E2:** `return walletChainId(chainId, version)` replaces `:20`, imported from `@/utils/chain-ids`. The two decode lines (`:18-19`) stay verbatim. That keeps:
+   - `Number(BigInt(...))` precision loss above 2^53;
+   - `ToInt32` wrapping above u32;
+   - `chainId` decoding before `version`;
+   - the signature.
+
+   The TSDoc at `:15`, which restates the arithmetic, becomes one sentence: `chainId` is decoded before `version`, and the `Number` rounding and u32 coercion are part of the persisted key.
 6. **E3:** delete `:44-56`, the stale comment, the stranded `Fr` import and the copy. Import `chainInfoToChainId` from `./session-established`. `:128` stays unchanged.
 
 ### What stays
 
-Every call site's surrounding lines, the port contract (`probeChainId(): Promise<number>`), `chainInfoFrom`, the canonical-range checks, all six `background.ts` and `session-established.ts` call expressions (including their `String(...)` wrapping), and every export name. No test file changes in Phase 2.
+Every call site's surrounding lines, the port contract (`probeChainId(): Promise<number>`), `chainInfoFrom`, the canonical-range checks, all six `background.ts` and `session-established.ts` call expressions (including their `String(...)` wrapping), and every export name. Phase 2 edits no existing test file.
 
 **Alternatives not taken:**
 
-- *The audit's home, `aztec-runtime/src/utils/chain-identity.ts`.* `chain-ids.ts` would then re-export from `@nulo/aztec-runtime/utils`. That barrel pulls in `fetch.ts`, `Fr` and `@nulo/wallet-crypto` (whose `package.json` declares no `sideEffects: false`, and whose barrel imports `@aztec-labs/accounts`). It would reach every importer of `chain-ids.ts`: the popup (`components/ui/utils.ts:1`), the Node e2e helpers and `scripts/seed-preflight-node.ts`. wallet-core has no dependencies, and its `utils` barrel is already in the popup graph. See Asks.
+- *The audit's home, `aztec-runtime/src/utils/chain-identity.ts`.* `chain-ids.ts` would then re-export from `@nulo/aztec-runtime/utils`. That barrel pulls in `fetch.ts`, `Fr` and `@nulo/wallet-crypto` (whose `package.json` declares no `sideEffects: false`, and whose barrel imports `@aztec-labs/accounts`). It would reach every importer of `chain-ids.ts`, including the popup (`components/ui/utils.ts:1`) and the Node e2e helpers. wallet-core has no dependencies, and its `utils` barrel is already in the popup graph. The panel chose wallet-core (see Decisions).
 - *Moving the decoder into `chain-ids.ts`.* That would add a `chainInfoToChainId` auto-import global and put an SDK wire decoder in a popup-shared constants file. E3 imports it from `session-established.ts` instead. That module was extracted from `background.ts` for exactly this reason, and its own imports (window-manager, pending-verification, wallet-bridge, logger) are light.
 
 ### Complexity
@@ -88,10 +103,16 @@ None of the touched functions is in `scripts/complexity-baseline/manifest.json`.
   - `InvalidChain` status (`network/service.ts:741, 760`);
   - the signing-boundary drift check (A2).
 
-  A helper that returned a signed, bigint or hex value would re-key persisted rows and break MAC'd lookups, so the tests pin `typeof` and literal values at the boundary rows.
+  A helper that returned a signed, bigint or hex value would re-key persisted rows and break MAC'd lookups (the canonicaliser rejects bigints outright), so the tests pin `typeof` and literal values at the boundary rows.
 - **Account-address freeze:** the composite feeds no address, regime or key derivation. Derivation consumes the exact `l1ChainId` (`network/service.ts:1006-1008`; `LOCAL_L1_CHAIN_ID` at `chain-ids.ts:26-28`), which this arc does not touch.
 - **No guard moves or merges.** Each site keeps its guard set from the table. A2's composite is still computed only after the canonical-range checks that defeat the above-u32 alias (`chain-identity.test.ts` already pins that alias and the two-coordinate collision). E2 still throws outside the handler's `try`; E3 still swallows inside its own.
-- **Preserved, not fixed:** the E2/E3 decoder accepts non-canonical dApp `chainInfo` and maps it many-to-one, via `ToInt32` above u32 and `Number` rounding above 2^53. For example, `(l1 + 2^32, v)` lands on the same composite as `(l1, v)`. Rejecting it would change which sessions a dApp can address, so it goes under Drift as a follow-up lead.
+- **Preserved, not fixed:** the E2/E3 decoder accepts non-canonical dApp `chainInfo` and maps it many-to-one:
+  - via `ToInt32` above u32, so `(l1 + 2^32, v)` lands on the same composite as `(l1, v)`;
+  - via `Number` rounding above 2^53;
+  - `BigInt("")` and `BigInt(" ")` decode to 0;
+  - negative strings are accepted.
+
+  The panel classified this as no authority issue. An alias reaches only a composite the dApp could name directly, under its own origin, and signing uses the live, A2-checked chain info, never the dApp's pair. It goes under Drift as a robustness follow-up.
 - **Layering:** wallet-core sits below aztec-runtime and the extension. The new leaf imports nothing, so biome's wallet-core bans stay satisfied.
 - **npm surface:** wallet-core is not published, but `scripts/publish/stage.ts` inlines workspace source into `@alejoamiras/nulo-wallet-crypto`, whose modules import `@nulo/wallet-core/utils`. A probe that added this exact leaf and barrel line staged all three packages byte-identical to the unchanged tree (`diff -r` clean, scratch only, reverted). Phase 2 repeats that diff.
 - **Logging:** no log line changes. The decoder's output already appears in `session-established.ts` warn lines as a chain number, unchanged.
@@ -110,48 +131,48 @@ None of the touched functions is in `scripts/complexity-baseline/manifest.json`.
 
 **Inferences:**
 
-- The popup bundle and `THIRD-PARTY-NOTICES.txt` stay unchanged, because the only module newly reachable from `chain-ids.ts` is a dependency-free file in a package the popup already loads. The Phase 2 build confirms it.
+- Moving the function adds no Aztec or crypto dependency to the popup, the e2e helpers or the scripts, and it preserves behaviour. Chunk bytes may still move. The Phase 2 build and the notices check confirm the dependency half.
 - Bun's and V8's `BigInt` parse errors differ in text, so tests pin the error class only.
 
-**Asks** (for the plan panel):
-
-1. **Home of `walletChainId`: wallet-core (this plan) or aztec-runtime (the audit writer's call).** The writer chose aztec-runtime because "nothing below aztec-runtime computes it". This plan's counter is the import graph above: the extension's popup-shared `chain-ids.ts` must re-export it, and re-exporting from aztec-runtime's barrel drags wallet-crypto and Aztec packages into the popup, the Node e2e helpers and the dev scripts. wallet-core costs one new file and nothing else.
+**Asks:** none open. The panel answered the one Ask (see Decisions).
 
 ## Phases
 
 ### Phase 1: pin today's values (test only)
 
-Each row uses distinct `l1ChainId` and `rollupVersion` values, so a swapped or duplicated field fails. Every expected value is a literal from Facts 7, never derived from the production function.
+Where it matters, a row gives the two operands different values. A duplicated or wrong operand then fails, and so does a signed, bigint or hex result. XOR commutes, so swapping operands is neither detectable nor harmful; the decode order is pinned separately. Every expected value is a literal from Facts 7, never derived from the production function. Only rows that guard this change are added.
 
-- **`apps/extension/src/utils/chain-ids.test.ts`:** a `walletChainId` table over the five pairs from Facts 7 that `>>> 0`, `| 0` and a bigint XOR would split (testnet, equal pair, high bit, above u32, the above-u32 alias of testnet). Each row also asserts `typeof === "number"`. This file pins the moved function through its re-export, so it also fails if the re-export goes missing.
-- **`packages/aztec-runtime/src/utils/chain-identity.test.ts`:** one row. Stored Sepolia with a live `rollupVersion` of `4127419662` throws a message containing the literal `composite=4138294185`, which pins A2's value as unsigned.
-- **New `packages/aztec-runtime/src/adapters/aztec-node-factory-adapter.probe.test.ts`:** it `vi.mock`s `createAztecNodeClient` (spreading the real module) to return a node whose `getNodeInfo` answers a fixed pair. A separate file is needed because a hoisted mock would break the existing file's real-transport tests.
+- **`apps/extension/src/utils/chain-ids.test.ts`:** one high-bit row, `walletChainId(1, 2^31) → 2147483649`, with `typeof === "number"`. It runs through the re-export, so it also fails if the re-export goes missing.
+- **`packages/aztec-runtime/src/utils/chain-identity.test.ts` (A2):** stored Sepolia with a live `rollupVersion` of `4127419662` throws a message containing the literal `composite=4138294185`.
+- **New `packages/aztec-runtime/src/adapters/aztec-node-factory-adapter.probe.test.ts` (A1):**
+  - It `vi.mock`s `createAztecNodeClient`, spreading the real module, to return a node whose `getNodeInfo` answers a fixed pair. A separate file is needed because a hoisted mock would break the existing file's real-transport tests.
   - `probeChainId` resolves `2904119610` on the testnet pair and `2147483649` on the high-bit pair.
-  - A non-allowlisted URL rejects with `refused to probe` and never constructs a client.
-- **`apps/extension/src/wallet/services/network/service.test.ts:264-276`:** the existing formula assertion gains the literal `4138294185`.
-- **`apps/extension/src/wallet/services/wallet-sdk/session-established.test.ts`:** a `chainInfoToChainId` table:
-  - lowercase hex strings for the testnet pair → `2904119610`;
-  - an uppercase `0X` prefix → the same;
-  - decimal `"1"`/`"1"` → `0`;
-  - `Fr` instances on the high-bit pair → `2147483649`;
-  - mixed `Fr` and string → the same;
-  - `Fr(2n ** 64n + 3n)` as `version` with `l1ChainId` 31337 → `31337`, which pins `Number` rounding against a bigint XOR (that would give `31338`);
-  - a malformed string → throws `SyntaxError`.
-- **`apps/extension/src/wallet/services/wallet-sdk/queued-journal.test.ts`:** a `test.each` over the high-bit `Fr` session and the testnet hex session. Each asserts that `tryGetDappSessionByOriginAndChain` receives the decimal string (`"2147483649"`, `"2904119610"`), and that `getAccounts` and `getNetworksRaw` receive the same `number`. A third row with a malformed `chainInfo` resolves `undefined` with no lookup made, which pins E3's swallow.
+- **`apps/extension/src/wallet/services/network/service.test.ts:264-276` (E1):** the existing formula assertion gains the literal `4138294185`. The wrong comment at `:268`, which claims the test runs `addNetwork`, now says it calls `_getChainId` directly.
+- **`apps/extension/src/wallet/services/wallet-sdk/session-established.test.ts` (E2):**
+  - `chainInfoToChainId` rows:
+    - lowercase hex strings for the testnet pair → `2904119610`;
+    - `Fr` instances on the high-bit pair → `2147483649`;
+    - `Fr(2n ** 64n + 3n)` as `version` with `chainId` 31337 → `31337`, which pins `Number` rounding against a bigint XOR (that would give `31338`).
+  - **Decode order:** a malformed `chainId` string with a `version` whose `toBigInt` is a spy throws `SyntaxError`, and the spy is never called.
+  - **Exception boundary:** `handleSessionEstablished` with a malformed `chainInfo` rejects with `SyntaxError` before any dependency is touched: no `pendingVerification.get`, no reservation lookup, no session read, no termination, no log line.
+- **`apps/extension/src/wallet/services/wallet-sdk/queued-journal.test.ts` (E3):**
+  - A high-bit `Fr` session: `tryGetDappSessionByOriginAndChain` receives `"2147483649"`, and `getAccounts` and `getNetworksRaw` receive the number `2147483649`.
+  - A malformed `chainInfo` resolves `undefined` with no session lookup made, and logs exactly `("wallet-sdk-bg", Warn, "tryCreateQueuedJournal failed", <SyntaxError>)`.
 
 The phase is green against the unchanged code, in its own commit, so the test files are frozen before Phase 2.
 
-**Mutation check** (scratch, reverted, logged in the arc's lessons file):
+**Mutation check** (scratch, reverted from copies, logged in the arc's lessons file):
 
-- Replace `>>> 0` with `| 0` in the moved function: the high-bit rows fail at every site.
-- Make E2's decode bigint-exact: the 2^64 row fails.
-- Pass `info.l1ChainId` twice at A1 or E1: their rows fail.
-- Delete A1's allowlist check: the refusal row fails.
-- Point E3 at a decoder returning a string: the `getAccounts` assertion fails.
+- `| 0` in place of `>>> 0` in the moved function: the high-bit rows fail at every site.
+- A bigint-exact E2 decode: the 2^64 row fails.
+- `info.l1ChainId` passed twice at A1 or E1: their rows fail.
+- E2's decode order swapped: the order row fails.
+- E2's decode moved inside the handler's `try`: the boundary row fails.
+- E3 pointed at a decoder returning a string: the `getAccounts` assertion fails.
 
 ### Phase 2: one definition
 
-Make the six edits under "What changes", leaving every test file untouched.
+Make the edits under "What changes". No existing test file changes; the only test file added is wallet-core's `chain-id.test.ts`.
 
 **Validation gate (after each phase):**
 
@@ -165,7 +186,7 @@ Make the six edits under "What changes", leaving every test file untouched.
   - the generated `auto-imports.d.ts`, `components.d.ts` and `.eslintrc-auto-import.json` are byte-identical;
   - `THIRD-PARTY-NOTICES.txt` from the build is unchanged;
   - the staged packages are identical;
-  - Phase 2's `git diff --stat` lists no test file.
+  - Phase 2's `git diff --stat` lists no existing test file, only the added `chain-id.test.ts`.
 - **Screenshots:** none. No `.vue` or CSS file changes.
 - **Layers:** unit and lint locally; the e2e lanes run in CI per the program gates. The network suite exercises E1, E2 and A2 for real.
 
@@ -188,6 +209,54 @@ None. No `.vue` or CSS file changes, and no copy changes. Every displayed chain 
 
 - **No behavioural drift.** All six copies compute the same value today.
 - **Stale comments:** `queued-journal.ts:44-49` is removed in this arc, because its lines are deleted. `authwit-discoverer.ts:116` ("noop for local") goes to execution-guards with the clump it describes.
-- **Follow-up lead, not a dedup item:** the SDK `chainInfo` decoder accepts non-canonical fields (above u32, above 2^53, any `Fr`) and folds them onto canonical composites. A stricter decoder would change which dApp sessions resolve, so it is a security or behaviour decision, recorded for the program's follow-ups.
+- **Robustness follow-up, not a dedup item and not an authority issue:** the SDK `chainInfo` decoder accepts non-canonical fields and folds them onto canonical composites:
+  - values above u32 and above 2^53, and any `Fr`;
+  - empty or blank strings, which decode to 0;
+  - negative strings.
+
+  A stricter decoder would change which dApp sessions resolve, so it is an optional behaviour decision, recorded for the program's follow-ups.
 
 ## Decisions (delegated)
+
+### Plan audit, Codex round 1 (GPT-6 Astra, xhigh): REVISE
+
+One should-fix and three nits, all adopted:
+
+1. **Should-fix: pin where exceptions surface.** Adopted. A malformed `chainInfo` makes `handleSessionEstablished` reject before any dependency call. E3's malformed row asserts its exact warning and the `SyntaxError` argument. A spy proves a malformed `chainId` stops `version` from being read, so the decode order is pinned without engine-specific messages.
+2. **Nit: XOR commutes.** Adopted. The vectors catch a duplicated or wrong operand and signedness changes, not swapped operands. The "distinct values in every row" wording, which the equal pair contradicted, is gone.
+3. **Nit: the popup-bundle claim.** Adopted. It is narrowed to "no new Aztec or crypto dependency, behaviour preserved". The build and notices checks stay, with no size claim.
+4. **Nit: comments beside touched code.** Adopted:
+   - E2's TSDoc becomes the decode-order and rounding contract;
+   - A1's header loses `F-011 / Phase 5:`;
+   - the `addNetwork` claim at `network/service.test.ts:268` is corrected (in Phase 1, since test files freeze before Phase 2).
+5. **Inventory.** Adopted: the other consumers of the composite are named under the guard table, and none is edited.
+
+Codex independently re-derived all seven vectors and the byte-exactness table. It did not reproduce the staging diff, because its review allowed no writes; Phase 2 repeats that diff.
+
+### Plan audit, Opus panelist: APPROVE (small revisions)
+
+All adopted:
+
+- **Phase 1 trimmed to rows that guard this change:** one high-bit row per site, E2's 2^64 row and E3's malformed-swallow row. The A1 allowlist-refusal row and its mutation check are dropped. So are E2's uppercase `0X`, decimal and mixed rows. The A1 `vi.mock` file keeps its two probe rows.
+- **A two-row `chain-id.test.ts` in wallet-core,** beside the moved function.
+- **`chain-ids.ts` named once as the extension-side entry point.**
+- **The seed-preflight script removed from the rejected alternative:** it already imports `@nulo/aztec-runtime`, so the argument does not need it.
+- **The decoder lead** gains two cases: empty or blank strings decode to 0, and negative strings are accepted.
+
+### The Ask: home of `walletChainId`
+
+**wallet-core**, by both legs. Codex's confidence is high: the `aztec-runtime/utils` barrel reaches `fetch.ts`, `Fr` and the wallet-crypto barrel, then `@aztec-labs/accounts`, which is an unnecessary dependency for the popup and for standalone consumers. The dependency-free leaf avoids the question.
+
+### The decoder lead
+
+Both legs: **no authority issue.**
+
+- An alias reaches only a composite that the dApp could name directly, under its own origin.
+- The MAC'd session row and its grants are unchanged.
+- Signing derives its chain info from the selected network's live, A2-checked reply, never from the dApp's pair.
+
+It stays a robustness follow-up.
+
+### Split: the A1 allowlist-refusal row
+
+Codex would keep it; Opus would drop it. **Dropped**, because it tests code this arc does not touch.
