@@ -27,13 +27,12 @@
  *     not a defensible ceiling for simulation time.
  */
 
-import { CallAuthorizationRequest, computeAuthWitMessageHash } from "@aztec-labs/aztec.js/authorization"
 import { type InteractionWaitOptions, type SendReturn, extractOffchainOutput } from "@aztec-labs/aztec.js/contracts"
 import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { collectOffchainEffects } from "@aztec-labs/stdlib/tx"
-import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
+import { liveChainInfo } from "@nulo/aztec-runtime/utils"
 import { type JobError, type JobProgress, JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { markFailedUnlessCancelled } from "./mark-failed-unless-cancelled"
 import { formatFeeJuice } from "@/utils/fee-estimation"
@@ -52,7 +51,7 @@ import type { ExecutionMutexRelease } from "./execution-mutex"
 import type { OperationEstimateReuse, OperationEstimateReuseEntry } from "./operation-estimate-reuse"
 import { fingerprintNoFromInputs, fingerprintOperation, type OperationFingerprintInput } from "./operation-fingerprint"
 import { PREVIEW_FOREIGN_MESSAGE, type PreviewLookup, type PreviewSnapshots, assertWithinPreview } from "./preview-snapshots"
-import { toDiscoveredAuthwit } from "./discovered-authwit"
+import { decodeAuthwitEffects } from "./decode-authwit-effects"
 import { probeSponsorFunding } from "./sponsor-funding"
 import { fingerprintBaseFee } from "./transfer-estimate-reuse"
 import { applyEmbeddedFpcGasCap } from "./fee/embedded-fpc-cap"
@@ -1001,22 +1000,7 @@ export class DappSendExecutor {
 		this.deps.logDebug(`executeNoFromSendTx: offchain effects found: ${effects.length}`)
 		if (!effects.length) return []
 		const nodeInfo2 = await d.node.getNodeInfo()
-		assertLiveChainIdentity(d.network, nodeInfo2)
-		const chainInfo = { chainId: new Fr(nodeInfo2.l1ChainId), version: new Fr(nodeInfo2.rollupVersion) }
-		const discovered: { record: DiscoveredAuthwit; messageHash: Fr }[] = []
-		for (const effect of effects) {
-			try {
-				const authRequest = await CallAuthorizationRequest.fromFields(effect.data)
-				const messageHash = await computeAuthWitMessageHash(
-					{ consumer: effect.contractAddress, innerHash: authRequest.innerHash },
-					chainInfo,
-				)
-				discovered.push({ record: toDiscoveredAuthwit(effect.contractAddress, authRequest, messageHash), messageHash })
-			} catch {
-				// Not a CallAuthorizationRequest — skip
-			}
-		}
-		return discovered
+		return decodeAuthwitEffects(effects, liveChainInfo(d.network, nodeInfo2))
 	}
 
 	/** Sign every discovered authorization into `txRequest.authWitnesses` — after

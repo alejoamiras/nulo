@@ -142,14 +142,48 @@ describe("batchedViewSimulation — mixed-arm chain-identity pin", () => {
 	})
 
 	test("drifted stored identity rejects a mixed batch BEFORE either arm dispatches", async () => {
-		const deps = makeDeps(STORED_CHAIN_ID ^ 1)
+		const deps = makeDeps((STORED_CHAIN_ID ^ 1) >>> 0)
 		const calls: CallAction[] = [
 			{ kind: "call", contract: CONTRACT_A, method: "fast_view", args: [] },
 			{ kind: "call", contract: CONTRACT_A, method: "bal_priv", args: [] },
 		]
-		await expect(batchedViewSimulation(calls, deps)).rejects.toThrowError(/Chain identity mismatch/)
+		const refused = await rejectionOf(batchedViewSimulation(calls, deps))
+		expect(refused.constructor).toBe(Error)
+		expect(refused.message).toBe(DRIFT_MESSAGE)
 		expect(simulateViaNodeMock).not.toHaveBeenCalled()
 		// biome-ignore lint/suspicious/noExplicitAny: reading stub call args
 		expect((deps.pxe as any).simulateTx).not.toHaveBeenCalled()
 	})
+
+	test("slow-only batch: the slow request commits to the checked pair; a drifted stored identity rejects before it is built", async () => {
+		const slowOnly: CallAction[] = [{ kind: "call", contract: CONTRACT_A, method: "bal_priv", args: [] }]
+		const deps = makeDeps()
+		await batchedViewSimulation(slowOnly, deps)
+		// biome-ignore lint/suspicious/noExplicitAny: reading stub call args
+		const chainInfo = (deps.account as any).buildTxExecutionRequest.mock.calls[0]?.[4] as { chainId: Fr; version: Fr }
+		expect(chainInfo.chainId.toBigInt()).toBe(BigInt(NODE_L1_CHAIN_ID))
+		expect(chainInfo.version.toBigInt()).toBe(BigInt(NODE_ROLLUP_VERSION))
+
+		const drifted = makeDeps((STORED_CHAIN_ID ^ 1) >>> 0)
+		const refused = await rejectionOf(batchedViewSimulation(slowOnly, drifted))
+		expect(refused.constructor).toBe(Error)
+		expect(refused.message).toBe(DRIFT_MESSAGE)
+		// biome-ignore lint/suspicious/noExplicitAny: reading stub call args
+		expect((drifted.account as any).buildTxExecutionRequest).not.toHaveBeenCalled()
+		// biome-ignore lint/suspicious/noExplicitAny: reading stub call args
+		expect((drifted.pxe as any).simulateTx).not.toHaveBeenCalled()
+	})
 })
+
+const DRIFT_MESSAGE =
+	"Chain identity mismatch: selected network has chainId=4138294184 but live node reports composite=4138294185 (l1ChainId=11155111, rollupVersion=4127419662). Refusing to sign/prove against a drifted endpoint."
+
+/** The rejection itself, so a message is compared whole: `toThrowError("text")` matches a substring. */
+async function rejectionOf(run: Promise<unknown>): Promise<Error> {
+	try {
+		await run
+	} catch (error) {
+		return error as Error
+	}
+	throw new Error("expected a rejection")
+}

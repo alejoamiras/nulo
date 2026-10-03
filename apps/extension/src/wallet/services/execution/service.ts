@@ -10,12 +10,7 @@ import {
 } from "@aztec-labs/stdlib/abi"
 import type { AuthWitness } from "@aztec-labs/stdlib/auth-witness"
 import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
-import {
-	computeContractAddressFromInstance,
-	ContractInstanceWithAddressSchema,
-	getContractClassFromArtifact,
-	computePartialAddress,
-} from "@aztec-labs/stdlib/contract"
+import { computeContractAddressFromInstance, ContractInstanceWithAddressSchema, computePartialAddress } from "@aztec-labs/stdlib/contract"
 import z from "zod"
 import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
 import type { Network } from "@/wallet/services/network/spec"
@@ -48,7 +43,8 @@ import {
 } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
-import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
+import { assertLiveChainIdentity, liveChainInfo } from "@nulo/aztec-runtime/utils"
+import { assertArtifactClassId } from "@nulo/aztec-runtime/pxe"
 import {
 	EXECUTION_SERVICE_NAME,
 	type Methods,
@@ -84,7 +80,7 @@ import { DiscoveryAwareEstimator, type DiscoveryProbe } from "./discovery-aware-
 import { ViewExecutor } from "./view-executor"
 import { ExecutionLane } from "./execution-lane"
 import { GasBalanceReader } from "./gas-balance-reader"
-import { ContractResolver, findFunctionBySelector } from "./contract-resolver"
+import { AUTHWIT_CALL_BINDING, ContractResolver, assertSelectorBinding, findFunctionBySelector } from "./contract-resolver"
 import { type ArtifactLookup, decodeCallForDisplay } from "./call-decoder"
 import { getViewSimulationDeps } from "./helpers/get-view-simulation-deps"
 import { AuthwitDiscoverer } from "./authwit-discoverer"
@@ -837,10 +833,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			throw new ContractNotRegisteredError("Contract artifact not found")
 		}
 
-		const contractClass = await getContractClassFromArtifact(artifact)
-		if (contractClass.id.toString() !== instance.currentContractClassId.toString()) {
-			throw new Error("Contract artifact doesn't match instance's current class id")
-		}
+		await assertArtifactClassId(artifact, instance.currentContractClassId)
 
 		const contractAddress = await computeContractAddressFromInstance(instance)
 		if (contractAddress.toString() !== op.address) {
@@ -984,10 +977,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			)
 		}
 
-		const contractClass = await getContractClassFromArtifact(artifact)
-		if (contractClass.id.toString() !== instance.currentContractClassId.toString()) {
-			throw new Error("Contract artifact doesn't match instance's current class id")
-		}
+		await assertArtifactClassId(artifact, instance.currentContractClassId)
 
 		await this.pxeService.registerContract(networkInfoFrom(network), { instance, artifact })
 
@@ -1020,13 +1010,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	private async resolveAuthWitMessageHash(op: AztecCreateAuthWitOperation, network: Network): Promise<Fr> {
 		const node = await this.networkService.getNode(network.chainId)
 		const nodeInfo = await node.getNodeInfo()
-		// F-012 / A-01 V-01: createAuthWit derives chain identity from the live
-		// node; rebind to the user-selected network before consuming.
-		assertLiveChainIdentity(network, nodeInfo)
-		const metadata = {
-			chainId: new Fr(nodeInfo.l1ChainId),
-			version: new Fr(nodeInfo.rollupVersion),
-		}
+		const metadata = liveChainInfo(network, nodeInfo)
 
 		if (typeof op.messageHashOrIntent === "object" && "caller" in op.messageHashOrIntent) {
 			const { caller, call } = op.messageHashOrIntent
@@ -1046,15 +1030,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			if (!authwitArtifact) {
 				throw new ContractNotRegisteredError("Contract artifact not found")
 			}
-			const authwitFn = await findFunctionBySelector(authwitArtifact, call.selector.toString())
-			if (!authwitFn) {
-				throw new Error("Method not found")
-			}
-			if (call.name !== undefined && call.name !== authwitFn.name) {
-				throw new Error(
-					`Scope violation: authwit call name "${call.name}" does not match selector's function "${authwitFn.name}" on ${call.to}`,
-				)
-			}
+			const authwitFn = assertSelectorBinding(
+				await findFunctionBySelector(authwitArtifact, call.selector.toString()),
+				call,
+				AUTHWIT_CALL_BINDING,
+			)
 			const intentAction: CallIntent = {
 				caller: await AztecAddress.schema.parseAsync(caller),
 				call: new FunctionCall(

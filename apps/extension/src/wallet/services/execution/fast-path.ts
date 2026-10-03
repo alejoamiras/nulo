@@ -32,7 +32,6 @@
  * doubly-nested execution tree from `DefaultMultiCallEntrypoint` is not
  * expressible by upstream's flat `appCallOffset` model.
  */
-import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { FunctionCall, FunctionType, type FunctionAbi, getFunctionReturnType } from "@aztec-labs/stdlib/abi"
 import type { TxSimulationResult } from "@aztec-labs/stdlib/tx"
 import { SimulationError } from "@aztec-labs/stdlib/errors"
@@ -45,8 +44,8 @@ import type { ContractNameResolver } from "@aztec-labs/pxe/client/lazy"
 import { buildMergedSimulationResult, simulateViaNode } from "@aztec-labs/wallet-sdk/base-wallet"
 import { completeFeeOptions, type PartialGasSettingsRPC } from "@nulo/aztec-runtime/account"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
-import { assertLiveChainIdentity, type SelectedNetworkChainInfo } from "@nulo/aztec-runtime/utils"
-import { type ContractResolver, findFunctionBySelector } from "./contract-resolver"
+import { liveChainInfo, type SelectedNetworkChainInfo } from "@nulo/aztec-runtime/utils"
+import { assertSelectorBinding, type ContractResolver, findFunctionBySelector, NAMED_CALL_BINDING } from "./contract-resolver"
 import { getBlockHeaderAnchor } from "./helpers/block-header-anchor"
 
 /**
@@ -132,23 +131,18 @@ export async function bindOptimizableCalls(pxe: IPXE, resolver: ContractResolver
 		} catch {
 			return null
 		}
-		if (!fn) {
-			throw new Error("Method not found")
-		}
-		if (call.name !== fn.name) {
-			throw new Error(`Scope violation: call name "${call.name}" does not match selector's function "${fn.name}" on ${call.to}`)
-		}
-		if (fn.functionType !== FunctionType.PUBLIC || !fn.isStatic) return null
+		const named = assertSelectorBinding(fn, call, NAMED_CALL_BINDING)
+		if (named.functionType !== FunctionType.PUBLIC || !named.isStatic) return null
 		bound.push(
 			new FunctionCall(
-				fn.name,
+				named.name,
 				call.to,
 				call.selector,
-				fn.functionType,
+				named.functionType,
 				call.hideMsgSender,
-				fn.isStatic,
+				named.isStatic,
 				call.args,
-				getFunctionReturnType(fn),
+				getFunctionReturnType(named),
 			),
 		)
 	}
@@ -217,17 +211,12 @@ export async function runFastPath(deps: FastPathDeps): Promise<TxSimulationResul
 
 	// `getNodeInfo` shares fate with the standard PXE path — let it propagate.
 	const nodeInfo = await node.getNodeInfo()
-	// F-012 / A-01 V-01: refuse to sim against a drifted RPC. Mirrors the
-	// rebind already present in `tx-request-builder.ts`.
-	assertLiveChainIdentity(network, nodeInfo)
+	// Refuse to simulate against a drifted node. Once checked, the projection is pure and cannot throw.
+	const chainInfo: ChainInfo = liveChainInfo(network, nodeInfo)
 	// Outside the infrastructure `try` below on purpose: a scope violation must reach the dApp,
 	// not be swallowed into the standard-path fallback.
 	const boundCalls = await bindOptimizableCalls(pxe, resolver, optimizableCalls)
 	if (boundCalls === null) return null
-	const chainInfo: ChainInfo = {
-		chainId: new Fr(nodeInfo.l1ChainId),
-		version: new Fr(nodeInfo.rollupVersion),
-	}
 
 	let optimizedResults: TxSimulationResult[]
 	let normalResult: TxSimulationResultWithAppOffset | null = null

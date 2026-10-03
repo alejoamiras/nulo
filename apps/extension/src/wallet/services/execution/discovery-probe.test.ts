@@ -125,7 +125,38 @@ describe("CollectingDiscoveryProbe", () => {
 		// A real (non-local) stored chain identity that the live node contradicts.
 		const network = { chainId: 31337, l1ChainId: 31337 } as never
 
-		await expect(probe.extractEffects(fakeSim([effect("a")]), { node: { getNodeInfo } as never, network })).rejects.toThrow()
+		let refused: unknown
+		try {
+			await probe.extractEffects(fakeSim([effect("a")]), { node: { getNodeInfo } as never, network })
+		} catch (error) {
+			refused = error
+		}
+		expect((refused as Error).constructor).toBe(Error)
+		expect((refused as Error).message).toBe(
+			"Chain identity mismatch: selected network has l1ChainId=31337 but live node reports l1ChainId=999 (rollupVersion=1). Refusing to sign/prove against a drifted endpoint.",
+		)
 		expect(probe.collected).toEqual([])
+	})
+
+	test("an effect whose record cannot be built does not claim its hash: a later effect with that hash is collected", async () => {
+		const crypto: DiscoveryProbeCrypto = {
+			fromFields: async (data) => ({
+				innerHash: "x" as never,
+				msgSender: "caller:x",
+				functionSelector: "0xsel",
+				// `toDiscoveredAuthwit` maps the args, so a missing list fails the record after the hash.
+				args: (data[0] === ("broken" as never) ? undefined : ["arg:x"]) as never,
+			}),
+			computeMessageHash: async (intent) => ({ toString: () => `mh:${intent.innerHash}` }) as never,
+		}
+		const probe = new CollectingDiscoveryProbe(new Set(), crypto)
+		const { node } = fakeNode()
+
+		const out = await probe.extractEffects(fakeSim([effect("broken"), effect("whole")]), { node, network: NETWORK })
+
+		expect(out).toEqual([{ kind: "add_private_authwit", content: { kind: "message_hash", messageHash: "mh:x" } }])
+		expect(probe.discovered).toEqual([
+			{ consumer: "0xentry", caller: "caller:x", selector: "0xsel", args: ["arg:x"], innerHash: "x", messageHash: "mh:x" },
+		])
 	})
 })

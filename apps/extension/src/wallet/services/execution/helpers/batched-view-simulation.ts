@@ -134,7 +134,7 @@ import { simulateViaNode } from "@aztec-labs/wallet-sdk/base-wallet"
 import { completeFeeOptions } from "@nulo/aztec-runtime/account"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
-import { assertLiveChainIdentity, chainInfoFrom, type SelectedNetworkChainInfo } from "@nulo/aztec-runtime/utils"
+import { liveChainInfo, type SelectedNetworkChainInfo } from "@nulo/aztec-runtime/utils"
 import type { CallAction, EncodedCallAction } from "@nulo/wallet-bridge"
 import { type ILogger, LogLevel } from "@/wallet/logger"
 import { type ContractResolver, findFunctionByName, findFunctionBySelector, requireArtifact } from "../contract-resolver"
@@ -201,8 +201,7 @@ export async function batchedViewSimulation(
 	// batches, which previously did no chain-identity check at all.
 	if (slowTuples.length > 0 && !chainInfo) {
 		const nodeInfo = await node.getNodeInfo()
-		assertLiveChainIdentity(network, nodeInfo)
-		chainInfo = chainInfoFrom(nodeInfo)
+		chainInfo = liveChainInfo(network, nodeInfo)
 	}
 
 	// Launch utility eagerly NOW (anchor read complete). One promise per utility
@@ -359,11 +358,7 @@ async function prepareFastArm(
 	// deriving chainInfo. A drifted RPC must be rejected before any merge/sim
 	// that depends on chainInfo runs. This ONE validated chainInfo feeds BOTH
 	// arms — the slow arm never re-fetches an unvalidated tuple.
-	assertLiveChainIdentity(network, nodeInfo)
-	const chainInfo: ChainInfo = {
-		chainId: new Fr(nodeInfo.l1ChainId),
-		version: new Fr(nodeInfo.rollupVersion),
-	}
+	const chainInfo: ChainInfo = liveChainInfo(network, nodeInfo)
 	try {
 		// For views, no caller opts.fee → undefined → defaults. completeFeeOptions
 		// mirrors upstream `BaseWallet.completeFeeOptions` byte-for-byte.

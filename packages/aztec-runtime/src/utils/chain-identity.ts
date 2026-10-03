@@ -6,7 +6,8 @@
  * the chain context after enrollment and have the account sign against a chain the user
  * never selected. `assertLiveChainIdentity` compares the live pair to the stored network
  * and throws on any drift; apply it at every site that has BOTH the stored network AND
- * the live node response in scope, before `chainInfoFrom`.
+ * the live node response in scope, before `chainInfoFrom`. A site that needs only the
+ * `ChainInfo` calls `liveChainInfo`, which does both.
  *
  * NOT applied inside `nulo-account.ts:buildTxExecutionRequest` (no network in scope) —
  * every caller of that method asserts first.
@@ -73,4 +74,12 @@ export function assertLiveChainIdentity(network: SelectedNetworkChainInfo, nodeI
  */
 export function chainInfoFrom(nodeInfo: LiveNodeChainInfo): ChainInfo {
 	return { chainId: new Fr(nodeInfo.l1ChainId), version: new Fr(nodeInfo.rollupVersion) }
+}
+
+/** The `ChainInfo` of a live node pair, refused unless it matches the selected network: the one
+ *  way to project a pair that has not already been checked. Synchronous, so the caller's fetch
+ *  stays where it is. */
+export function liveChainInfo(network: SelectedNetworkChainInfo, nodeInfo: LiveNodeChainInfo): ChainInfo {
+	assertLiveChainIdentity(network, nodeInfo)
+	return chainInfoFrom(nodeInfo)
 }

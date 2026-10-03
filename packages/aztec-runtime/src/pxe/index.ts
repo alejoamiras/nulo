@@ -24,6 +24,7 @@ export {
 export {
 	type ArtifactClassIdVerifier,
 	type ClassIdVerifyLogger,
+	assertArtifactClassId,
 	DefaultArtifactClassIdVerifier,
 	verifyArtifactClassId,
 } from "./artifact-class-id"

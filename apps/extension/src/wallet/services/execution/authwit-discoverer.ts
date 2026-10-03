@@ -27,7 +27,7 @@
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { FunctionSelector, type FunctionType, FunctionCall, encodeArguments, getFunctionReturnType } from "@aztec-labs/stdlib/abi"
 import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
-import { computeAuthWitMessageHash, CallAuthorizationRequest, computeInnerAuthWitHash } from "@aztec-labs/aztec.js/authorization"
+import { computeAuthWitMessageHash, computeInnerAuthWitHash } from "@aztec-labs/aztec.js/authorization"
 import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
 import type { NodeInfo, ContractInstanceWithAddress } from "@aztec-labs/stdlib/contract"
 import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
@@ -35,12 +35,18 @@ import { collectOffchainEffects, type TxExecutionRequest } from "@aztec-labs/std
 import type { ILogger } from "@/wallet/logger"
 import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
-import { findFunctionByName, findFunctionBySelector, requireArtifact } from "./contract-resolver"
+import {
+	AUTHWIT_CALL_BINDING,
+	assertSelectorBinding,
+	findFunctionByName,
+	findFunctionBySelector,
+	requireArtifact,
+} from "./contract-resolver"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
-import { assertLiveChainIdentity, type SelectedNetworkChainInfo } from "@nulo/aztec-runtime/utils"
+import { chainInfoFrom, liveChainInfo, type SelectedNetworkChainInfo } from "@nulo/aztec-runtime/utils"
 import type { Action, AddPrivateAuthwitAction, CallAuthwitContent, EncodedCallAuthwitContent, IntentAuthwitContent } from "./spec"
 import type { DiscoveredAuthwit } from "@nulo/wallet-bridge"
-import { toDiscoveredAuthwit } from "./discovered-authwit"
+import { decodeAuthwitEffects } from "./decode-authwit-effects"
 
 /** What one discovery simulation found: the wire actions to splice into the
  *  build, and the decoded authorization behind each (same order). */
@@ -70,6 +76,8 @@ export type BuildTxRequestFn = (
 	paymentMethod: AccountFeePaymentMethodOptions,
 ) => Promise<DiscoverContext>
 
+/** The `compute*MessageHash` methods hash over the `nodeInfo` they are given and do not validate chain identity:
+ *  a signing caller passes one already checked against the selected network. */
 export class AuthwitDiscoverer {
 	public constructor(readonly _logger: ILogger) {}
 
@@ -77,7 +85,7 @@ export class AuthwitDiscoverer {
 	 *  and `scopes: [account.address]`, inspects the `privateExecutionResult`'s
 	 *  offchain effects for `CallAuthorizationRequest`s, and emits one
 	 *  `AddPrivateAuthwitAction { kind: "message_hash" }` per authorization
-	 *  the tx proved it needs. Mirrors service.ts:1446-1486 byte-for-byte. */
+	 *  the tx proved it needs. */
 	public async discoverPrivateAuthwits(
 		op: { networkId: string; accountAddress: string; actions: Action[] },
 		buildTxRequest: BuildTxRequestFn,
@@ -112,38 +120,21 @@ export class AuthwitDiscoverer {
 		}
 
 		const nodeInfo = await node.getNodeInfo()
-		// F-012 / A-01 V-01: refuse to derive authwit message hash from a
-		// drifted RPC. assertLiveChainIdentity is a noop for local (chainId=0).
-		assertLiveChainIdentity(network, nodeInfo)
-		const chainInfo = { chainId: new Fr(nodeInfo.l1ChainId), version: new Fr(nodeInfo.rollupVersion) }
-		const actions: AddPrivateAuthwitAction[] = []
-		const discovered: DiscoveredAuthwit[] = []
-
-		for (const effect of effects) {
-			try {
-				const authRequest = await CallAuthorizationRequest.fromFields(effect.data)
-				const messageHash = await computeAuthWitMessageHash(
-					{ consumer: effect.contractAddress, innerHash: authRequest.innerHash },
-					chainInfo,
-				)
-				const record = toDiscoveredAuthwit(effect.contractAddress, authRequest, messageHash)
-				actions.push({
-					kind: "add_private_authwit",
-					content: { kind: "message_hash", messageHash: messageHash.toString() },
-				})
-				discovered.push(record)
-			} catch {
-				// Effect is not a CallAuthorizationRequest — skip.
-			}
+		// Refuse to derive a hash from a drifted node.
+		const decoded = await decodeAuthwitEffects(effects, liveChainInfo(network, nodeInfo))
+		return {
+			actions: decoded.map(({ record }) => ({
+				kind: "add_private_authwit",
+				content: { kind: "message_hash", messageHash: record.messageHash },
+			})),
+			discovered: decoded.map(({ record }) => record),
 		}
-
-		return { actions, discovered }
 	}
 
 	/** Compute the authwit message hash for a `call`-kind content.
 	 *  Resolves the function from the pre-fetched artifact by name;
 	 *  throws `"Contract not found"` / `"Contract artifact not found"`
-	 *  / `"Method not found"` — call-site-verbatim from service.ts:2060-2099. */
+	 *  / `"Method not found"`. */
 	public async computeCallMessageHash(
 		content: CallAuthwitContent,
 		nodeInfo: NodeInfo,
@@ -169,10 +160,7 @@ export class AuthwitDiscoverer {
 					getFunctionReturnType(fn),
 				),
 			},
-			{
-				chainId: new Fr(nodeInfo.l1ChainId),
-				version: new Fr(nodeInfo.rollupVersion),
-			},
+			chainInfoFrom(nodeInfo),
 		)
 	}
 
@@ -191,15 +179,7 @@ export class AuthwitDiscoverer {
 		// obtain an authwit over a selector that did not match the claimed name. The
 		// fields set below are ABI truth; any dApp-supplied values are overwritten.
 		const artifact = requireArtifact(instances, artifacts, content.to)
-		const fn = await findFunctionBySelector(artifact, content.selector)
-		if (!fn) {
-			throw new Error("Method not found")
-		}
-		if (content.name !== undefined && content.name !== fn.name) {
-			throw new Error(
-				`Scope violation: authwit call name "${content.name}" does not match selector's function "${fn.name}" on ${content.to}`,
-			)
-		}
+		const fn = assertSelectorBinding(await findFunctionBySelector(artifact, content.selector), content, AUTHWIT_CALL_BINDING)
 		content.name = fn.name
 		content.type = fn.functionType
 		content.isStatic = fn.isStatic
@@ -218,10 +198,7 @@ export class AuthwitDiscoverer {
 					getFunctionReturnType(fn),
 				),
 			},
-			{
-				chainId: new Fr(nodeInfo.l1ChainId),
-				version: new Fr(nodeInfo.rollupVersion),
-			},
+			chainInfoFrom(nodeInfo),
 		)
 	}
 
@@ -232,10 +209,7 @@ export class AuthwitDiscoverer {
 				consumer: AztecAddress.fromStringUnsafe(content.consumer),
 				innerHash: await computeInnerAuthWitHash(content.intent.map((x) => Fr.fromString(x))),
 			},
-			{
-				chainId: new Fr(nodeInfo.l1ChainId),
-				version: new Fr(nodeInfo.rollupVersion),
-			},
+			chainInfoFrom(nodeInfo),
 		)
 	}
 }

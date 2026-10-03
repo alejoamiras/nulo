@@ -1,19 +1,13 @@
 /**
- * Class-id verification helper.
+ * Class-id checks: recompute a `ContractArtifact`'s class id and compare it to the expected `Fr`.
  *
- * Recomputes the class id of a `ContractArtifact` and compares to the
- * caller's expected `Fr`. Returns the artifact on match, undefined on
- * mismatch (with an optional logger callback for observability).
+ * - `verifyArtifactClassId` returns the artifact on match and `undefined` on mismatch or recompute
+ *   failure, so artifact resolution ("pxe-local" → "known") can fall through to the next source.
+ * - `assertArtifactClassId` throws on mismatch and lets a recompute failure propagate unchanged, for
+ *   registration, where a mismatched artifact must be refused at the boundary.
  *
- * Why returning `undefined` rather than throwing: callers walk a
- * resolution policy ("registry" → "known" → "pxe-local"); a single
- * source mismatch should fall through to the next source, not abort
- * the whole lookup. Throws are reserved for system-level failures
- * (which the wrapping try/catch catches generically).
- *
- * Pure: no chrome.*, no network, no storage. Just a Poseidon-heavy
- * compute via upstream `getContractClassFromArtifact`. Tests inject
- * fixture artifacts directly.
+ * Pure: no chrome.*, no network, no storage, no cache. Just a Poseidon-heavy compute via upstream
+ * `getContractClassFromArtifact`. Tests inject fixture artifacts directly.
  */
 
 import type { Fr } from "@aztec-labs/foundation/curves/bn254"
@@ -67,5 +61,17 @@ export async function verifyArtifactClassId(
 	} catch (err) {
 		log?.("warn", "Artifact class id recompute failed", err)
 		return undefined
+	}
+}
+
+/**
+ * Throws unless `artifact` hashes to `expected`. Compares the ids' string forms, and lets a recompute
+ * failure propagate as thrown: registration refuses with the upstream error, not a mismatch.
+ * Stateless by contract: never route it through a class-id cache.
+ */
+export async function assertArtifactClassId(artifact: ContractArtifact, expected: Fr): Promise<void> {
+	const contractClass = await getContractClassFromArtifact(artifact)
+	if (contractClass.id.toString() !== expected.toString()) {
+		throw new Error("Contract artifact doesn't match instance's current class id")
 	}
 }

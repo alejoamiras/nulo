@@ -13,7 +13,7 @@
 import { type Aliased, ContractInitializationStatus } from "@aztec-labs/aztec.js/wallet"
 import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import type { ChainInfo } from "@aztec-labs/entrypoints/interfaces"
-import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
 import type { PackedPrivateEvent } from "@aztec-labs/pxe/client/bundle"
 import {
 	type AbiDecoded,
@@ -27,7 +27,7 @@ import { AuthWitness } from "@aztec-labs/stdlib/auth-witness"
 import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import type { ContractInstanceWithAddress } from "@aztec-labs/stdlib/contract"
 import type { TxProfileResult, TxSimulationResult, UtilityExecutionResult } from "@aztec-labs/stdlib/tx"
-import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
+import { liveChainInfo } from "@nulo/aztec-runtime/utils"
 import z from "zod"
 import type { AccountService } from "@/wallet/services/account/service"
 import type { ContactService } from "@/wallet/services/contact/service"
@@ -35,7 +35,7 @@ import { type NetworkService, networkInfoFrom } from "@/wallet/services/network/
 import type { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import type { PxeServiceClient } from "@/wallet/services/pxe/client"
-import { type ContractResolver, findFunctionByName, findFunctionBySelector } from "./contract-resolver"
+import { assertSelectorBinding, CALL_BINDING, type ContractResolver, findFunctionByName, findFunctionBySelector } from "./contract-resolver"
 import { rehydrateOptimizablePrefix, runFastPath } from "./fast-path"
 import { applyEmbeddedFpcGasCap } from "./fee/embedded-fpc-cap"
 import { suggestGasLimits } from "./fee/fee-strategy"
@@ -213,11 +213,8 @@ export class ViewExecutor {
 		const network = await this.deps.networkService.getNetwork(op.networkId)
 		const node = await this.deps.networkService.getNode(network.chainId)
 		const nodeInfo = await node.getNodeInfo()
-		// F-012 / A-01 V-01: this API returns chain identity to the dApp.
-		// A drifted RPC must be reported as a mismatch rather than silently
-		// reporting whatever the RPC claims.
-		assertLiveChainIdentity(network, nodeInfo)
-		return { chainId: new Fr(nodeInfo.l1ChainId), version: new Fr(nodeInfo.rollupVersion) }
+		// This API reports chain identity to the dApp: a drifted node is refused, never relayed.
+		return liveChainInfo(network, nodeInfo)
 	}
 
 	public async executeAztecGetAddressBook(_op: AztecGetAddressBookOperation): Promise<Aliased<AztecAddress>[]> {
@@ -350,34 +347,16 @@ export class ViewExecutor {
 		const account = await this.deps.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
 		const pxe = this.deps.pxeService.getPXE(networkInfoFrom(network))
 		await account.ensureRegistered(pxe)
-		// F-02: bind the dApp-supplied `name` to the SELECTOR's real function
-		// before executing. `checkExecuteUtility` (method-scope-checkers) authorizes
-		// on `call.name`, but `pxe.executeUtility` dispatches by `call.selector`.
-		// Without this bind a dApp scoped for `symbol` could send
-		// `{name:"symbol", selector:<balance_of_private>}` — scope passes on the
-		// name, PXE runs the selector and returns the user's PRIVATE state. Resolve
-		// the ABI, reject a name/selector mismatch, and rebuild the call from ABI
-		// truth (isStatic/type/returnType), mirroring the four tx/authwit sinks.
-		// A present-but-mismatched name is rejected; an EMPTY name ("") is also
-		// rejected (it is NOT treated as "absent" — doing so let a dApp scope
-		// `{function:""}` and sign a different selector silently). Only a genuinely
-		// absent (`undefined`) name skips the check, and only a wildcard scope
-		// authorizes such a selector-only call.
-		// `checkExecuteUtility` validates `to`/`name` presence but NOT `selector`;
-		// guard it before dereferencing so a malformed call is a controlled error,
-		// not a raw TypeError from `.toString()`.
+		// Scope checks authorize `call.name`; PXE runs `call.selector`. Bind the two, and rebuild the
+		// call from the ABI, or a dApp scoped for `symbol` could read private state through another
+		// selector. Only `undefined` means absent; `""` is a mismatch. The scope checker does not
+		// validate `selector`, so a malformed call gets a controlled error, not a TypeError.
 		if (op.call.to === undefined || op.call.selector === undefined) {
 			throw new Error("Malformed executeUtility: call requires a `to` and a `selector`")
 		}
 		const [, instance] = await this.deps.resolver.resolveInstance(pxe, op.call.to.toString())
 		const [, artifact] = await this.deps.resolver.resolveArtifact(pxe, instance.currentContractClassId.toString())
-		const fn = await findFunctionBySelector(artifact, op.call.selector.toString())
-		if (!fn) {
-			throw new Error("Method not found")
-		}
-		if (op.call.name !== undefined && op.call.name !== fn.name) {
-			throw new Error(`Scope violation: call name "${op.call.name}" does not match selector's function "${fn.name}" on ${op.call.to}`)
-		}
+		const fn = assertSelectorBinding(await findFunctionBySelector(artifact, op.call.selector.toString()), op.call, CALL_BINDING)
 		const boundCall = new FunctionCall(
 			fn.name,
 			op.call.to,
