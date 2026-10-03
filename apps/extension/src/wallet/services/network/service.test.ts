@@ -1561,6 +1561,13 @@ describe("NetworkService node status: getNodeStatus and probeNodeStatus", () => 
 		expect(r.probeCalls).toEqual([])
 		expect(factory.created).toHaveLength(0)
 	})
+
+	test("a row another profile owns rejects on both: only the probe's failure reads Inactive", async () => {
+		const { service, local } = setupServiceWithStorage({ [NON_SEED_LOCAL_URL]: nodeInfoForChain(0) })
+		storeRow(local, { id: "theirs", profileId: "p2" })
+		await expect(service.getNodeStatus("theirs")).rejects.toThrow(new Error("Invalid id"))
+		await expect(service.probeNodeStatus("theirs", 5_000)).rejects.toThrow(new Error("Invalid id"))
+	})
 })
 
 describe("NetworkService endpoint identity guard (add and update)", () => {
