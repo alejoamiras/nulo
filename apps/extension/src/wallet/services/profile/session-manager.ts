@@ -64,6 +64,7 @@ import {
 	verifyEnvelopeMacV3,
 	zeroize,
 } from "@nulo/wallet-crypto"
+import { macEnvelopeV3 } from "./profile-row"
 import type { ActiveSession, Profile, ProfileInfo, Session } from "./spec"
 
 const LOG_SOURCE = "SessionManager"
@@ -620,13 +621,7 @@ export class SessionManager {
 				session.profile,
 				pair.master,
 				pair.dek,
-				{
-					guard: profile.guard,
-					secret: profile.secret,
-					entropy: profile.entropy,
-					dek: profile.dekSealed,
-					walletFingerprint: profile.walletFingerprint,
-				},
+				macEnvelopeV3(profile, profile.dekSealed, profile.walletFingerprint),
 				profile.envelopeMac,
 			)
 			if (!envelopeIntact) {

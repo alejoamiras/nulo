@@ -14,7 +14,8 @@
  * stay small (1–2 PBKDF2 runs each) so the suite stays under ~30s total.
  */
 
-import { describe, expect, test, vi } from "vitest"
+import { createHmac, hkdfSync } from "node:crypto"
+import { afterEach, describe, expect, test, vi } from "vitest"
 import type { ConfigProp, IConfig } from "@/wallet/config"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { LoggerStore } from "@/wallet/logger"
@@ -32,11 +33,15 @@ import {
 } from "@nulo/extension-messaging/errors"
 import { AccountIntegrityBlockedRepository } from "../account-integrity/blocked-repository"
 import {
+	asBase64Ciphertext,
 	asBase64CredentialId,
 	asBase64MasterSecret,
 	asBase64SecretPrf,
 	asHexUserHandle,
 	asImportedKeysDek,
+	EncryptionKey,
+	IMPORTED_DEK_AAD,
+	PasswordSecretBox,
 	sealDekUnderWrapKey,
 	type PasskeyCredential,
 	type PasskeyCredentialData,
@@ -3293,4 +3298,416 @@ describe("F-06 dApp-session rows under same-phrase SIBLINGS — the real Profile
 		await profiles.unlockProfile(p1.id, "pass1234")
 		expect((await sessions.getDappSessions()).map((r) => r.id)).toEqual([row.id])
 	}, 60_000)
+})
+
+// ── Credential rows, the degraded-open tail and the restore stash: byte-exact characterization ──
+
+/** Persisted rows recorded under `seedRandom` before the row builders existed. A diff here is a
+ *  refactor bug in a MAC binding, the key order or the draw order: never re-record it. */
+const VECTORS = {
+	createProfile:
+		'{"id":"57da5de0","name":"P","type":"password","pxeGeneration":"63e669ec6ff275f87bfe8104870a8d10","dekSealed":"ADO2Obw/wkXIS85R1NMgBYiGSWwUgq/hQCr9ZzEZufA77Ha+SCp26O7VKJCXaDRjIkMhv2tagTp6fHB8xQ==","walletFingerprint":"1651dc30b4ebf7710b5f3f131fe00e2e86c42fdca894fbc4dd619f1f6b984536","guard":"AMdKzVDTVtlc32LlaLhYN5POF5LNA7UdWEq2C+zExBLZWw5rSw==","secret":"AOtu8XT3ev2AA4YJjCKQyN0gHvwl+u2FB9gMO5ypZAO29B3WdP4M57RcnQoIONwNTb6AbRK+zZkMVDZiBw==","entropy":"AA+SFZgbniGkJ6otsDE3fkvg6RJwKRzHmr6YLWyZRgfKZ40yOQPktSPx00LxrhGQ988bjZX3LlB/aVqvow==","envelopeMac":"P4nG6bXWpPTsWXuwNGZVKUwK5K1iloeN4Ll61ROFD90="}',
+	importMnemonic:
+		'{"id":"67ea6df0","name":"M","type":"password","pxeGeneration":"0386098c0f9215981b9e21a427aa2db0","dekSealed":"AN9i5WjrbvF093r9gHLKfNQHa4NskbXmv/TnqEUG0SH+hm+O2PzyL56PeyDxfLzWUrCKdsn273CqBNjdaQ==","walletFingerprint":"88011021d699c4b34d147248125216475436ee0002a7228be357ee8a685263d4","guard":"AHP2efx/AoUIiw6RFE7T9C1c7DUJjweN0tJ5Xolvvsj+CIg2bA==","secret":"AJcanSCjJqksrzK1OLxCFQzxpKp5m7SWVSoGphW33bVUeBxiPjj+wTICidIPEZFIA8fVtqQvtm7mCO/y1A==","entropy":"ALs+wUTHSs1Q01bZXJ2iuEGKeQhZ/7iUgvWxsCv+pI4fqRGnJonrlzfHApRrPqTTG2+S2cZqj5d3YOylBA==","envelopeMac":"hXTIcKfyBtK4kfUpSg8gSVyEyI+VywFSWMQZGtuC5uQ="}',
+	changeProfilePassword:
+		'{"id":"57da5de0","name":"P","type":"password","pxeGeneration":"63e669ec6ff275f87bfe8104870a8d10","dekSealed":"AONm6WzvcvV4+34BhNRM886Dpo/BUS4qCIvzgWsjSF1MS4OFwmwIfnPsKEc/SJwcVAbcGBxnPT/yP30c6w==","walletFingerprint":"1651dc30b4ebf7710b5f3f131fe00e2e86c42fdca894fbc4dd619f1f6b984536","guard":"AHf6fQCDBokMjxKVGEtBg/X7i/NZAKqh/+DlNVBdAgsZ9tnORg==","secret":"AJseoSSnKq0wsza5PIgkjE6hfkPaqNI0l7h72i4SZ6Ll5F8oiOEGpTAOPrVa/d12wlQYkmCxcRvC2Hdf+w==","entropy":"AL9CxUjLTtFU11rdYKOXbbCH4GkKcYrboh8agZiPhTGgBXXHU/pT8uPAelVoxbaNGjWciADYioVvkLUA/w==","envelopeMac":"CV/4ufEGDHF1ejQgbntfJ6oyQQJmCfZXv+ExwbAx3NU="}',
+	restorePassword:
+		'{"id":"67ea6df0","name":"R","type":"password","pxeGeneration":"73f679fc7f0285088b0e9114971a9d20","dekSealed":"AEPGScxP0lXYW95h5D67/zGqm5B/CEse9VMfenzOoLZjNdBd6P4Qk9bx8MYoq5517yIgiFQ/5VlYAbzzbw==","walletFingerprint":"0014d75992f28a43b1dadc1ddb9f392bfb0a268bd8cd742c16f5a947a084ceb0","guard":"AHf6fQCDBokMjxKVGBl8hNX5SjXkQY4jdUg+/4FBnopbeXrg+Q==","secret":"AJseoSSnKq0wsza5PFma/GRXgcPZSVeg3c3nH21GvSQQR5dAOT7B4JdfOoPr4xAnvUeSjoeEx8w01DpeUA==","entropy":"AL9CxUjLTtFU11rdYK4GQ1tgife8Dlg86+tbPbJdGiWbDFeSalaCwUkTlm6nLGcDehqk+SiuHju41Ub+fw==","envelopeMac":"nnyNrT5fiff60sASdg4uYLMlUePURymzglspFrn264c="}',
+	createPasskeyProfile:
+		'{"id":"uh-kat-1","name":"PK","type":"passkey","pxeGeneration":"8b0e9114971a9d20a326a92caf32b538","dekSealed":"AWfqbfBz9nn8fwKFCDu9LF22CnDcL0iJFxXdluXGTNsIjArSaEJCgGCIsR3B9RpEAXBayfSVqJSDcSfLaQ==","walletFingerprint":"298b3d269d2e810e9918557ff146d2a475266c11940ff7befd7651dfaabcf7f7","credentialId":"cred-kat-1"}',
+	importPasskeyWithHandle:
+		'{"id":"uh-kat-2","name":"IK","type":"passkey","pxeGeneration":"8b0e9114971a9d20a326a92caf32b538","dekSealed":"AWfqbfBz9nn8fwKFCMKMe4ARHwaxgOgTocDDAKG6bOP/jPpsx0CBF8FLXpkNZGpWwb7wzwCYR71eLtEUtA==","walletFingerprint":"298b3d269d2e810e9918557ff146d2a475266c11940ff7befd7651dfaabcf7f7","credentialId":"cred-kat-2"}',
+	importPasskeyGeneratedId:
+		'{"id":"8b0e9114","name":"IK","type":"passkey","pxeGeneration":"971a9d20a326a92caf32b538bb3ec144","dekSealed":"AWfqbfBz9nn8fwKFCOLqOf/rFIPmCNqTlnVDUcpgUp6T9IDEfUJf7sR1Q2K0MGIQo9wzd1uFAS+9eQx2Jg==","walletFingerprint":"298b3d269d2e810e9918557ff146d2a475266c11940ff7befd7651dfaabcf7f7","credentialId":"cred-kat-3"}',
+	restorePasskey:
+		'{"id":"uh-kat-4","name":"PR","type":"passkey","pxeGeneration":"af32b538bb3ec144c74acd50d356d95c","dekSealed":"AYsOkRSXGp0goyapLPFPuM3rWUAsM1AiBD9D5mkx4O3hTeOVpXdTtgaiS5zDdAgASAxAGD/zID0DJvHGig==","walletFingerprint":"298b3d269d2e810e9918557ff146d2a475266c11940ff7befd7651dfaabcf7f7","credentialId":"cred-kat-4"}',
+}
+
+describe("credential rows, degraded opens and the restore stash", () => {
+	afterEach(() => {
+		vi.restoreAllMocks()
+	})
+
+	/** Counter-filled `getRandomValues`, so every row path persists the same bytes on every run. */
+	function seedRandom(): void {
+		let n = 0
+		vi.spyOn(globalThis.crypto, "getRandomValues").mockImplementation(((array: ArrayBufferView) => {
+			const bytes = new Uint8Array(array.buffer, array.byteOffset, array.byteLength)
+			for (let i = 0; i < bytes.length; i++) bytes[i] = (n++ * 131 + 7) & 0xff
+			return array
+		}) as typeof globalThis.crypto.getRandomValues)
+	}
+
+	const rawRow = async (api: FakeBrowserApi, id: string): Promise<string> =>
+		(await api.storage.local.get(profileRowKey(id)))[profileRowKey(id)] as string
+
+	function expectVector(name: keyof typeof VECTORS, raw: string): void {
+		expect(raw).toBe(VECTORS[name])
+	}
+
+	type SealedRow = { guard: string; secret: string; entropy: string; dekSealed: string; walletFingerprint: string; envelopeMac: string }
+
+	/** The v3 tag recomputed with node:crypto over the persisted fields, keyed on the STORAGE key. */
+	function oracleTag(storageKey: string, row: SealedRow, master: Uint8Array, dek: Uint8Array): string {
+		const ikm = Buffer.concat([Buffer.from(master), Buffer.from(dek)])
+		const macKey = Buffer.from(hkdfSync("sha256", ikm, Buffer.alloc(32), Buffer.from("nulo:envelope-mac:v3", "utf8"), 64))
+		const preimage = `${storageKey}.${row.guard}.${row.secret}.${row.entropy}.${row.dekSealed}.${row.walletFingerprint}`
+		return createHmac("sha256", macKey).update(preimage, "utf8").digest("base64")
+	}
+
+	async function unsealPasswordDek(row: SealedRow, password: string): Promise<Uint8Array> {
+		const key = await EncryptionKey.fromPasshash(await EncryptionKey.getPasshash(password))
+		return key.decrypt(Buffer.from(row.dekSealed, "base64") as Uint8Array<ArrayBuffer>, IMPORTED_DEK_AAD)
+	}
+
+	async function unsealPasswordMaster(row: SealedRow, password: string): Promise<Uint8Array> {
+		const unsealed = await new PasswordSecretBox().unseal(password, {
+			guard: asBase64Ciphertext(row.guard),
+			secret: asBase64Ciphertext(row.secret),
+			entropy: asBase64Ciphertext(row.entropy),
+		})
+		if (!unsealed) throw new Error("oracle could not unseal the row")
+		return unsealed.secret
+	}
+
+	async function expectOracle(storageKey: string, row: SealedRow, master: Uint8Array, password: string): Promise<void> {
+		const dek = await unsealPasswordDek(row, password)
+		expect(oracleTag(storageKey, row, master, dek)).toBe(row.envelopeMac)
+		expect(oracleTag(storageKey, row, dek, master)).not.toBe(row.envelopeMac)
+	}
+
+	const PASSKEY_RESTORE_SECRET = async (credentialId: string) => ({
+		type: "passkey" as const,
+		credentialId: asBase64CredentialId(credentialId),
+		dekSealed: await fakeDekSealedFor(credentialId),
+	})
+
+	describe("row known-answer vectors (seeded RNG)", () => {
+		test("createProfile persists the pinned row and returns it", async () => {
+			seedRandom()
+			const { api, service } = await makeService()
+			const created = await service.createProfile("P", "pass1234")
+			const raw = await rawRow(api, created.id)
+			expectVector("createProfile", raw)
+			expect(created).toStrictEqual(JSON.parse(raw))
+			await expectOracle(created.id, JSON.parse(raw), await unsealPasswordMaster(JSON.parse(raw), "pass1234"), "pass1234")
+		}, 30_000)
+
+		test("importMnemonic persists the pinned row and returns it", async () => {
+			seedRandom()
+			const { api, service } = await makeService()
+			const words = await wordsForFill(0x21)
+			const imported = await service.importMnemonic("M", words, "pass1234")
+			const raw = await rawRow(api, imported.id)
+			expectVector("importMnemonic", raw)
+			expect(imported).toStrictEqual(JSON.parse(raw))
+			await expectOracle(imported.id, JSON.parse(raw), await deriveMasterFromMnemonic(words), "pass1234")
+		}, 30_000)
+
+		test("changeProfilePassword persists the pinned re-MACed row and returns it", async () => {
+			seedRandom()
+			const { api, service } = await makeService()
+			const created = await service.createProfile("P", "pass1234")
+			const changed = await service.changeProfilePassword(created.id, "pass1234", "newpass99")
+			const raw = await rawRow(api, created.id)
+			expectVector("changeProfilePassword", raw)
+			expect(changed).toStrictEqual(JSON.parse(raw))
+			await expectOracle(created.id, JSON.parse(raw), await unsealPasswordMaster(JSON.parse(raw), "newpass99"), "newpass99")
+		}, 30_000)
+
+		test("a password restore over a taken id MACs the re-minted id and returns only the info", async () => {
+			seedRandom()
+			const { api, service } = await makeService()
+			const live = await service.createProfile("L", "pass1234")
+			await service.lockActiveProfile()
+			const secret = await restoreSecretFor(0x31)
+			const out = await service.restore({ id: live.id, name: "R", type: "password" }, secret, "pass1234")
+			expect(out).toStrictEqual({ id: out.id, name: "R", type: "password" })
+			expect(out.id).not.toBe(live.id)
+			const raw = await rawRow(api, out.id)
+			expectVector("restorePassword", raw)
+			await expectOracle(out.id, JSON.parse(raw), Buffer.from(secret.masterKey, "base64"), "pass1234")
+		}, 30_000)
+
+		test("createPasskeyProfile persists the pinned row and returns it", async () => {
+			seedRandom()
+			const { api, service } = await makeService()
+			const created = await service.createPasskeyProfile("PK", fakeCredentialData("cred-kat-1", "uh-kat-1"))
+			const raw = await rawRow(api, created.id)
+			expectVector("createPasskeyProfile", raw)
+			expect(created).toStrictEqual(JSON.parse(raw))
+		}, 30_000)
+
+		test("importPasskey with a userHandle persists the pinned row under it and returns it", async () => {
+			seedRandom()
+			const { api, service } = await makeService()
+			const imported = await service.importPasskey("IK", fakeCredentialData("cred-kat-2", "uh-kat-2"))
+			expect(imported.id).toBe("uh-kat-2")
+			const raw = await rawRow(api, imported.id)
+			expectVector("importPasskeyWithHandle", raw)
+			expect(imported).toStrictEqual(JSON.parse(raw))
+		}, 30_000)
+
+		test("importPasskey without a userHandle persists the pinned row under a generated id", async () => {
+			seedRandom()
+			const { api, service, passkeys } = await makeService()
+			const realMaterialize = passkeys.materializeCredential.bind(passkeys)
+			vi.spyOn(passkeys, "materializeCredential").mockImplementation(async (data) => {
+				const credential = await realMaterialize(data)
+				;(credential as { userHandle?: string }).userHandle = undefined
+				return credential
+			})
+			const imported = await service.importPasskey("IK", fakeCredentialData("cred-kat-3"))
+			expect(imported.id).not.toBe("user-handle")
+			expect(imported.id).toMatch(/^[0-9a-f]{8}$/)
+			const raw = await rawRow(api, imported.id)
+			expectVector("importPasskeyGeneratedId", raw)
+			expect(imported).toStrictEqual(JSON.parse(raw))
+		}, 30_000)
+
+		test("a passkey restore persists the pinned row and returns only the info", async () => {
+			seedRandom()
+			const { api, service } = await makeService()
+			const secret = await PASSKEY_RESTORE_SECRET("cred-kat-4")
+			const out = await service.restore(
+				{ id: "ignored", name: "PR", type: "passkey" },
+				secret,
+				undefined,
+				fakeCredentialData("cred-kat-4", "uh-kat-4"),
+			)
+			expect(out).toStrictEqual({ id: "uh-kat-4", name: "PR", type: "passkey" })
+			expectVector("restorePasskey", await rawRow(api, out.id))
+		}, 30_000)
+	})
+
+	describe("the degraded-open tail", () => {
+		function observe(service: ProfileService) {
+			const order: string[] = []
+			const degraded: unknown[] = []
+			service.onActiveProfileChanged.add((p) => {
+				if (p) order.push("active")
+			})
+			service.onImportedKeysDegraded.add((info) => {
+				order.push("degraded")
+				degraded.push(info)
+			})
+			return { order, degraded }
+		}
+
+		const nonZero = (bytes: Uint8Array | undefined) => bytes?.some((b) => b !== 0) === true
+
+		async function expectDegraded(service: ProfileService, seen: ReturnType<typeof observe>, returned: unknown, info: object) {
+			const payload = { ...info, recoveryMode: true }
+			expect(seen.degraded).toStrictEqual([payload])
+			expect(seen.order).toStrictEqual(["active", "degraded"])
+			expect(returned).toStrictEqual(payload)
+			const id = (info as { id: string }).id
+			expect(await service.getProfileDek(id)).toBeUndefined()
+			expect(nonZero((await service.getProfileSecret(id)).toBuffer())).toBe(true)
+		}
+
+		async function expectHealthy(
+			service: ProfileService,
+			seen: ReturnType<typeof observe>,
+			returned: unknown,
+			info: object,
+			dek: Uint8Array,
+		) {
+			expect(seen.degraded).toStrictEqual([])
+			expect(seen.order).toStrictEqual(["active"])
+			expect(returned).toStrictEqual(info)
+			const id = (info as { id: string }).id
+			const sessionDek = await service.getProfileDek(id)
+			expect(nonZero(sessionDek)).toBe(true)
+			expect(Array.from(sessionDek!)).toStrictEqual(Array.from(dek))
+			expect(nonZero((await service.getProfileSecret(id)).toBuffer())).toBe(true)
+		}
+
+		async function lockedPasswordProfile(name = "P", password = "pass1234") {
+			const ctx = await makeService()
+			const created = await ctx.service.createProfile(name, password)
+			await ctx.service.lockActiveProfile()
+			return { ...ctx, id: created.id, info: { id: created.id, name, type: "password" } }
+		}
+
+		test("unlockProfile: a healthy open stays silent and holds the real master and DEK", async () => {
+			const { api, service, id, info } = await lockedPasswordProfile()
+			const dek = await unsealPasswordDek(await readRawRow(api, id), "pass1234")
+			const seen = observe(service)
+			await expectHealthy(service, seen, await service.unlockProfile(id, "pass1234"), info, dek)
+		}, 30_000)
+
+		test("unlockProfile: a same-password sibling's DEK slot opens derived-only and warns once", async () => {
+			const { api, service, id, info } = await lockedPasswordProfile("A", "shared-pass1")
+			const sibling = await service.createProfile("B", "shared-pass1")
+			await service.lockActiveProfile()
+			await writeRawRow(api, id, { ...(await readRawRow(api, id)), dekSealed: (await readRawRow(api, sibling.id)).dekSealed })
+			const seen = observe(service)
+			await expectDegraded(service, seen, await service.unlockProfile(id, "shared-pass1"), info)
+		}, 30_000)
+
+		test.each([
+			["deleted", undefined],
+			["non-string", 12345],
+		])(
+			"unlockProfile: an envelopeMac that is %s opens derived-only, warns once, and blocks the password change",
+			async (_label, mac) => {
+				const { api, service, id, info } = await lockedPasswordProfile()
+				const { envelopeMac: _dropped, ...row } = await readRawRow(api, id)
+				await writeRawRow(api, id, mac === undefined ? row : { ...row, envelopeMac: mac })
+				const seen = observe(service)
+				await expectDegraded(service, seen, await service.unlockProfile(id, "pass1234"), info)
+				await service.lockActiveProfile()
+				await expect(service.changeProfilePassword(id, "pass1234", "newpass99")).rejects.toThrow()
+			},
+			30_000,
+		)
+
+		test("unlockProfile: a degraded open that the integrity delegate refuses never warns", async () => {
+			const { api, service, id } = await lockedPasswordProfile()
+			const { envelopeMac: _dropped, ...row } = await readRawRow(api, id)
+			await writeRawRow(api, id, row)
+			service.setIntegrityDelegate({
+				verifyBeforeSessionOpen: async () => {
+					throw new AccountAddressInconsistencyError()
+				},
+			})
+			const seen = observe(service)
+			await expect(service.unlockProfile(id, "pass1234")).rejects.toBeInstanceOf(AccountAddressInconsistencyError)
+			expect(seen.degraded).toStrictEqual([])
+		}, 30_000)
+
+		async function lockedPasskeyProfile() {
+			const ctx = await makeService()
+			const created = await ctx.service.createPasskeyProfile("PK", fakeCredentialData("cred-tail", "uh-tail"))
+			await ctx.service.lockActiveProfile()
+			return { ...ctx, id: created.id, info: { id: created.id, name: "PK", type: "passkey" } }
+		}
+
+		test("unlockPasskeyProfile: a healthy open stays silent and holds the real master and DEK", async () => {
+			const { api, service, id, info } = await lockedPasskeyProfile()
+			const dek = await unsealDekUnderWrapKey(await fakeWrapKey("cred-tail"), (await readRawRow(api, id)).dekSealed)
+			const seen = observe(service)
+			await expectHealthy(service, seen, await service.unlockPasskeyProfile(id), info, dek)
+		}, 30_000)
+
+		test("unlockPasskeyProfile: a blinded fingerprint opens derived-only and warns once", async () => {
+			const { api, service, id, info } = await lockedPasskeyProfile()
+			await writeRawRow(api, id, { ...(await readRawRow(api, id)), walletFingerprint: "0".repeat(64) })
+			const seen = observe(service)
+			await expectDegraded(service, seen, await service.unlockPasskeyProfile(id), info)
+		}, 30_000)
+
+		async function restoredPassword() {
+			const ctx = await makeService()
+			const out = await ctx.service.restore({ id: "r", name: "R", type: "password" }, await restoreSecretFor(0x51), "pass1234")
+			return { ...ctx, id: out.id, info: { id: out.id, name: "R", type: "password" } }
+		}
+
+		test("finalizeRestore (password): a healthy open stays silent and holds the real master and DEK", async () => {
+			const { api, service, id, info } = await restoredPassword()
+			const dek = await unsealPasswordDek(await readRawRow(api, id), "pass1234")
+			const seen = observe(service)
+			await expectHealthy(service, seen, await service.finalizeRestore(id, "pass1234"), info, dek)
+		}, 30_000)
+
+		test("finalizeRestore (password): a corrupted envelopeMac opens derived-only and warns once", async () => {
+			const { api, service, id, info } = await restoredPassword()
+			await writeRawRow(api, id, { ...(await readRawRow(api, id)), envelopeMac: Buffer.alloc(32, 0xee).toString("base64") })
+			const seen = observe(service)
+			await expectDegraded(service, seen, await service.finalizeRestore(id, "pass1234"), info)
+		}, 30_000)
+
+		async function restoredPasskey() {
+			const ctx = await makeService()
+			const out = await ctx.service.restore(
+				{ id: "ignored", name: "PR", type: "passkey" },
+				await PASSKEY_RESTORE_SECRET("cred-fin"),
+				undefined,
+				fakeCredentialData("cred-fin", "uh-fin"),
+			)
+			return { ...ctx, id: out.id, info: { id: out.id, name: "PR", type: "passkey" } }
+		}
+
+		test("finalizeRestore (passkey): a healthy open stays silent and holds the real master and DEK", async () => {
+			const { api, service, id, info } = await restoredPasskey()
+			const dek = await unsealDekUnderWrapKey(await fakeWrapKey("cred-fin"), (await readRawRow(api, id)).dekSealed)
+			const seen = observe(service)
+			await expectHealthy(service, seen, await service.finalizeRestore(id), info, dek)
+		}, 30_000)
+
+		test("finalizeRestore (passkey): a swapped DEK slot opens derived-only and warns once", async () => {
+			const { api, service, id, info } = await restoredPasskey()
+			await writeRawRow(api, id, { ...(await readRawRow(api, id)), dekSealed: await fakeDekSealedFor("cred-other") })
+			const seen = observe(service)
+			await expectDegraded(service, seen, await service.finalizeRestore(id), info)
+		}, 30_000)
+	})
+
+	describe("the restore stash", () => {
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to the stash maps and their TTL
+		const internalsOf = (service: ProfileService) => service as any
+		const allZero = (bytes: Uint8Array) => bytes.every((b) => b === 0)
+
+		async function restoredPasskey(credentialId: string, userHandle: string) {
+			const ctx = await makeService()
+			const out = await ctx.service.restore(
+				{ id: "ignored", name: "PR", type: "passkey" },
+				await PASSKEY_RESTORE_SECRET(credentialId),
+				undefined,
+				fakeCredentialData(credentialId, userHandle),
+			)
+			const internals = internalsOf(ctx.service)
+			return { ...ctx, id: out.id, internals, ttl: internals.constructor.PENDING_RESTORE_TTL_MS as number }
+		}
+
+		test("(BUG PIN) finalize's type refusal keeps the stashed secret, even at the TTL", async () => {
+			// The type check precedes the take, and the entry sweep spares the id being finalized,
+			// so an edited `type` leaves the master stashed until a later sweep, lock or delete.
+			const { api, service, id, internals, ttl } = await restoredPasskey("cred-type", "uh-type")
+			const entry = internals.pendingRestoreSecrets.get(id)
+			const now = Date.now()
+			vi.spyOn(Date, "now").mockReturnValue(now)
+			entry.capturedAt = now - ttl
+			await writeRawRow(api, id, { ...(await readRawRow(api, id)), type: "bogus" })
+			await expect(service.finalizeRestore(id)).rejects.toThrow("Profile type changed between restore and finalizeRestore")
+			expect(internals.pendingRestoreSecrets.get(id)).toBe(entry)
+			expect(allZero(entry.secret) || allZero(entry.dek)).toBe(false)
+			expect(internals.pendingDekRewraps.has(id)).toBe(false)
+		}, 30_000)
+
+		test("consumeDekRewrapContext hands over exactly the two buffers once", async () => {
+			const { service } = await makeService()
+			const out = await service.restore({ id: "c", name: "C", type: "password" }, await restoreSecretFor(0x61), "pass1234")
+			const context = await service.consumeDekRewrapContext(out.id)
+			expect(Object.keys(context!)).toStrictEqual(["sourceDek", "destinationDek"])
+			expect(Array.from(context!.sourceDek)).toStrictEqual(new Array(32).fill(0x55))
+			expect(allZero(context!.destinationDek)).toBe(false)
+			expect(await service.consumeDekRewrapContext(out.id)).toBeUndefined()
+		}, 30_000)
+
+		test("consumeDekRewrapContext wipes and drops an entry exactly at the TTL", async () => {
+			const { service } = await makeService()
+			const out = await service.restore({ id: "e", name: "E", type: "password" }, await restoreSecretFor(0x62), "pass1234")
+			const internals = internalsOf(service)
+			const entry = internals.pendingDekRewraps.get(out.id)
+			const now = Date.now()
+			vi.spyOn(Date, "now").mockReturnValue(now)
+			entry.capturedAt = now - internals.constructor.PENDING_RESTORE_TTL_MS
+			expect(await service.consumeDekRewrapContext(out.id)).toBeUndefined()
+			expect(internals.pendingDekRewraps.has(out.id)).toBe(false)
+			expect(allZero(entry.sourceDek) && allZero(entry.destinationDek)).toBe(true)
+		}, 30_000)
+
+		test("an unrelated sweep wipes and drops a stashed secret exactly at the TTL", async () => {
+			const { service, id, internals, ttl } = await restoredPasskey("cred-sweep", "uh-sweep")
+			const entry = internals.pendingRestoreSecrets.get(id)
+			const now = Date.now()
+			vi.spyOn(Date, "now").mockReturnValue(now)
+			entry.capturedAt = now - ttl
+			expect(await service.consumeDekRewrapContext("unrelated")).toBeUndefined()
+			expect(internals.pendingRestoreSecrets.has(id)).toBe(false)
+			expect(allZero(entry.secret) && allZero(entry.dek)).toBe(true)
+		}, 30_000)
+	})
 })

@@ -24,7 +24,6 @@ import {
 	asBase64Ciphertext,
 	asImportedKeysDek,
 	asMasterSecretBytes,
-	computeEnvelopeMacV3,
 	computeWalletFingerprint,
 	deriveDappSessionMacKey as deriveDappSessionMacKeyFromSecrets,
 	deriveMasterFromMnemonic,
@@ -33,7 +32,6 @@ import {
 	IMPORTED_DEK_AAD,
 	IMPORTED_KEYS_DEK_LEN,
 	type ImportedKeysDek,
-	type MacEnvelopeV3,
 	type MasterSecretBytes,
 	type Passhash,
 	PasswordSecretBox,
@@ -46,8 +44,9 @@ import { PasskeyService } from "@/wallet/services/passkey/service"
 import { PasskeyRecoveryCoordinator, type PasskeyRecovery } from "./passkey-recovery-coordinator"
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
 import { SessionManager } from "./session-manager"
+import { ExpiringStash } from "./expiring-stash"
+import { envelopeMacFor, macEnvelopeV3, newPasskeyRow, newPasswordRow } from "./profile-row"
 import {
-	mintPxeGeneration,
 	PROFILE_SERVICE_NAME,
 	type ProfileInfo,
 	type Profile,
@@ -117,6 +116,16 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	private passkeys: PasskeyService = null!
 	private passkeyCoordinator: PasskeyRecoveryCoordinator = null!
 
+	/** B-11: an abandoned backup restore (row written, never finalized/deleted)
+	 *  would otherwise park a raw master secret in `pendingRestoreSecrets` for the
+	 *  SW lifetime. Sweep entries older than this, zeroizing them, at the entry of
+	 *  every op that touches the map (restore/finalizeRestore/deleteProfile). The
+	 *  window comfortably exceeds a slow multi-service backup import; a legitimate
+	 *  import that runs longer can be expired by a later trigger — accepted. NEVER
+	 *  the id currently being finalized (finalizeRestore removes it from the map
+	 *  before its await). */
+	private static readonly PENDING_RESTORE_TTL_MS = 30 * 60 * 1000
+
 	/**
 	 * Holds the recovered passkey secret between `restore()` (which writes the
 	 * profile to storage) and `finalizeRestore()` (which opens the session).
@@ -134,23 +143,23 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * to get the same secret would be a UX regression — we cache the recovery
 	 * secret here in memory only, never persisted, cleared on SW restart.
 	 */
-	private readonly pendingRestoreSecrets = new Map<
-		string,
-		{
-			secret: MasterSecretBytes
-			dek: ImportedKeysDek
-			capturedAt: number
-			/** The security-bearing row fields as restore() wrote them. Finalize compares the
-			 *  live row against this snapshot before a clean open — an A1 writer editing
-			 *  `dekSealed`/`credentialId`/`pxeGeneration` between restore and finalize must not
-			 *  get a clean session carrying the stashed master (the fingerprint binding alone
-			 *  would miss those fields). */
-			expected: { type: ProfileType; credentialId: string; dekSealed: string; pxeGeneration: string; walletFingerprint: string }
-		}
-	>()
+	private readonly pendingRestoreSecrets = new ExpiringStash<{
+		secret: MasterSecretBytes
+		dek: ImportedKeysDek
+		capturedAt: number
+		/** The security-bearing row fields as restore() wrote them. Finalize compares the
+		 *  live row against this snapshot before a clean open — an A1 writer editing
+		 *  `dekSealed`/`credentialId`/`pxeGeneration` between restore and finalize must not
+		 *  get a clean session carrying the stashed master (the fingerprint binding alone
+		 *  would miss those fields). */
+		expected: { type: ProfileType; credentialId: string; dekSealed: string; pxeGeneration: string; walletFingerprint: string }
+	}>(ProfileService.PENDING_RESTORE_TTL_MS, (entry) => {
+		zeroize(entry.secret)
+		zeroize(entry.dek)
+	})
 
 	/**
-	 * TTL-bound, memory-only source→destination DEK rewrap context (final-audit condition).
+	 * TTL-bound, memory-only source→destination DEK rewrap context.
 	 * `restore()` runs BEFORE the imported-keys slice arrives, so the SOURCE DEK cannot be
 	 * consumed inside restore itself: it is stashed here — both profile types — and
 	 * `AccountService.restoreImportedKeys` consumes it atomically (rewraps every backup key row
@@ -159,24 +168,18 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * restores + SW death. An expired/missing context with rows present fails those rows into
 	 * the existing orphan taxonomy — never silently-kept undecryptable rows.
 	 */
-	private readonly pendingDekRewraps = new Map<
-		string,
-		{ sourceDek: ImportedKeysDek; destinationDek: ImportedKeysDek; capturedAt: number }
-	>()
+	private readonly pendingDekRewraps = new ExpiringStash<{
+		sourceDek: ImportedKeysDek
+		destinationDek: ImportedKeysDek
+		capturedAt: number
+	}>(ProfileService.PENDING_RESTORE_TTL_MS, (entry) => {
+		zeroize(entry.sourceDek)
+		zeroize(entry.destinationDek)
+	})
 
 	/** Durable delete-in-progress markers (finding D). NOT an EntityStorage — see
 	 *  TombstoneRepository: a corrupt tombstone must still reserve its id. */
 	private readonly tombstones: TombstoneRepository
-
-	/** B-11: an abandoned backup restore (row written, never finalized/deleted)
-	 *  would otherwise park a raw master secret in `pendingRestoreSecrets` for the
-	 *  SW lifetime. Sweep entries older than this, zeroizing them, at the entry of
-	 *  every op that touches the map (restore/finalizeRestore/deleteProfile). The
-	 *  window comfortably exceeds a slow multi-service backup import; a legitimate
-	 *  import that runs longer can be expired by a later trigger — accepted. NEVER
-	 *  the id currently being finalized (finalizeRestore removes it from the map
-	 *  before its await). */
-	private static readonly PENDING_RESTORE_TTL_MS = 30 * 60 * 1000
 
 	/** F-B24: a restore-pending marker must be at least this old before the boot
 	 *  sweep may treat the import as ABANDONED and reap it. A marker only proves
@@ -192,22 +195,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 *  facade lock (`runExclusive`) so it can't zeroize an entry another op holds
 	 *  a live reference to. Optionally skips `exceptId` (the id being finalized). */
 	private sweepStalePendingRestore(now: number, exceptId?: string): void {
-		for (const [id, entry] of this.pendingRestoreSecrets) {
-			if (id === exceptId) continue
-			if (now - entry.capturedAt >= ProfileService.PENDING_RESTORE_TTL_MS) {
-				this.pendingRestoreSecrets.delete(id)
-				zeroize(entry.secret)
-				zeroize(entry.dek)
-			}
-		}
-		for (const [id, entry] of this.pendingDekRewraps) {
-			if (id === exceptId) continue
-			if (now - entry.capturedAt >= ProfileService.PENDING_RESTORE_TTL_MS) {
-				this.pendingDekRewraps.delete(id)
-				zeroize(entry.sourceDek)
-				zeroize(entry.destinationDek)
-			}
-		}
+		this.pendingRestoreSecrets.sweep(now, exceptId)
+		this.pendingDekRewraps.sweep(now, exceptId)
 	}
 
 	/**
@@ -223,17 +212,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		return this.runExclusive(async () => {
 			const now = Date.now()
 			this.sweepStalePendingRestore(now, profileId)
-			const entry = this.pendingDekRewraps.get(profileId)
+			const entry = this.pendingDekRewraps.take(profileId, now)
 			if (!entry) return undefined
-			this.pendingDekRewraps.delete(profileId)
-			// The sweep above EXCLUDES this id (it must not free the entry mid-consume), so the TTL
-			// has to be enforced here or it never applies to the one entry that matters: an
-			// abandoned restore's raw SOURCE DEK would stay consumable for the whole SW lifetime.
-			if (now - entry.capturedAt >= ProfileService.PENDING_RESTORE_TTL_MS) {
-				zeroize(entry.sourceDek)
-				zeroize(entry.destinationDek)
-				return undefined
-			}
 			return { sourceDek: entry.sourceDek, destinationDek: entry.destinationDek }
 		})
 	}
@@ -389,17 +369,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		try {
 			dek = await this.unsealDekWithPasshash(passhash, row.dekSealed)
 			if (dek) {
-				const macOk = await verifyEnvelopeMacV3(
-					id,
-					secret,
-					dek,
-					this.macEnvelopeV3(
-						{ guard: row.guard, secret: row.secret, entropy: row.entropy },
-						row.dekSealed,
-						row.walletFingerprint,
-					),
-					row.envelopeMac,
-				)
+				const macOk = await this.envelopeMacValid(id, row, secret, dek)
 				if (!macOk) {
 					zeroize(dek)
 					dek = null
@@ -446,6 +416,24 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			)
 		}
 		return dek
+	}
+
+	/** Open the session, then raise the visible warning when it opened derived-only. `dek` must
+	 *  come from a trust gate (`unsealTrustedDekHoldingLock`, `unsealPasskeyDekHoldingLock`, or
+	 *  finalize's snapshot compare); `null` opens without it. Allocates and wipes nothing, so
+	 *  callers must `return await` it inside their `try`: a bare return lets their `finally`
+	 *  zeroize the buffers before the open copies them. Caller MUST hold the facade lock. */
+	private async openAndWarnIfDegradedHoldingLock(
+		row: Profile,
+		master: MasterSecretBytes,
+		passhash: Passhash | undefined,
+		dek: ImportedKeysDek | null,
+	): Promise<ProfileInfo> {
+		await this.openSessionVerified(row, master, passhash, dek ?? undefined)
+		if (!dek) {
+			this.emit("onImportedKeysDegraded", this.getProfileInfo(row))
+		}
+		return this.getProfileInfo(row)
 	}
 
 	protected async init(services: ServiceCollection) {
@@ -604,23 +592,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				// impossible) — kept uniform with the import/restore paths.
 				const walletFingerprint = await this.assertNotDuplicateWallet(secret, false)
 				const id = await this.nextUnreservedId()
-				// The envelope MAC binds the row's OWN storage key (plus its fingerprint), so it
-				// can only be computed after the id is final — hence inside this locked section,
-				// after allocation. PBKDF2 stays outside; this is microseconds.
-				const envelopeMac = await computeEnvelopeMacV3(id, secret, dek, this.macEnvelopeV3(encrypted, dekSealed, walletFingerprint))
-
-				const profile: Profile = {
-					id,
-					name,
-					type: "password",
-					pxeGeneration: mintPxeGeneration(),
-					dekSealed,
-					walletFingerprint,
-					guard: encrypted.guard,
-					secret: encrypted.secret,
-					entropy: encrypted.entropy,
-					envelopeMac,
-				}
+				// Inside the lock, after allocation: the MAC binds the final id. PBKDF2 stays outside.
+				const profile = await newPasswordRow({ id, name, slots: encrypted, dekSealed, walletFingerprint }, secret, dek)
 				await this.persistNewProfileHoldingLock(profile)
 
 				await this.openSessionVerified(profile, secret, passhash, dek)
@@ -699,11 +672,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					// warning fires (the popup listens on onImportedKeysDegraded — never just a
 					// log), and NO bearer is persisted (open() enforces that from the absent dek).
 					dek = await this.unsealTrustedDekHoldingLock(id, current, secret, passhash, "unlock")
-					await this.openSessionVerified(current, secret, passhash, dek ?? undefined)
-					if (!dek) {
-						this.emit("onImportedKeysDegraded", this.getProfileInfo(current))
-					}
-					return this.getProfileInfo(current)
+					return await this.openAndWarnIfDegradedHoldingLock(current, secret, passhash, dek)
 				})
 			} finally {
 				zeroize(passhash)
@@ -740,8 +709,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		const id = credentialData?.userHandle ?? (await this.nextUnreservedId())
 		const recovery = await this.acquireRecovery({ ceremony: "create", userHandle: id, name }, credentialData)
 		// Fresh imported-keys DEK, sealed under the PRF-derived wrap key while the ceremony's
-		// credential material is in hand (the SIXTH row-construction site — every creation path
-		// mints a DEK + fingerprint).
+		// credential material is in hand.
 		const dek = generateImportedKeysDek()
 
 		try {
@@ -760,15 +728,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				// Invariant assertion (fresh credential ⇒ fresh PRF ⇒ fresh master).
 				const walletFingerprint = await this.assertNotDuplicateWallet(recovery.secret, false)
 
-				const profile: Profile = {
-					id,
-					name,
-					type: "passkey",
-					pxeGeneration: mintPxeGeneration(),
-					dekSealed,
-					walletFingerprint,
-					credentialId: recovery.credentialId,
-				}
+				const profile = newPasskeyRow({ id, name, dekSealed, walletFingerprint, credentialId: recovery.credentialId })
 				await this.persistNewProfileHoldingLock(profile)
 
 				await this.openSessionVerified(profile, recovery.secret, undefined, dek)
@@ -848,11 +808,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				}
 				const dek = await this.unsealPasskeyDekHoldingLock(id, current, recovery)
 				try {
-					await this.openSessionVerified(current, recovery.secret, undefined, dek ?? undefined)
-					if (!dek) {
-						this.emit("onImportedKeysDegraded", this.getProfileInfo(current))
-					}
-					return this.getProfileInfo(current)
+					return await this.openAndWarnIfDegradedHoldingLock(current, recovery.secret, undefined, dek)
 				} finally {
 					zeroize(dek)
 				}
@@ -1165,11 +1121,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				profile.secret = resealed.encrypted.secret
 				profile.entropy = resealed.encrypted.entropy
 				profile.dekSealed = rekeyed.newDekSealed
-				profile.envelopeMac = await computeEnvelopeMacV3(
-					id,
+				profile.envelopeMac = await envelopeMacFor(
+					{ id, slots: resealed.encrypted, dekSealed: rekeyed.newDekSealed, walletFingerprint: profile.walletFingerprint },
 					secret,
 					dek,
-					this.macEnvelopeV3(resealed.encrypted, rekeyed.newDekSealed, profile.walletFingerprint),
 				)
 				await this.repo.set(id, profile)
 				this.emit("onProfileUpdated", this.getProfileInfo(profile))
@@ -1427,26 +1382,6 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		}
 	}
 
-	/** Drop + zeroize the stashed passkey restore secret (the map owns its buffers). */
-	private dropPendingRestoreSecret(id: string): void {
-		const pending = this.pendingRestoreSecrets.get(id)
-		if (pending) {
-			this.pendingRestoreSecrets.delete(id)
-			zeroize(pending.secret)
-			zeroize(pending.dek)
-		}
-	}
-
-	/** Drop + zeroize the DEK rewrap context (the map owns its buffers). */
-	private dropPendingDekRewrap(id: string): void {
-		const rewrap = this.pendingDekRewraps.get(id)
-		if (rewrap) {
-			this.pendingDekRewraps.delete(id)
-			zeroize(rewrap.sourceDek)
-			zeroize(rewrap.destinationDek)
-		}
-	}
-
 	/**
 	 * Atomic, awaited, privacy-erasing profile deletion (finding D). THREE phases:
 	 *  1. UNDER the facade lock: snapshot (lock-free reads) → write the durable
@@ -1491,10 +1426,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (this.sessionManager.isActive(id)) {
 				await this.sessionManager.close()
 			}
-			this.dropPendingRestoreSecret(id)
+			this.pendingRestoreSecrets.drop(id)
 			// Deleting a profile mid-restore must also drop + zeroize its rewrap context (its
-			// buffers aren't aged yet, so the TTL sweep wouldn't reap them) — P4 rider Medium.
-			this.dropPendingDekRewrap(id)
+			// buffers aren't aged yet, so the TTL sweep wouldn't reap them).
+			this.pendingDekRewraps.drop(id)
 			// A deleted profile's integrity records must not outlive it: a stale blocking record
 			// would keep the barrier up forever, and a stale verified-stamp could let a future
 			// same-id re-import skip its first boot verification.
@@ -2019,19 +1954,6 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		}
 	}
 
-	/** The envelope MAC v3 preimage for a sealed profile record: the row's OWN storage key
-	 *  first (kills whole-envelope swaps between same-password profiles — B's authentic
-	 *  envelope pasted under A's id fails verification even though every byte, including the
-	 *  original tag, is genuine), then the four sealed slots, then the plaintext fingerprint
-	 *  (blinding the duplicate guard becomes a detectable tamper). */
-	private macEnvelopeV3(
-		p: { guard: string; secret: string; entropy: string },
-		dekSealed: string,
-		walletFingerprint: string,
-	): MacEnvelopeV3 {
-		return { guard: p.guard, secret: p.secret, entropy: p.entropy, dek: dekSealed, walletFingerprint }
-	}
-
 	/**
 	 * Does the stored MAC still cover this exact record? EVERY site that is about to trust the DEK
 	 * must ask — not just the unlock path. The DEK slot's AAD is a purpose constant, not
@@ -2053,7 +1975,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		secret: MasterSecretBytes,
 		dek: ImportedKeysDek,
 	): Promise<boolean> {
-		return verifyEnvelopeMacV3(requestedId, secret, dek, this.macEnvelopeV3(p, p.dekSealed, p.walletFingerprint), p.envelopeMac)
+		return verifyEnvelopeMacV3(requestedId, secret, dek, macEnvelopeV3(p, p.dekSealed, p.walletFingerprint), p.envelopeMac)
 	}
 
 	/** Seal the imported-keys DEK under the password credential (EncryptionKey — the audited
@@ -2160,19 +2082,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				const id = await this.nextUnreservedId()
 				const encrypted = await this.secretBox.sealWithPasshash(passhash, secret, entropy)
 				const dekSealed = await this.sealDekWithPasshash(passhash, dek)
-				const envelopeMac = await computeEnvelopeMacV3(id, secret, dek, this.macEnvelopeV3(encrypted, dekSealed, walletFingerprint))
-				const profile: Profile = {
-					id,
-					name,
-					type: "password",
-					pxeGeneration: mintPxeGeneration(),
-					dekSealed,
-					walletFingerprint,
-					guard: encrypted.guard,
-					secret: encrypted.secret,
-					entropy: encrypted.entropy,
-					envelopeMac,
-				}
+				const profile = await newPasswordRow({ id, name, slots: encrypted, dekSealed, walletFingerprint }, secret, dek)
 				await this.persistNewProfileHoldingLock(profile)
 				await this.openSessionVerified(profile, secret, passhash, dek)
 				return profile
@@ -2219,16 +2129,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					userHandle = await this.nextUnreservedId()
 				}
 
-				const id = userHandle
-				const profile: Profile = {
-					id,
-					name,
-					type: "passkey",
-					pxeGeneration: mintPxeGeneration(),
-					dekSealed,
-					walletFingerprint,
-					credentialId,
-				}
+				const profile = newPasskeyRow({ id: userHandle, name, dekSealed, walletFingerprint, credentialId })
 				await this.persistNewProfileHoldingLock(profile)
 				await this.openSessionVerified(profile, secret, undefined, dek)
 				return profile
@@ -2408,29 +2309,13 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			while ((await this.repo.contains(id)) || this.deletionState.isReserved(id)) {
 				id = await this.repo.generateUniqueId()
 			}
-			// MAC v3 binds the row's OWN id — computed only after the id loop above
-			// settles it.
-			const envelopeMac = await computeEnvelopeMacV3(
-				id,
+			// After the id loop, so the MAC binds the settled id. `plainSecret` is the
+			// length-checked backup decode; the caller's `finally` wipes it.
+			const newProfile = await newPasswordRow(
+				{ id, name, slots: sealed.encrypted, dekSealed, walletFingerprint },
 				asMasterSecretBytes(plainSecret as Uint8Array<ArrayBuffer>),
 				destinationDek,
-				this.macEnvelopeV3(sealed.encrypted, dekSealed, walletFingerprint),
 			)
-
-			const newProfile: Profile = {
-				id,
-				name,
-				type: "password",
-				// Fresh generation even on a same-id re-import: the D4 fence
-				// distinguishes this incarnation from the deleted one.
-				pxeGeneration: mintPxeGeneration(),
-				dekSealed,
-				walletFingerprint,
-				guard: sealed.encrypted.guard,
-				secret: sealed.encrypted.secret,
-				entropy: sealed.encrypted.entropy,
-				envelopeMac,
-			}
 
 			await this.writeMarkerThenRowHoldingLock(id, newProfile)
 
@@ -2587,15 +2472,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			id = await this.nextUnreservedId()
 		}
 
-		const newProfile: Profile = {
-			id,
-			name,
-			type: "passkey",
-			pxeGeneration: mintPxeGeneration(),
-			dekSealed,
-			walletFingerprint,
-			credentialId: recovery.credentialId,
-		}
+		const newProfile = newPasskeyRow({ id, name, dekSealed, walletFingerprint, credentialId: recovery.credentialId })
 		// Same marker-before-row bracket as the password branch (a torn passkey
 		// import must not escape detection).
 		await this.writeMarkerThenRowHoldingLock(id, newProfile)
@@ -2679,7 +2556,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			// Zeroize any LEFTOVER rewrap context for this id — the empty-slice case
 			// (`restoreImportedKeys` never ran, so nothing consumed it) and any abandoned
 			// re-restore of the same id. Consumed contexts are already gone.
-			this.dropPendingDekRewrap(id)
+			this.pendingDekRewraps.drop(id)
 
 			// If the session is already active for this profile, treat as
 			// no-op. Defensive against double-finalize.
@@ -2723,11 +2600,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			await this.assertEntropyMasterPair(unsealed.secret, unsealed.entropy)
 			passhash = await EncryptionKey.getPasshash(password)
 			dek = await this.unsealTrustedDekHoldingLock(id, profile, unsealed.secret, passhash, "finalizeRestore")
-			await this.openSessionVerified(profile, unsealed.secret, passhash, dek ?? undefined)
-			if (!dek) {
-				this.emit("onImportedKeysDegraded", this.getProfileInfo(profile))
-			}
-			return this.getProfileInfo(profile)
+			return await this.openAndWarnIfDegradedHoldingLock(profile, unsealed.secret, passhash, dek)
 		} finally {
 			// zero buffers after sessionManager has copied.
 			zeroize(unsealed.secret)
@@ -2747,20 +2620,15 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 *  degrades exactly like the password side on any mismatch. Caller MUST hold the
 	 *  facade lock. */
 	private async finalizePasskeyRestoreHoldingLock(id: string, profile: Profile): Promise<ProfileInfo> {
-		const pending = this.pendingRestoreSecrets.get(id)
-		if (!pending) {
+		if (!this.pendingRestoreSecrets.get(id)) {
 			throw new Error("No pending restore secret for passkey profile")
 		}
 		if (profile.type !== "passkey") {
 			throw new Error("Profile type changed between restore and finalizeRestore")
 		}
-		this.pendingRestoreSecrets.delete(id)
-		// The sweep excludes the id being finalized, so the TTL must be enforced here (as
-		// `consumeDekRewrapContext` does) or an abandoned restore stays openable for the SW lifetime.
-		if (Date.now() - pending.capturedAt >= ProfileService.PENDING_RESTORE_TTL_MS) {
-			zeroize(pending.secret)
-			zeroize(pending.dek)
-			this.dropPendingDekRewrap(id)
+		const pending = this.pendingRestoreSecrets.take(id, Date.now())
+		if (!pending) {
+			this.pendingDekRewraps.drop(id)
 			throw new Error("No pending restore secret for passkey profile")
 		}
 		let dek: ImportedKeysDek | null = pending.dek
@@ -2784,11 +2652,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			this.logger.log(this.name, LogLevel.Error, "passkey row changed between restore and finalizeRestore — opening derived-only", id)
 		}
 		try {
-			await this.openSessionVerified(profile, pending.secret, undefined, dek ?? undefined)
-			if (!dek) {
-				this.emit("onImportedKeysDegraded", this.getProfileInfo(profile))
-			}
-			return this.getProfileInfo(profile)
+			return await this.openAndWarnIfDegradedHoldingLock(profile, pending.secret, undefined, dek)
 		} finally {
 			zeroize(pending.secret)
 			zeroize(dek)
