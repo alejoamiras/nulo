@@ -3,6 +3,7 @@
 Open follow-ups lifted out of closing plans, one entry each, or a pointer to the GitHub issue that owns it. Read when planning; delete an entry when it resolves. A plan never closes while it still owns an open follow-up.
 
 - **The gas link** (owner UI calls, 2026-09-28 and 2026-10-01). The fee card's get-gas link opens unleashed's V6 testnet app, `https://testnet.app.unleashed.systems`, on every network ([nulo-v6](archive/nulo-v6/plan.md) § P8 step 3). Revisit when unleashed has a public mainnet bridge, since the link would then follow the network.
+- **Unleashed publishes no privacy notice** (2026-10-03). Privacy § 5.10 (`legal/privacy.md`) names the site the get-gas links open and says the app's own requests "are not Nulo's, and this policy does not describe them". Whether unleashed publishes a notice is the owner's call in that repository; if it does, § 5.10 should link it.
 
 ## Aztec V6
 

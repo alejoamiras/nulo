@@ -19,6 +19,16 @@ export interface LockIO {
 /** Reads of a branch that keeps moving under the write, before giving up. */
 export const ATTEMPTS = 3
 
+export type GraphQLError = { type?: string; message?: string }
+
+/**
+ * Whether `createCommitOnBranch` failed only because the branch moved past `expectedHeadOid`, which
+ * GraphQL reports inside a 200. A response carrying any other error is a real failure.
+ */
+export function movedHead(errors: readonly GraphQLError[] | undefined): boolean {
+	return !!errors?.length && errors.every((e) => e.type === "STALE_DATA" || /expected branch to point to/i.test(e.message ?? ""))
+}
+
 export async function runLockVersion(prJson: string, io: LockIO): Promise<0 | 1> {
 	const branch = releaseBranch(prJson)
 	if (!branch.ok) return fail(io, branch.reason)
@@ -85,11 +95,10 @@ if (import.meta.main) {
 			const res = await call("graphql", json, { method: "POST", body: JSON.stringify({ query, variables: { input } }) })
 			const { data, errors } = (await res.json()) as {
 				data?: { createCommitOnBranch?: { commit?: { oid?: string } } } | null
-				errors?: { type?: string; message?: string }[]
+				errors?: GraphQLError[]
 			}
 			if (data?.createCommitOnBranch?.commit?.oid) return true
-			// GraphQL reports a moved head inside a 200; any other error is a real failure.
-			if (errors?.some((e) => e.type === "STALE_DATA" || /expected branch to point to/i.test(e.message ?? ""))) return false
+			if (movedHead(errors)) return false
 			throw new Error(`createCommitOnBranch: ${errors?.map((e) => e.message).join("; ") || "no commit returned"}`)
 		},
 		log: (message) => console.log(message),

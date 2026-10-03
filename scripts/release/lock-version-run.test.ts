@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { ATTEMPTS, type LockIO, runLockVersion } from "./lock-version-run"
+import { ATTEMPTS, type LockIO, movedHead, runLockVersion } from "./lock-version-run"
 
 const BRANCH = "release-please--branches--main"
 const PR = JSON.stringify({ headBranchName: BRANCH, baseBranchName: "main", number: 7 })
@@ -69,4 +69,17 @@ describe("runLockVersion", () => {
 		expect(await runLockVersion(PR, garbled.io)).toBe(1)
 		expect(garbled.commits).toEqual([])
 	})
+})
+
+const stale = { type: "STALE_DATA", message: 'Expected branch to point to "h0" but it did not. Pull and try again.' }
+const refused = { type: "FORBIDDEN", message: "Resource not accessible by integration" }
+
+test.each([
+	["a moved head", [stale], true],
+	["a moved head reported by its message alone", [{ message: stale.message }], true],
+	["a refusal", [refused], false],
+	["a moved head beside a refusal", [stale, refused], false],
+	["no errors", [], false],
+])("movedHead: %s → %p", (_, errors, moved) => {
+	expect(movedHead(errors)).toBe(moved)
 })
