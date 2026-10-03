@@ -195,7 +195,7 @@ Each guard stays inline as a few statements, so every `await`, listing and branc
 
 **New file `apps/extension/src/wallet/services/pxe/known-artifacts-order.test.ts`** (Q-27 k; the extension resolves the aliases). It mocks only `@aztec-labs/stdlib/contract`, spreading `importOriginal`: the hasher records each artifact and returns a unique id, and `getContractInstanceFromInstantiationParams` returns a stub address. It resets through `_resetNoteSchemasForTests`. It asserts:
 
-- `loadProductionKnownArtifacts` hashes, in order, the ten imported artifacts by identity, then the Wonderland token and the private FPC, each `toEqual` its `loadContractArtifact(json)`;
+- `loadProductionKnownArtifacts` hashes, in order, the ten imported artifacts by identity, then the Wonderland token and the private FPC, each matching its `loadContractArtifact(json)` by name and function names (a deep compare times out);
 - the returned map's values are in the same order;
 - the SponsoredFPC instance is built from `SponsoredFPCContractArtifact`.
 
