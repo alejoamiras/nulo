@@ -62,6 +62,10 @@ describe("assertLiveChainIdentity", () => {
 		expect(() => assertLiveChainIdentity(SEPOLIA, { l1ChainId: 11155111, rollupVersion: 2 })).toThrow(/chainId=11155110/)
 		expect(() => assertLiveChainIdentity(SEPOLIA, { l1ChainId: 11155111, rollupVersion: 2 })).toThrow(/rollupVersion=2/)
 	})
+
+	test("the live composite it compares and reports is unsigned", () => {
+		expect(() => assertLiveChainIdentity(SEPOLIA, { l1ChainId: 11155111, rollupVersion: 4127419662 })).toThrow(/composite=4138294185 /)
+	})
 })
 
 describe("chainInfoFrom", () => {
