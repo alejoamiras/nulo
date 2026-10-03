@@ -56,10 +56,10 @@
 - `realSleep` left `auto-imports.d.ts`'s `vue` block on the build, but its global `const` line stayed until removed by hand; a rebuild keeps it out.
 - `ScanEpisodeStore.settled()` now returns `Promise<unknown>`, the live `tail`. Every caller only awaits it.
 - The temporary site fingerprints and the seven-shape matrix passed unchanged against the migrated code, two runs each on Bun, then left in 3g.
-- **Mutation re-run on the migrated code**, 53 mutants at the sites (policy swaps, an unchained stand-in queue, fence checks and bumps, guard swaps by import alias, each `sleep` off by 1 ms, the LogsViewer clear and the quarter fallback): all killed except three equivalents and one gap.
+- **Mutation re-run on the migrated code**, 51 mutants at the sites (policy swaps, an unchained stand-in queue, fence checks and bumps, guard swaps by import alias, each `sleep` off by 1 ms): all killed except three equivalents and one gap.
   - Equivalent: offscreen report to propagate (`closeOffscreen` never rejects), and the seed and health dispose `invalidate()`s.
   - Gap: the logger's report-to-propagate swap survived, because no test made a storage op fail while watching its caller. The new `clear()` row passes against the parent's chain and the migrated queue, and kills the swap.
-- **LogsViewer, red then green:** `LogsViewer.test.ts` failed against the unchanged file (the 500 ms timer is never cleared) and passed after the fix; the fallback row passed both times.
+- **The LogsViewer timer clear moved to arc 15b** (logsviewer-timer), after the build: a route-2 fix ships in its own arc. Its commit was dropped from this branch by a non-interactive rebase and cherry-picked there, with its red-then-green record and its two mutants (the clear removed, the fallback count changed), both killed.
 
 ### Gates
 

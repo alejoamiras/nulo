@@ -11,7 +11,7 @@ branch: hd/15-async-primitives, stacked on harden-dedupe
 
 # async-primitives: one serial queue, one run fence, one record guard, one sleep
 
-Finding Q-16 and the record-guard half of Q-15 (part e), from `audit/quality/2026-09-30-dedup-high/`. The wallet hand-rolls the same async idioms (deadline race, `sleep`, promise-chain queue, latest-wins counter) and two meanings of "is a record", in about forty places. This batch gives the queue, the fence, the guards and `sleep` one definition each, and moves only the sites whose promise graph and cleanup order stay exactly as they are. The deadline races all stay inline (see Deferred). The one intended behaviour change is the program's pre-cleared LogsViewer timer clear, made inline in its own commit with a red-then-green test.
+Finding Q-16 and the record-guard half of Q-15 (part e), from `audit/quality/2026-09-30-dedup-high/`. The wallet hand-rolls the same async idioms (deadline race, `sleep`, promise-chain queue, latest-wins counter) and two meanings of "is a record", in about forty places. This batch gives the queue, the fence, the guards and `sleep` one definition each, and moves only the sites whose promise graph and cleanup order stay exactly as they are. The deadline races all stay inline (see Deferred). The program's pre-cleared LogsViewer timer clear is a route-2 fix, so it ships in its own arc, logsviewer-timer (arc 15b); this arc changes no behaviour.
 
 ## Outcome & Quality Bar
 
@@ -50,9 +50,9 @@ Each one is `new Promise((r) => setTimeout(r, ms))` and becomes `sleep(ms)` from
 - `apps/extension/src/core/adapters/system-clock.ts:13-15` (`return sleep(ms)`)
 - `apps/extension/src/composables/importPreflight.ts:31` `realSleep` (used at `:46`, `:61`; imported by `importChainSync.ts:26` for `:115`). It is deleted, both files import `sleep`, and its lines leave `src/types/auto-imports.d.ts` and `.eslintrc-auto-import.json`.
 
-### Q-16 (a): the LogsViewer timer (Phase 3f, route 2)
+### Q-16 (a): the LogsViewer timer
 
-`apps/extension/src/components/JsonViewer/LogsViewer.vue:189-200` arms a 500 ms timer that rejects with `"Logs fetch timeout"` and never clears it. The fix stays inline: the timer id is kept, and `await Promise.race([fetch, timeout])` is wrapped in a `try/finally` that clears it. The `finally` runs inside the race's resume job, so no hop is added, the caught reason is unchanged, and `return await fetch` stays. The new component test proves the clear red-then-green, and a separate row proves the timeout still falls back to `cnt / 4`.
+Moved to arc 15b, logsviewer-timer: a route-2 fix ships in its own arc.
 
 ### Q-16 (b): serial queues (Phase 3c)
 
@@ -148,7 +148,7 @@ Every touched function gets shorter or stays the same length. None is in the com
 - **Storage reads** (`usePinnedTokens`, `scan-episodes`, `fee-send-selection`). Storage is writable by anything that reaches the profile directory, and a backup import writes it too. These sites keep the strict guard, so an array blob still reads as absent.
 - **Write queues guard against resurrection.** A tombstone, a cleared Send pick or a purged log overtaken by an older write would bring data back. Each site's serialization, continuation past a rejection and policy are pinned. Propagate swapped for report would tell `mutateSendSelections`' caller that a failed write succeeded. Report swapped for propagate would surface failures to callers that never handle them.
 - **Fences guard scope privacy.** A stale read landing late would show one profile's incoming transfers, pins or seed status under another. Every check stays at its line, after the same await, with `disposed` and the scope comparison intact.
-- **Deadlines** are untouched, apart from LogsViewer's added clear.
+- **Deadlines** are untouched.
 - **Logging:** no new log line. The `onError` callbacks are today's calls.
 - **npm surface:** `wallet-crypto/src/public.ts` is unchanged. Its bundle inlines `@nulo/wallet-core/utils` (`encryption-key.ts:2`), so the staged package is compared parent against head: the same inventory and every file's sha256.
 - **Secret pages:** untouched.
@@ -166,7 +166,7 @@ Every touched function gets shorter or stays the same length. None is in the com
 3. **Probe 2** (same engines) ran the seven queue shapes against the helper over resolve, reject, synchronous throw, a rethrowing reporter and the ops after it: the event logs are identical. Both audit legs reproduced this; Opus's run interleaved two noise chains.
 4. `ScanEpisodeStore`'s reporter is an arrow (`incoming-transfer/service.ts:258`).
 5. `scripts/publish/approved-digests.json` binds the `0.1.0` wallet-crypto tarball by sha256.
-6. Every migrated composable and service has a colocated test file, except `system-clock.ts` and `LogsViewer.vue`. No test names `realSleep`.
+6. Every migrated composable and service has a colocated test file, except `system-clock.ts`. No test names `realSleep`.
 
 **Inferences:**
 
@@ -218,7 +218,7 @@ Every test passes on unchanged code. Each mutant is applied to a scratch copy of
 - **3c:** the queues, trimming the narration the helper now owns (`guarded-network-activation.ts:45-46`, the `fee-send-selection.ts:77` doc), with each site's why kept.
 - **3d:** the fences, with the stale comments rewritten.
 - **3e:** the guards.
-- **3f:** LogsViewer, red-then-green against the parent's file copy. A Decisions entry, the commit body and the PR body record it.
+- **3f:** moved to arc 15b, logsviewer-timer.
 - **3g (test only):** remove the temporary fingerprints and collapse the seven-shape matrix, after logging their green results.
 
 **Validation gate (after each phase):**
@@ -243,9 +243,7 @@ One arc, `hd/15-async-primitives`, stacked on `harden-dedupe`. Code review: off.
 
 ## UI impact
 
-**Not logic-only: one `.vue` file changes.** `LogsViewer.vue`'s script changes; its template and styles do not.
-
-The zero-diff gate covers the logger window (`popup/windows/logger/`), with a fixed log set so the parent and the head render identical lines. The build stubs the viewer's two ports (`log-viewer.getLogs`, `config.getValue`) rather than seeding `nulo:logs`: the window has no testids to click, so each state is reached by its data.
+**Logic only.** No `.vue` file changes. The logger store's queue moves, so the zero-diff gate still covers the logger window (`popup/windows/logger/`), with a fixed log set so the parent and the head render identical lines. The build stubs the viewer's two ports (`log-viewer.getLogs`, `config.getValue`) rather than seeding `nulo:logs`: the window has no testids to click, so each state is reached by its data.
 
 - three states: loaded, with Debug Mode on, and empty (what Clear logs leaves);
 - Chrome and Firefox, dark and light;
@@ -269,7 +267,7 @@ Nothing here is user-visible, so these items go to follow-ups, not the alignment
 - **`raceDeadline`, the shared deadline race.**
   - Codex: the helper's `race.then(clear, clear)` reaction reorders cleanup on both engines. At OPFS the order goes from quarantine-or-release, clear, outer catch to clear, quarantine-or-release, outer catch, and at base-client the clear moves into its own reaction. Under the program's cleanup-order rule, that is a blocker.
   - Opus: no macrotask can run between the two reactions, so clearing earlier cannot be observed.
-  - Call: Codex. Its only other consumer would be LogsViewer, so the helper does not pay for itself. All three sites stay inline, and LogsViewer gets its clear inline. A follow-up when the program closes.
+  - Call: Codex. Its only other consumer would be LogsViewer, so the helper does not pay for itself. All three sites stay inline, and LogsViewer gets its clear inline, in arc 15b. A follow-up when the program closes.
 
 ## Decisions (delegated)
 
@@ -290,7 +288,7 @@ Nothing here is user-visible, so these items go to follow-ups, not the alignment
 1. **The `raceDeadline` reorder is unobservable** (no macrotask runs between reactions). **Rejected** in favour of the conservative rule; recorded under Deferred.
 2. **Two interleaved noise chains** reproduce the seven queue traces on both engines. **Adopted** as evidence (Fact 3).
 3. **Name clash:** `useLegalAcceptance.ts:14` already declares `isCurrent`. **Adopted:** the closure is `mine`.
-4. **A Decisions entry for route 2** (program plan, the Behaviour rule). **Adopted**, below.
+4. **A Decisions entry for route 2** (program plan, the Behaviour rule). **Adopted**, in arc 15b's plan.
 5. **Deterministic logger screenshots** via seeded `nulo:logs`. **Adopted.**
 6. **Guards:** boxed-primitive rows; `isObjectLike` typed `value is Record<string, unknown>`. **Adopted.**
 7. **Comments:** rewrite the stale ones at `useEntityCrud.ts:83` and `useIncomingTransfers.ts:74-75`; trim the narration the queue now owns; TSDoc for both policies and the throwing `onError`; say "promise hop", not "tick"; one line on `Lock`; README rows. **Adopted.**
@@ -300,7 +298,4 @@ Nothing here is user-visible, so these items go to follow-ups, not the alignment
 
 ### Route 2: the LogsViewer timer clear
 
-- **Invisible:** no pixel, copy, wire or persisted byte changes. The zero-diff shots prove the pixels.
-- **Strictly safer:** it only adds a cleanup.
-- **Red-then-green:** `LogsViewer.test.ts` fails against the parent's file (the 500 ms timer is never cleared) and passes after the fix; its fallback row passes on both. Removing the clear is a killed mutant.
-- Pre-cleared by the program plan's Behaviour rule.
+Split into arc 15b, logsviewer-timer, whose Decisions carry the route-2 entry: the program plan puts a route-2 fix in its own arc.
