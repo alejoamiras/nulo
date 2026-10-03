@@ -32,7 +32,7 @@ const props = defineProps({
 
 <style module>
 .wrapper {
-	position: relative;
+	composes: divider from "./settings-row.module.css";
 
 	cursor: pointer;
 	background: transparent;
@@ -55,16 +55,8 @@ const props = defineProps({
 	}
 
 	&::after {
-		position: absolute;
-		bottom: 0;
 		left: 16px;
 		right: 16px;
-		display: block;
-		height: 1px;
-
-		background: rgba(74, 70, 63, 0.3);
-
-		content: " ";
 	}
 
 	&:last-of-type::after {

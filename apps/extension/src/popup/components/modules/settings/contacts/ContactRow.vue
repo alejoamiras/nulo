@@ -60,43 +60,7 @@ const target = ref(null)
 
 <style module>
 .row {
-	position: relative;
-	padding: 12px 16px;
-	cursor: pointer;
-	background: transparent;
-
-	transition: background 0.2s var(--bezier);
-
-	&:hover,
-	&:has(> [data-row-target]:focus-visible) {
-		background: var(--nulo-surface-high);
-	}
-
-	&:has(> [data-row-target]:focus-visible) {
-		outline: 2px solid var(--nulo-accent);
-		outline-offset: -2px;
-	}
-
-	&:active {
-		background: var(--nulo-surface-highest);
-	}
-
-	&::after {
-		position: absolute;
-		bottom: 0;
-		left: 16px;
-		right: 16px;
-		display: block;
-		height: 1px;
-
-		background: rgba(74, 70, 63, 0.3);
-
-		content: " ";
-	}
-
-	&:last-child::after {
-		display: none;
-	}
+	composes: divider row from "../../../../../components/ui/Settings/settings-row.module.css";
 }
 
 .avatar {
@@ -120,31 +84,15 @@ const target = ref(null)
 }
 
 .row_text {
-	min-width: 0;
+	composes: row_text from "../../../../../components/ui/Settings/settings-row.module.css";
 }
 
 .row_name {
-	font-family: var(--font-body);
-	font-size: 14px;
-	font-weight: 600;
-	color: var(--txt-primary);
-	line-height: 20px;
-	letter-spacing: 0.01em;
-
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	composes: row_name from "../../../../../components/ui/Settings/settings-row.module.css";
 }
 
 .row_address {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	color: var(--nulo-secondary);
-	line-height: 16px;
-
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	composes: row_sub from "../../../../../components/ui/Settings/settings-row.module.css";
 }
 
 .sender_chip {
@@ -172,6 +120,6 @@ const target = ref(null)
 }
 
 .actions {
-	flex-shrink: 0;
+	composes: row_actions from "../../../../../components/ui/Settings/settings-row.module.css";
 }
 </style>
