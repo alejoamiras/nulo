@@ -6,7 +6,7 @@ import { isTerminal } from "@nulo/wallet-core/jobs"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { ProfileService } from "@/wallet/services/profile/service"
 import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
-import { NetworkService, networkInfoFrom, type Network } from "@/wallet/services/network/service"
+import { NetworkService, networkInfoFrom, primaryEndpointUrl, type Network } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
 import { TokenService, type Token, type TokenAdded, type TokenDeleted } from "@/wallet/services/token/service"
 import { TransactionService, type Tx } from "@/wallet/services/transaction/service"
@@ -533,9 +533,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			// node: a profile switch mid-call could otherwise route this tx hash to another profile's RPC
 			// provider (a cross-profile leak) — the same footgun the pending-tx poller avoids. A malformed
 			// network with no primary endpoint fails soft (dash) rather than falling back to that global node.
-			const primary = network.endpoints?.find((e) => e.id === network.primaryEndpointId)
-			if (!primary) return null
-			const node = await this.networkService.getNodeForUrl(primary.rpcUrl)
+			const rpcUrl = primaryEndpointUrl(network)
+			if (rpcUrl === undefined) return null
+			const node = await this.networkService.getNodeForUrl(rpcUrl)
 			const receipt = await node.getTxReceipt(TxHash.fromString(record.txHash))
 			const fee = receipt.transactionFee
 			if (fee === undefined) return null

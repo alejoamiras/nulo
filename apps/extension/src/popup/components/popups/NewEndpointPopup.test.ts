@@ -1,11 +1,5 @@
-/**
- * Component tests for NewEndpointPopup — pins the popup's wiring onto the
- * shared `usePopupEntity` lifecycle (Q-14): Enter submits ONLY while an
- * input/textarea is focused (a global Enter must not), the listener dies with
- * the popup, and show resets the fields. The composable's own mechanics are
- * covered in `usePopupEntity.test.ts`; these pins prove THIS popup is wired
- * through it and that its submit guard still gates the Enter path.
- */
+/** NewEndpointPopup's wiring onto `usePopupEntity` (Enter submits only from a focused input) and
+ *  its error copy per rejection, byte for byte. */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils"
@@ -27,9 +21,16 @@ vi.mock("@/composables/toast", () => ({
 	useToast: () => ({ openToast: openToastMock }),
 }))
 
-vi.mock("@/stores/app.store", () => ({
-	useAppStore: () => ({ networks: [{ id: "net-1", chainId: 1, name: "Local" }] }),
+// One reactive store, so a test can take the network away while a request is in flight.
+const { app, NETWORKS } = vi.hoisted(() => ({
+	app: { store: undefined as unknown as { networks: { id: string; chainId: number; name: string }[] } },
+	NETWORKS: [{ id: "net-1", chainId: 1, name: "Local" }],
 }))
+vi.mock("@/stores/app.store", async () => {
+	const { reactive } = await import("vue")
+	app.store = reactive({ networks: [...NETWORKS] })
+	return { useAppStore: () => app.store }
+})
 vi.mock("@/stores/cache.store", () => ({
 	useCacheStore: () => ({ endpointEditNetworkId: "net-1" }),
 }))
@@ -93,6 +94,7 @@ async function fillRpcUrl(w: VueWrapper, url: string) {
 beforeEach(() => {
 	addEndpointMock.mockResolvedValue(undefined)
 	getNetworksMock.mockResolvedValue([])
+	app.store.networks = [...NETWORKS]
 })
 
 afterEach(() => {
@@ -188,5 +190,88 @@ describe("NewEndpointPopup — Enter-submit wiring (usePopupEntity)", () => {
 		expect(w.emitted("onClose")).toBeTruthy()
 		expect(openToastMock).toHaveBeenCalledWith({ kind: "success", label: "Endpoint added" })
 		await dispose(w)
+	})
+})
+
+/** A submit button routes the handler's own rejection to the app error handler, as Vue does for a
+ *  component event, instead of the document listener's unhandled promise. */
+const SUBMIT_STUBS = {
+	...STUBS,
+	FormPopup: {
+		props: ["show", "submitLabel", "submitDisabled", "submitLoading", "displaceIdx", "submitTestId"],
+		emits: ["onClose", "submit"],
+		template: `<div><slot name="title" /><slot /><button data-testid="submit" :data-loading="String(!!submitLoading)" @click="$emit('submit')">go</button></div>`,
+	},
+}
+
+async function mountForErrors(): Promise<{ w: VueWrapper; errors: unknown[] }> {
+	const errors: unknown[] = []
+	const w = mount(NewEndpointPopup, {
+		props: { show: false },
+		global: { stubs: SUBMIT_STUBS, config: { errorHandler: (err) => errors.push(err) } },
+	})
+	wrappers.push(w)
+	await w.setProps({ show: true })
+	await flushPromises()
+	await fillRpcUrl(w, "https://rpc.example.com")
+	return { w, errors }
+}
+
+const fieldText = (w: VueWrapper) =>
+	w
+		.findAll("label")
+		.find((l) => l.find("input").attributes("data-input-label") === "RPC URL")
+		?.text() ?? ""
+
+describe("NewEndpointPopup: the RPC URL field's error copy", () => {
+	test.each([
+		["ENDPOINT_CHAIN_MISMATCH: This RPC reports chainId 5, but this network is chain 1.", "Wrong chain. This network is chain 1."],
+		["ENDPOINT_CHAIN_MISMATCH: This RPC reports L1 chain 2, but this network is L1 chain 0.", "Wrong chain. This network is chain 1."],
+		["DUPLICATE_ENDPOINT: This URL is already an endpoint of this network.", "This URL is already an endpoint of this network."],
+		["Failed to fetch node info", "RPC didn't respond. Check the URL."],
+		["Failed to fetch node info.", "Something went wrong."],
+		["DUPLICATE_ENDPOINT then ENDPOINT_CHAIN_MISMATCH", "Wrong chain. This network is chain 1."],
+		["Invalid params for addEndpoint: RPC URL must use https://", "Something went wrong."],
+	])("a rejection %j shows %j", async (message, copy) => {
+		addEndpointMock.mockRejectedValueOnce(new Error(message))
+		const { w, errors } = await mountForErrors()
+		await w.find('[data-testid="submit"]').trigger("click")
+		await flushPromises()
+		expect(fieldText(w)).toBe(copy)
+		expect(errors).toEqual([])
+	})
+
+	describe("the network leaves the store while the request is in flight", () => {
+		async function rejectAfterNetworkLeaves(message: string) {
+			let reject!: (e: Error) => void
+			addEndpointMock.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, rej) => {
+						reject = rej
+					}),
+			)
+			const ctx = await mountForErrors()
+			await ctx.w.find('[data-testid="submit"]').trigger("click")
+			await flushPromises()
+			app.store.networks = []
+			await flushPromises()
+			reject(new Error(message))
+			await flushPromises()
+			return ctx
+		}
+
+		test("a duplicate reads no chain id and shows its copy", async () => {
+			const { w, errors } = await rejectAfterNetworkLeaves("DUPLICATE_ENDPOINT: x")
+			expect(fieldText(w)).toBe("This URL is already an endpoint of this network.")
+			expect(errors).toEqual([])
+			expect(w.find('[data-testid="submit"]').attributes("data-loading")).toBe("false")
+		})
+
+		test("a chain mismatch reads the chain id optionally and interpolates undefined", async () => {
+			const { w, errors } = await rejectAfterNetworkLeaves("ENDPOINT_CHAIN_MISMATCH: x")
+			expect(fieldText(w)).toBe("Wrong chain. This network is chain undefined.")
+			expect(errors).toEqual([])
+			expect(w.find('[data-testid="submit"]').attributes("data-loading")).toBe("false")
+		})
 	})
 })

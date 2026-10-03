@@ -2,6 +2,7 @@
 import { FieldWarning } from "@nulo/design"
 /** Utils */
 import { managers } from "@/utils/core"
+import { endpointErrorText } from "./endpoint-error-text"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
@@ -12,7 +13,6 @@ const { openToast } = useToast()
 import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
 import { useCacheStore } from "@/stores/cache.store"
-import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 const cacheStore = useCacheStore()
@@ -51,16 +51,10 @@ const handleCreate = async () => {
 		emit("onClose")
 		openToast({ kind: "success", label: "Endpoint added" })
 	} catch (err) {
-		const msg = errorMessageFromUnknown(err)
-		if (msg.includes("ENDPOINT_CHAIN_MISMATCH")) {
-			errorText.value = `Wrong chain. This network is chain ${network.value?.chainId}.`
-		} else if (msg.includes("DUPLICATE_ENDPOINT")) {
-			errorText.value = "This URL is already an endpoint of this network."
-		} else if (msg === "Failed to fetch node info") {
-			errorText.value = "RPC didn't respond. Check the URL."
-		} else {
-			errorText.value = "Something went wrong."
-		}
+		errorText.value = endpointErrorText(err, {
+			duplicate: "This URL is already an endpoint of this network.",
+			chainId: () => network.value?.chainId,
+		})
 	} finally {
 		isSubmitting.value = false
 	}

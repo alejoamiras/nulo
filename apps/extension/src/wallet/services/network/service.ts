@@ -33,6 +33,7 @@ import {
 	ERR_PRIMARY_ENDPOINT,
 	ERR_UNATTENDED_LIVE_CHECK,
 	type Events,
+	findPrimaryEndpoint,
 	type Methods,
 	type Network,
 	type NetworkEndpoint,
@@ -40,6 +41,7 @@ import {
 	NETWORK_SERVICE_NAME,
 	NETWORK_STORAGE_ROOT,
 	NetworkMethodSchemas,
+	networkInfoFrom,
 	NodeStatus,
 	NetworkRowSchema,
 	primaryEndpointUrl,
@@ -133,6 +135,32 @@ function sameLocalNetworkUrl(a: string, b: string): boolean {
 	} catch {
 		return a === b
 	}
+}
+
+/** A node whose composite chain id the wallet reads as 0: the caller says the network is local, or
+ *  the URL is the Local Network seed's. */
+function isLocalNetworkTarget(rpcUrl: string, kindHint: ChainKind | undefined): boolean {
+	return kindHint === "local" || sameLocalNetworkUrl(rpcUrl, LOCAL_NETWORK_RPC_URL)
+}
+
+/** Refuses a node that is not `network`'s chain. The XOR composite alone is collision-prone: a
+ *  different (l1ChainId, rollupVersion) pair can XOR to the same value, and l1ChainId feeds key
+ *  derivation, so the L1 must match exactly too. */
+function assertSameChainIdentity(probed: { chainId: number; l1ChainId: number }, network: Network): void {
+	if (probed.chainId !== network.chainId) {
+		throw new Error(
+			`${ERR_ENDPOINT_CHAIN_MISMATCH}: This RPC reports chainId ${probed.chainId}, but this network is chain ${network.chainId}.`,
+		)
+	}
+	if (probed.l1ChainId !== network.l1ChainId) {
+		throw new Error(
+			`${ERR_ENDPOINT_CHAIN_MISMATCH}: This RPC reports L1 chain ${probed.l1ChainId}, but this network is L1 chain ${network.l1ChainId}.`,
+		)
+	}
+}
+
+function trimmedLabel(label: string | undefined): string | undefined {
+	return label?.trim() || undefined
 }
 
 /** Lowercase host + protocol; preserve path/query/fragment verbatim. Falls
@@ -337,7 +365,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		deletion.assertCurrent(fence.profileId, fence.epoch)
 		await this._writeActive(profileId, activeId)
 		const active = seeded.find((n) => n.id === activeId)!
-		const primaryEndpoint = active.endpoints.find((e) => e.id === active.primaryEndpointId)!
+		const primaryEndpoint = findPrimaryEndpoint(active)!
 		this.nodes.set(active.chainId, this.nodeFactory.createNode(primaryEndpoint.rpcUrl))
 	}
 
@@ -412,7 +440,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		const kind = network.kind ?? "custom"
 		if (SEED_L1_BY_KIND[kind] === undefined) {
 			if (opts?.unattended) throw new Error(`${ERR_UNATTENDED_LIVE_CHECK}: network ${chainId} needs a live L1 identity check`)
-			const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId) ?? network.endpoints[0]
+			const primary = findPrimaryEndpoint(network) ?? network.endpoints[0]
 			if (!primary) throw new Error("Network has no endpoint to verify its L1 identity against")
 			const probed = await this._probeChainIdentity(primary.rpcUrl, kind)
 			if (probed.l1ChainId !== stored) {
@@ -584,7 +612,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		return await this.lock.withLock(async () => {
 			const network = requireOwnedRow(await this.storage.get(id), profile.id)
 			await this._writeActive(profile.id, id)
-			const primaryEndpoint = network.endpoints.find((e) => e.id === network.primaryEndpointId)
+			const primaryEndpoint = findPrimaryEndpoint(network)
 			if (primaryEndpoint) {
 				this.nodes.set(network.chainId, this.nodeFactory.createNode(primaryEndpoint.rpcUrl))
 			}
@@ -606,19 +634,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		const probed = await this._probeChainIdentity(rpcUrl, peek.kind)
 		return await this.lock.withLock(async () => {
 			const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
-			if (probed.chainId !== network.chainId) {
-				throw new Error(
-					`${ERR_ENDPOINT_CHAIN_MISMATCH}: This RPC reports chainId ${probed.chainId}, but this network is chain ${network.chainId}.`,
-				)
-			}
-			// The XOR composite alone is collision-prone: a different (l1ChainId, rollupVersion)
-			// pair can XOR to the same value, and l1ChainId feeds key derivation — so endpoint
-			// mutations require EXACT L1 equality, not just composite equality.
-			if (probed.l1ChainId !== network.l1ChainId) {
-				throw new Error(
-					`${ERR_ENDPOINT_CHAIN_MISMATCH}: This RPC reports L1 chain ${probed.l1ChainId}, but this network is L1 chain ${network.l1ChainId}.`,
-				)
-			}
+			assertSameChainIdentity(probed, network)
 			const normalized = normalizeRpcUrl(rpcUrl)
 			if (network.endpoints.some((e) => e.rpcUrl === normalized)) {
 				throw new Error(`${ERR_DUPLICATE_ENDPOINT}: This URL is already an endpoint of this network.`)
@@ -626,7 +642,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			const endpoint: NetworkEndpoint = {
 				id: this._fresh8(network.endpoints.map((e) => e.id)),
 				rpcUrl: normalized,
-				label: label?.trim() || undefined,
+				label: trimmedLabel(label),
 			}
 			network.endpoints.push(endpoint)
 			await this.storage.set(network.id, network)
@@ -648,23 +664,11 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		// Peek the network's kind so the chainId probe can short-circuit for
 		// `kind === "local"` regardless of how the URL was edited.
 		const peek = requireOwnedRow(await this.storage.get(networkId), profile.id)
-		// Probe outside the lock when URL changes (network call).
-		// We probe regardless to keep semantics simple — chainId could have shifted on the same URL.
+		// Probe outside the lock even for an unchanged URL: the node's chain identity may have drifted.
 		const probed = await this._probeChainIdentity(rpcUrl, peek.kind)
 		return await this.lock.withLock(async () => {
 			const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
-			if (probed.chainId !== network.chainId) {
-				throw new Error(
-					`${ERR_ENDPOINT_CHAIN_MISMATCH}: This RPC reports chainId ${probed.chainId}, but this network is chain ${network.chainId}.`,
-				)
-			}
-			// Exact L1 equality — see addEndpoint: the composite is XOR-collision-prone and
-			// l1ChainId feeds key derivation.
-			if (probed.l1ChainId !== network.l1ChainId) {
-				throw new Error(
-					`${ERR_ENDPOINT_CHAIN_MISMATCH}: This RPC reports L1 chain ${probed.l1ChainId}, but this network is L1 chain ${network.l1ChainId}.`,
-				)
-			}
+			assertSameChainIdentity(probed, network)
 			const idx = network.endpoints.findIndex((e) => e.id === endpointId)
 			if (idx < 0) throw new Error("Invalid endpoint id")
 			const collision = network.endpoints.find((e, i) => i !== idx && e.rpcUrl === normalized)
@@ -673,7 +677,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			const updated: NetworkEndpoint = {
 				id: endpointId,
 				rpcUrl: normalized,
-				label: label?.trim() || undefined,
+				label: trimmedLabel(label),
 			}
 			network.endpoints[idx] = updated
 			await this.storage.set(network.id, network)
@@ -734,9 +738,10 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
 		const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
-		const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
+		const primary = findPrimaryEndpoint(network)
 		if (!primary) return NodeStatus.Inactive
 		try {
+			// No kind hint, unlike probeNodeStatus: a local network off the seed URL reads InvalidChain.
 			const probedChainId = await this._getChainId(primary.rpcUrl)
 			if (probedChainId !== network.chainId) return NodeStatus.InvalidChain
 			return NodeStatus.Active
@@ -750,13 +755,11 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
 		const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
-		const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
+		const primary = findPrimaryEndpoint(network)
 		if (!primary) return NodeStatus.Inactive
 		try {
 			const probed = await this.nodeFactory.probeChainId(primary.rpcUrl, timeoutMs)
-			// Local-network chain ids are conventionally 0 — mirror `_getChainId`'s
-			// carve-outs so a local endpoint can't misreport as InvalidChain.
-			const effective = network.kind === "local" || sameLocalNetworkUrl(primary.rpcUrl, LOCAL_NETWORK_RPC_URL) ? 0 : probed
+			const effective = isLocalNetworkTarget(primary.rpcUrl, network.kind) ? 0 : probed
 			if (effective !== network.chainId) return NodeStatus.InvalidChain
 			return NodeStatus.Active
 		} catch {
@@ -772,7 +775,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 				const profile = await requireActiveProfile(this.profileService)
 				const network = (await this.storage.getValues()).find((n) => n.profileId === profile.id && n.chainId === chainId)
 				if (!network) throw new Error(`No network configured for chainId ${chainId}`)
-				const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
+				const primary = findPrimaryEndpoint(network)
 				if (!primary) throw new Error(`Network ${network.id} has no primary endpoint`)
 				node = this.nodeFactory.createNode(primary.rpcUrl)
 				this.nodes.set(chainId, node)
@@ -848,10 +851,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	 */
 	public async getNetworkInfo(networkId: string): Promise<NetworkInfo> {
 		await this.ensureInitialized()
-		const network = await this.getNetwork(networkId)
-		const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
-		if (!primary) throw new Error(`Network ${network.id} has no primary endpoint`)
-		return { profileId: network.profileId, chainId: network.chainId, rpcUrl: primary.rpcUrl }
+		return networkInfoFrom(await this.getNetwork(networkId))
 	}
 
 	// ── Cascade coordinator ──────────────────────────────────────────────
@@ -968,7 +968,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		const endpoint: NetworkEndpoint = {
 			id: endpointId,
 			rpcUrl: normalizeRpcUrl(rpcUrl),
-			label: endpointLabel?.trim() || undefined,
+			label: trimmedLabel(endpointLabel),
 		}
 		return {
 			id: networkId,
@@ -991,14 +991,8 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		return randomIdNotIn((id) => seen.has(id))
 	}
 
-	/**
-	 * `kindHint` lets callers that already know the target network's kind
-	 * (i.e. `addEndpoint` / `updateEndpoint`) bypass the URL comparison
-	 * entirely. This is the structural fix for the bug where editing
-	 * Local Network's endpoint URL away from the seed literal yielded
-	 * `ERR_ENDPOINT_CHAIN_MISMATCH` even though the user's intent was
-	 * obviously the local chain.
-	 */
+	/** A caller that knows the network is local passes `kindHint`, so a Local Network endpoint
+	 *  edited away from the seed URL still reads as chain 0. */
 	private async _getChainId(rpcUrl: string, kindHint?: ChainKind): Promise<number> {
 		return (await this._probeChainIdentity(rpcUrl, kindHint)).chainId
 	}
@@ -1011,8 +1005,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			const rpc = this.nodeFactory.createNode(rpcUrl)
 			const info = await rpc.getNodeInfo()
 			const l1ChainId = info.l1ChainId
-			if (kindHint === "local") return { chainId: 0, l1ChainId }
-			if (sameLocalNetworkUrl(rpcUrl, LOCAL_NETWORK_RPC_URL)) return { chainId: 0, l1ChainId }
+			if (isLocalNetworkTarget(rpcUrl, kindHint)) return { chainId: 0, l1ChainId }
 			return { chainId: walletChainId(info.l1ChainId, info.rollupVersion), l1ChainId }
 		} catch (error) {
 			this.logError("Failed to fetch node info", error)

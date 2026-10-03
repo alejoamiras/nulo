@@ -8,17 +8,9 @@
  * for the silent single read). A lint guard (`no-restricted-syntax`)
  * enforces that every other reference goes through `NodeFactory.createNode()`.
  *
- * Scheme allowlist enforced at THIS boundary too (in
- * addition to the network/spec.ts schema). Defense in depth — if a future
- * code path persists a URL bypassing the schema (e.g., direct storage
- * write, internal bypass), the adapter still refuses to construct a node
- * client from a non-allowlisted URL.
- *
- * The schema is the primary gate; this is the safety net that catches
- * any drift. Allowlist policy matches the schema:
- * - `https:` for any host.
- * - `http:` only for `localhost`, `127.0.0.1`, `[::1]` (WHATWG-URL form).
- * - Everything else rejected.
+ * Every node is built through the transport rule (`rpcTransportVerdict`). It is the only gate
+ * for a URL that never crossed the extension's schema, such as a persisted endpoint. Unlike the
+ * schema it accepts userinfo, and it judges the raw string, not a trimmed copy.
  */
 
 import type { Fr } from "@aztec-labs/foundation/curves/bn254"
@@ -26,7 +18,7 @@ import { createSafeJsonRpcClient } from "@aztec-labs/foundation/json-rpc/client"
 import type { Logger } from "@aztec-labs/foundation/log"
 import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { type AztecNode, AztecNodeApiSchema, createAztecNodeClient } from "@aztec-labs/stdlib/interfaces/client"
-import { walletChainId } from "@nulo/wallet-core/utils"
+import { rpcTransportVerdict, walletChainId } from "@nulo/wallet-core/utils"
 import type { NodeFactory } from "../ports/node-factory-port"
 import { makeFetchWithTimeout, makeSingleAttemptFetch } from "../utils/fetch"
 
@@ -51,11 +43,8 @@ export const SILENT_RPC_LOG: Logger = {
 	getBindings: () => ({}),
 }
 
-/**
- * F-011: stand-alone allowlist check used by the adapter (and exportable for
- * other call sites that need to verify before persisting). Returns
- * `{ ok: true }` or `{ ok: false, reason: string }`.
- */
+/** The transport rule on the raw string; each refusal `reason` embeds the URL, host or scheme it
+ *  refused. */
 export function isAllowedRpcUrl(rpcUrl: string): { ok: true } | { ok: false; reason: string } {
 	let parsed: URL
 	try {
@@ -63,14 +52,12 @@ export function isAllowedRpcUrl(rpcUrl: string): { ok: true } | { ok: false; rea
 	} catch {
 		return { ok: false, reason: `not a valid URL: ${rpcUrl}` }
 	}
-	const scheme = parsed.protocol.slice(0, -1)
-	if (scheme === "https") return { ok: true }
-	if (scheme === "http") {
-		const host = parsed.hostname.toLowerCase()
-		if (host === "localhost" || host === "127.0.0.1" || host === "[::1]") return { ok: true }
-		return { ok: false, reason: `http: only permitted for loopback hosts (got host="${host}")` }
+	const verdict = rpcTransportVerdict(parsed)
+	if (verdict.allowed) return { ok: true }
+	if (verdict.refusal === "non-loopback-http") {
+		return { ok: false, reason: `http: only permitted for loopback hosts (got host="${verdict.host}")` }
 	}
-	return { ok: false, reason: `scheme "${scheme}:" not in allowlist (only https: and http://loopback are permitted)` }
+	return { ok: false, reason: `scheme "${verdict.scheme}:" not in allowlist (only https: and http://loopback are permitted)` }
 }
 
 export class AztecNodeFactoryAdapter implements NodeFactory {

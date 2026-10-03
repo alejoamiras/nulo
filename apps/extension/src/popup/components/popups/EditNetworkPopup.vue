@@ -1,5 +1,8 @@
 <script setup>
 import { FieldWarning } from "@nulo/design"
+/** Utils */
+import { findPrimaryEndpoint } from "@/wallet/services/network/spec"
+
 /** Composables */
 import { useToast } from "@/composables/toast"
 const { openToast } = useToast()
@@ -55,7 +58,7 @@ const isAvailableToUpdateNetwork = computed(() => {
 })
 
 const handleFillFieldsWithDefaultValues = () => {
-	const primary = networkToEdit.value?.endpoints.find((e) => e.id === networkToEdit.value.primaryEndpointId)
+	const primary = networkToEdit.value && findPrimaryEndpoint(networkToEdit.value)
 	// rebase() loads values + sets the dirty-baseline so `field.isDirty` drives
 	// the "Already exists" warning gating (isStartedEditingName) above.
 	form.rebase({ name: networkToEdit.value?.name ?? "", url: primary?.rpcUrl ?? "" })

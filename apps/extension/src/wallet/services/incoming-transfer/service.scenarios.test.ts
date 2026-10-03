@@ -3843,6 +3843,22 @@ describe("IncomingTransferService — D8 dust filter (getIncomingTransfers)", ()
 		expect(calls).toBe(after) // cached now that receipt.blockHash === record.blockHash
 	})
 
+	test.each([
+		[
+			"a dangling primaryEndpointId",
+			{ id: "n1", chainId: 1, endpoints: [{ id: "e1", rpcUrl: "http://n1" }], primaryEndpointId: "gone" },
+		],
+		["no endpoints at all", { id: "n1", chainId: 1, primaryEndpointId: "e1" }],
+	])("getReceiptFee → null for a network with %s, reaching neither the record's endpoint nor the chain node", async (_name, net) => {
+		const network = makeNetworkStub([net])
+		const { service } = await bootService({ network })
+		const rec = seedPublic({ txHash: txh(0x1006), blockHash: "0xbh" })
+		network.setReceiptImpl(async () => ({ transactionFee: 1n, blockHash: hash("0xbh") }))
+		expect(await service.getReceiptFee(rec.id)).toBeNull()
+		expect(network.getNodeForUrl).not.toHaveBeenCalled()
+		expect(network.getNode).not.toHaveBeenCalled()
+	})
+
 	test("getReceiptFee skips the cache write when a purge bumped the epoch mid-fetch (no stale repopulation)", async () => {
 		const network = makeNetworkStub()
 		const { service } = await bootService({ network })
