@@ -60,6 +60,7 @@ const VERIFIED_ERASE = { onBlocked: "wait", timeoutMs: 5_000, warnArgs: (name) =
   - S2 becomes `await this.deleteDb(keyval.name!, LEGACY_SWEEP_KEYVAL)`.
   - The three S3 callers pass `VERIFIED_ERASE`. Their resolved value is discarded, as it is today.
 - **Kept per site as policy data:** the warn text and arity (S2's single string is kept, not normalised), skip versus wait, the 5 s deadline, and the null-reason fallback (wait only).
+- **Comments.** The `deleteDb` doc (`:860-866`) says "never false-success" of every call, which is wrong once the skip policy is in. It shrinks to "deletes `name`; the policy decides what `blocked` does", and the per-arm docs carry the semantics. One line records that the wrapper must stay non-async. The splice comment (`:294-296`) keeps its reason and drops "(review finding — …)".
 
 ### B. The shared-store rule (Q-21, keyval guard)
 
@@ -82,9 +83,11 @@ The legacy-DB predicate also appears a third time, as the boot filter at `:237`.
   - the sweep passes its boot snapshot `dbs`;
   - erasure passes `await indexedDB.databases()`, only inside its `if (!remaining)` branch, exactly where the second listing happens today.
 
-Each guard stays inline as a few statements, so every `await`, listing and branch sits where it does today.
+Each guard stays inline as a few statements, so every `await`, listing and branch sits where it does today. One line at the sweep's `findKeyvalStore(dbs)` says the boot snapshot is deliberate: a store created after boot is never the sweep's to delete.
 
-**Alternative rejected: one async `deleteSharedKeyvalIfNoPxeDbs({ lookup })` helper.** It adds exactly one microtask between the guard and the next statement on both branches. In `clearProfileState` that next statement is the success-only `profileBarriers.delete` (`:794`), `profileLifecycles.set(deleted)` (`:800`) and `leaveWrite()` (`:804`). A probe of the inline shape against the helper shape counted 2→3 ticks (something remains) and 4→5 ticks (nothing remains), the same on Bun/JSC and Node/V8 (scratch probe, deleted). This is the arc-10 lesson in `implementations-plan/lessons.md` ("Moving a span into an awaited helper…"), so the guard stays inline.
+**Engine text, reviewed.** In erasure, `(await indexedDB.databases()).find(...)` becomes `findKeyvalStore(...)`, so a non-array listing's `TypeError` would name `dbs`. `databases()` returns a browser-built sequence and no input reaches it, so no malformed value can arrive there. The change is recorded, not pinned.
+
+**Alternative rejected: one async `deleteSharedKeyvalIfNoPxeDbs({ lookup })` helper.** It adds exactly one microtask between the guard and the next statement on both branches. In `clearProfileState` that next statement is the success-only `profileBarriers.delete` (`:794`), `profileLifecycles.set(deleted)` (`:800`) and `leaveWrite()` (`:804`). A synthetic probe of the inline shape against the helper shape counted 2→3 ticks (something remains) and 4→5 ticks (nothing remains), the same on Bun/JSC and Node/V8. It measures guard completion only, not the service-level endpoints T1–T5, which Phase 1 measures itself. This is the lesson in `implementations-plan/lessons.md` ("Moving a span into an awaited helper…", evidence `approval-scope-follow`), so the guard stays inline.
 
 ### C. Catalog keys (Q-27 k)
 
@@ -99,7 +102,7 @@ Each guard stays inline as a few statements, so every `await`, listing and branc
 - `rawArtifact` becomes the one table: `{ … } satisfies Record<string, () => ContractArtifact>`, with entries in today's order. It keeps the name `rawArtifact`, so the `TypeError` an unknown key raises at `rawArtifact[key]()` (`:93`) keeps its text.
 - `export type CatalogKey = keyof typeof rawArtifact`.
 - `export const ALL_CATALOG_KEYS = Object.keys(rawArtifact) as readonly CatalogKey[]`. For non-integer string keys, `Object.keys` returns them in insertion order, so the order equals today's literal. It is a fresh plain array, as the literal is.
-- The "single source of truth" doc and the resolution-order note move onto the table.
+- The "single source of truth" doc and the resolution-order note move onto the table, and the "Before this, …" history paragraph goes.
 
 `CatalogKey` keeps the same twelve literal members, and its consumers (`known-artifacts.ts:4`, `note-schemas.ts:2`) are untouched.
 
@@ -129,10 +132,10 @@ Each guard stays inline as a few statements, so every `await`, listing and branc
   - Erasure's prefix ends in `/`, so profile `p1` never matches `p10`. Phase 1 adds a `pxe/p10/1` fixture to pin it.
   - The shared store goes only when the fresh listing shows no `pxe/*` database for any profile, at both sites. The sweep's boot-snapshot lookup is the stricter one: a store created after boot is never deleted by the sweep. It is kept, per the program's Behaviour rule.
   - A database held open in another extension context (tab, popup, worker) produces `blocked`, never a forced close. The site's policy decides what follows, as today.
-- **Blocked and success semantics are identical per site** (table A). The verified policy can never report a blocked or failed erasure as success, and the skip policy can never hang the boot. The skip's `false` keeps the database in `pxes`, so the keyval guard sees it (`:295-297`, the review-finding comment that stays).
+- **Blocked and success semantics are identical per site** (table A). The verified policy can never report a blocked or failed erasure as success, and the skip policy can never hang the boot. The skip's `false` keeps the database in `pxes`, so the keyval guard sees it (`:294-297`; its comment stays, minus the review tag).
 - **Ordering is preserved, including microtasks.** The wrapper stays non-async, and the guards stay inline. Phase 1 pins the tick distance from each awaited IDB event to the next observable step, so a later "tidy" into an async helper turns red.
 - **Logging:** the same arguments at the same level. Database names are wallet-chosen identifiers (`pxe/<profileId>/<chainId>`), already logged today; no new field is added.
-- **Pre-existing, out of scope (a follow-up, not fixed):** `keyval-store` is also bb.js's CRS cache, through `idb-keyval`'s default store (`node_modules/.bun/@aztec-foundation+bb.js@6.0.0-rc.1/.../crs/browser/cached_net_crs.js:1`). `idb-keyval` keeps its connection open and ignores `versionchange`. So on a modern install with no legacy database left, every `clearProfileState` either wipes the CRS cache (a re-download on the next WASM prove), or, if bb.js has the cache open in the offscreen document, waits 5 s and rejects, which the coordinator records as a retryable erasure failure. Confidence: moderate. The overlap is certain from source, but whether the offscreen holds the connection at deletion time is unverified. `opfs-storage.test.ts` passes on both browsers, which shows no blocking connection on that path in CI. This arc keeps today's behaviour exactly; see Asks.
+- **Pre-existing, out of scope (a follow-up, not fixed):** `keyval-store` is also bb.js's CRS cache, through `idb-keyval`'s default store (`node_modules/.bun/@aztec-foundation+bb.js@6.0.0-rc.1/.../crs/browser/cached_net_crs.js:1`). idb-keyval 6.3.0 caches its connection and has no `versionchange` handler, and bb.js loads the CRS in its caller's context. So a `clearProfileState` deletes the CRS cache whenever the store exists and no legacy PXE database remains. If a same-origin context also holds the store open, the delete is blocked, waits 5 s and rejects, and the coordinator records a retryable erasure failure. The overlap is high confidence from source; the live block is likely once a WASM prove has run. It is a medium reliability issue with no data loss and no crypto exposure. `opfs-storage.test.ts` seeds no `keyval-store`, so it neither shows nor rules this out. This arc keeps today's behaviour exactly, and Phase 1's ordered-log pin freezes it, so the follow-up must edit that pin deliberately.
 - **npm surface:** none. `@nulo/aztec-runtime` is private and unstaged (`scripts/publish/packages.ts`).
 
 ## Assumptions
@@ -147,8 +150,8 @@ Each guard stays inline as a few statements, so every `await`, listing and branc
    - `clearChainState` rejects on error (`service.test.ts:255-260`).
 4. **Real-browser coverage today:**
    - `opfs-storage.test.ts:107-155` runs `clearProfileState` on a seeded legacy database for the deleted profile, on the Chrome and Firefox network lanes. It is not in `CHROME_ONLY`.
-   - `settings-crud.test.ts:103` reaches `clearChainState`, but `purgeChain` swallows its rejection (`network/service.ts:896-900`).
-   - Nothing reaches the boot sweep. Nothing produces `blocked` in a browser.
+   - `settings-crud.test.ts:103` reaches `clearChainState`. `purgeChain` collects its rejection and throws (`network/service.ts:896-904`), but the spec seeds and checks no IndexedDB erasure, so it proves nothing about this path.
+   - `opfs-storage` covers no blocked handling, no boot sweep and no CRS behaviour, and seeds no `keyval-store`. Nothing reaches the boot sweep. Nothing produces `blocked` in a browser.
 5. `ALL_CATALOG_KEYS` order is not pinned anywhere. The aztec-runtime vitest run cannot import `artifact-catalog.ts`, because its JSON aliases resolve only in the extension (`note-schema-reset.test.ts:1-8`).
 6. No in-flight arc touches these files. Arc 16 (byte-primitives) will edit `service.ts:817` and `:848` inside `provisionChainStoreKey`, in a hunk separate from this arc's three.
 
@@ -156,11 +159,9 @@ Each guard stays inline as a few statements, so every `await`, listing and branc
 
 - A stub that fires `blocked`, `success` or `error` on demand is a faithful test of the wrapper. Per spec, Chrome and Firefox fire `blocked` on a delete request while a connection stays open after `versionchange`, then `success` once it closes. The refactor changes only how the wrapper reacts, not what the browser fires.
 - `req.error` is non-null in a real `error` event, so the per-policy null fallback is unreachable in browsers. It is kept anyway, at no cost.
+- "A late `success` changes nothing" refers to the wrapper's bookkeeping only. A browser never cancels a delete after its timeout, so a blocked delete still completes when its blocker closes, today and after.
 
-**Asks:**
-
-1. **The keyval guard's shape.** This plan meets "keyval lookup as a named parameter" with a sync `findKeyvalStore(dbs)` whose argument is the lookup source, keeping both guards inline. The literal async helper would add a microtask before `clearProfileState`'s barrier release (§ B). The panel should confirm this reading.
-2. **The bb.js `keyval-store` overlap** goes to the program's follow-ups for the final report, with a real-browser check: list the offscreen's `indexedDB.databases()` after a WASM prove, then delete a profile and read the coordinator's result.
+**Asks:** both answered by the plan audit; see Decisions.
 
 ## Phases
 
@@ -170,7 +171,8 @@ Each guard stays inline as a few statements, so every `await`, listing and branc
 
 - **Sweep (S1, S2, boot lookup):**
   - Two legacy databases are deleted in reverse order.
-  - A blocked one warns `(Warn, "deleteDatabase blocked (DB still in use):", "pxe/p1/1")`, stays in the list, and causes no re-list (`databases` called once) and no keyval delete. A `success` arriving after the `blocked` changes nothing.
+  - A blocked one warns `(Warn, "deleteDatabase blocked (DB still in use):", "pxe/p1/1")`, asserted before the sweep is awaited so a wait-policy mutant reds instead of hanging. It stays in the list, and causes no re-list (`databases` called once) and no keyval delete. A `success` arriving after the `blocked` changes nothing.
+  - A new `pxe/*` database appears after the boot-snapshot deletions: the ordered log ends at the re-list, with no keyval delete. Removing `if (remaining) return` reds this file.
   - When all succeed and the store is in the boot snapshot: exactly two `databases` calls, then `delete:keyval-store`.
   - A blocked keyval delete warns the single string and the sweep resolves.
   - A keyval error rejects with the same error object. An S1 error with no `req.error` rejects with `undefined`.
@@ -179,8 +181,9 @@ Each guard stays inline as a few statements, so every `await`, listing and branc
   - The full ordered log for a profile with two databases and no other profile's: `disposeProfile`, `removeProfileStoreDirs`, `databases`, the two deletes in listing order, `databases`, `databases`, `delete:keyval-store`.
   - Beside siblings `pxe/p2/1` and `pxe/p10/1`: the same log up to the second `databases` call, then nothing. Neither sibling and not the store is deleted.
   - A store present only in the third listing is deleted; a store present earlier but absent from the third listing is not.
-  - A `blocked` prefix delete (fake timers) warns `(Warn, "deleteDatabase blocked (waiting for close):", name)`, is still pending at 4,999 ms, and rejects at 5,000 ms with the exact message. The keyval delete is never attempted, the barrier is retained, and the lifecycle stays `deleting`.
-  - `blocked` then `success` resolves, and `vi.getTimerCount()` is `0`.
+  - A `blocked` delete, run against **both** targets (a prefix database and the keyval-store), under fake timers. The `blocked` event is delayed, and no deletion timer exists before it. The test anchors on the recorded warn `(Warn, "deleteDatabase blocked (waiting for close):", name)`, attaches a rejection observer, then advances with `advanceTimersByTimeAsync`. Measured from the blocked event, it is still pending at 4,999 ms and rejects at 5,000 ms with the exact message. The barrier entry is retained, the lifecycle stays `deleting`, and the write lock is released (a later `barrier.read` runs). After a blocked prefix delete, no keyval delete is attempted.
+  - `blocked` then `success` resolves, with zero deletion timers left.
+  - `blocked` then `error` rejects with the same error object, with zero deletion timers left.
   - An error rejects with the given object, or with `Error("deleteDatabase failed: <name>")` when `req.error` is unset.
 - **`clearChainState`:** the ordered log reads dispose, `removeChainStoreDir`, `delete:pxe/p1/1`. Blocked past 5 s rejects with the exact message.
 - **Await shape**, counted with a self-requeuing microtask counter, with literals measured on the unchanged code:
@@ -190,7 +193,7 @@ Each guard stays inline as a few statements, so every `await`, listing and branc
   - (T4) the same from the remaining-listing's resolution, when a sibling survives;
   - (T5) from `clearChainState`'s delete `onsuccess` to its promise settling.
 
-**New file `apps/extension/src/wallet/services/pxe/known-artifacts-order.test.ts`** (Q-27 k; the extension resolves the aliases). It mocks only `@aztec-labs/stdlib/contract`: the hasher records each artifact and returns a unique id, and `getContractInstanceFromInstantiationParams` returns a stub address. It resets through `_resetNoteSchemasForTests`. It asserts:
+**New file `apps/extension/src/wallet/services/pxe/known-artifacts-order.test.ts`** (Q-27 k; the extension resolves the aliases). It mocks only `@aztec-labs/stdlib/contract`, spreading `importOriginal`: the hasher records each artifact and returns a unique id, and `getContractInstanceFromInstantiationParams` returns a stub address. It resets through `_resetNoteSchemasForTests`. It asserts:
 
 - `loadProductionKnownArtifacts` hashes, in order, the ten imported artifacts by identity, then the Wonderland token and the private FPC, each `toEqual` its `loadContractArtifact(json)`;
 - the returned map's values are in the same order;
@@ -223,6 +226,7 @@ Make the § A to C edits with every test file untouched.
   - (M13) `deleteDb` declared `async`;
   - (M14) `finish` not clearing the timer.
 - **Ordering:** (M15) success bookkeeping moved above the keyval delete.
+- **Data loss:** (M19a) erasure's filter uses `isLegacyPxeDb`; (M19b) its prefix loses the trailing slash (`pxe/${profileId}`). This is the mutant that maps to the arc's stated risk.
 - **Catalog:**
   - (M16) two table entries swapped;
   - (M17) one accessor rebound;
@@ -272,3 +276,27 @@ None. The per-site differences (skip against wait, the 5 s deadline, the warn te
 - **Retiring the rc.2-era sweep** stays deferred (the program's Deferred table).
 
 ## Decisions (delegated)
+
+### Plan audit: Codex (GPT-6 Astra, xhigh) REVISE, no design defect; Opus APPROVE
+
+Both legs confirmed the design: the non-async `deleteDb` keeps every site's await shape (Opus probed S2 at 3 ticks in both shapes, 4 for an async mutant), the policies match per site and never choose a name, the predicates are identical and keep the trailing slash, the boot-snapshot and fresh-listing rules are intact, and the catalog change is sound.
+
+**Adopted, all of them:**
+
+1. **M3c would survive** (Codex): only a blocked prefix delete was exercised. The blocked-erasure case now runs against both targets and asserts pending, rejection, the retained barrier entry, the `deleting` lifecycle and the released write lock.
+2. **The sweep's fresh-listing guard** (Codex): the new file gets its own case, so removing `if (remaining) return` reds it, not only the older sweep file.
+3. **Timer arming and error cleanup** (Codex; Opus nit 6): `blocked` is delayed with no timer before it; 4,999/5,000 ms are measured from the event; `blocked → error` checks identity and zero timers; tests anchor on the warn, observe the rejection and use `advanceTimersByTimeAsync`; the skip test asserts the warn before awaiting; the hasher mock spreads `importOriginal`.
+4. **M19, the data-loss mutant** (Opus): added.
+5. **The stale `deleteDb` doc** (both legs): reduced; the per-arm docs carry the semantics.
+6. **Comments** (both legs): the splice comment drops its review tag; the `CatalogKey` history goes; one line keeps the wrapper non-async; one line explains the sweep's boot snapshot.
+7. **Evidence corrections:** `purgeChain` throws collected failures (`network/service.ts:899-904`), and `opfs-storage` stays the only relevant proof, with its gaps stated; the probe is synthetic, and T1–T5 are Phase 1's; a late `success` changes wrapper bookkeeping only; the erasure `dbs.find` engine text is recorded as reviewed (Opus nit 5); the awaited-helper lesson's evidence is `approval-scope-follow` (`implementations-plan/lessons.md:36`).
+
+**Rejected:** none.
+
+### Ask 1: the keyval guard's shape
+
+Both legs approve the sync `findKeyvalStore(dbs)` with both guards inline as meeting "keyval lookup as a named parameter". Codex reproduced 2→3 and 4→5 ticks for the async alternative on Bun and Node.
+
+### Ask 2: bb.js and `keyval-store`
+
+Real, and a follow-up, unchanged here. Opus: a high-confidence block once a WASM prove has run, medium severity. Codex: the overlap is high confidence, the live failure moderate; a medium reliability follow-up with no data loss and no crypto exposure. The Security section states the real conditions.
