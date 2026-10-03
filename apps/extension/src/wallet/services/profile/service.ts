@@ -436,6 +436,24 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		return dek
 	}
 
+	/** Open the session, then raise the visible warning when it opened derived-only. `dek` must
+	 *  come from a trust gate (`unsealTrustedDekHoldingLock`, `unsealPasskeyDekHoldingLock`, or
+	 *  finalize's snapshot compare); `null` opens without it. Allocates and wipes nothing, so
+	 *  callers must `return await` it inside their `try`: a bare return lets their `finally`
+	 *  zeroize the buffers before the open copies them. Caller MUST hold the facade lock. */
+	private async openAndWarnIfDegradedHoldingLock(
+		row: Profile,
+		master: MasterSecretBytes,
+		passhash: Passhash | undefined,
+		dek: ImportedKeysDek | null,
+	): Promise<ProfileInfo> {
+		await this.openSessionVerified(row, master, passhash, dek ?? undefined)
+		if (!dek) {
+			this.emit("onImportedKeysDegraded", this.getProfileInfo(row))
+		}
+		return this.getProfileInfo(row)
+	}
+
 	protected async init(services: ServiceCollection) {
 		this.passkeys = services.get(PasskeyService.name)
 		this.passkeyCoordinator = new PasskeyRecoveryCoordinator(this.passkeys, this.logger)
@@ -672,11 +690,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					// warning fires (the popup listens on onImportedKeysDegraded — never just a
 					// log), and NO bearer is persisted (open() enforces that from the absent dek).
 					dek = await this.unsealTrustedDekHoldingLock(id, current, secret, passhash, "unlock")
-					await this.openSessionVerified(current, secret, passhash, dek ?? undefined)
-					if (!dek) {
-						this.emit("onImportedKeysDegraded", this.getProfileInfo(current))
-					}
-					return this.getProfileInfo(current)
+					return await this.openAndWarnIfDegradedHoldingLock(current, secret, passhash, dek)
 				})
 			} finally {
 				zeroize(passhash)
@@ -812,11 +826,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				}
 				const dek = await this.unsealPasskeyDekHoldingLock(id, current, recovery)
 				try {
-					await this.openSessionVerified(current, recovery.secret, undefined, dek ?? undefined)
-					if (!dek) {
-						this.emit("onImportedKeysDegraded", this.getProfileInfo(current))
-					}
-					return this.getProfileInfo(current)
+					return await this.openAndWarnIfDegradedHoldingLock(current, recovery.secret, undefined, dek)
 				} finally {
 					zeroize(dek)
 				}
@@ -2628,11 +2638,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			await this.assertEntropyMasterPair(unsealed.secret, unsealed.entropy)
 			passhash = await EncryptionKey.getPasshash(password)
 			dek = await this.unsealTrustedDekHoldingLock(id, profile, unsealed.secret, passhash, "finalizeRestore")
-			await this.openSessionVerified(profile, unsealed.secret, passhash, dek ?? undefined)
-			if (!dek) {
-				this.emit("onImportedKeysDegraded", this.getProfileInfo(profile))
-			}
-			return this.getProfileInfo(profile)
+			return await this.openAndWarnIfDegradedHoldingLock(profile, unsealed.secret, passhash, dek)
 		} finally {
 			// zero buffers after sessionManager has copied.
 			zeroize(unsealed.secret)
@@ -2689,11 +2695,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			this.logger.log(this.name, LogLevel.Error, "passkey row changed between restore and finalizeRestore — opening derived-only", id)
 		}
 		try {
-			await this.openSessionVerified(profile, pending.secret, undefined, dek ?? undefined)
-			if (!dek) {
-				this.emit("onImportedKeysDegraded", this.getProfileInfo(profile))
-			}
-			return this.getProfileInfo(profile)
+			return await this.openAndWarnIfDegradedHoldingLock(profile, pending.secret, undefined, dek)
 		} finally {
 			zeroize(pending.secret)
 			zeroize(dek)
