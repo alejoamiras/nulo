@@ -38,12 +38,12 @@ None. The template and styles do not change. The zero-diff gate covers the logge
 ## Results
 
 - The test row failed against async-primitives' head file and passed after the cherry-picked fix. Both mutants were killed.
-- The program gates pass at the fix plus this plan (`4585a49c`).
-- Shots against async-primitives' head (`c27831b7`): 12 of 12 identical, and 12 of 12 identical in the `--stability` run.
+- The program gates pass on the final stack: this arc on json-logger-close-guard, on activity-feed, on harden-dedupe after async-primitives, estimate-reuse and dapp-windows landed.
+- Shots against async-primitives' restacked head: 12 of 12 identical, and 12 of 12 identical in the `--stability` run. The arcs stacked below since then touch none of this arc's files.
 
 ## Delivery
 
-One arc, `hd/15b-logsviewer-timer`, stacked on `hd/15-async-primitives`. Code review: off. Codex reviews this diff in the same round as async-primitives'.
+One arc, `hd/15b-logsviewer-timer`, at the top of the stack (on `hd/19b-close-guard`). Codex reviewed this diff in async-primitives' round 1: CONVERGED, no findings.
 
 ## Decisions (delegated)
 
