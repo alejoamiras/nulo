@@ -9,8 +9,8 @@
  *   - `FeeJuiceWithClaimStrategy` (kind "fjwc") — prepend claim payload
  *   - `FpcStrategy` (kind "fpc") — two-pass: estimate with FJ first, then
  *     compute maxFee, prepend FPC fee payload, re-simulate with External
- *   - `EmbeddedStrategy` (kind "embedded") — dApp's own FPC, realistic
- *     maxFeesPerGas before simulation, 1x multiplier to stay within budget
+ *   - `EmbeddedStrategy` (kind "embedded") — dApp's own FPC; maxFeesPerGas
+ *     is capped before simulation and committed as is, within its budget
  *
  * Shared helpers + the dispatch map live here. Per-strategy impls live
  * in `./{fee-juice,fee-juice-with-claim,fpc,embedded}-strategy.ts`.
@@ -32,10 +32,11 @@
  * ## Priority multiplier
  *
  * `feeSettings.priorityLevel` ("normal" / "fast" / "urgent") maps to
- * a numeric multiplier via `PRIORITY_MULTIPLIERS` in `models/fee.ts`.
+ * a numeric multiplier via `PRIORITY_MULTIPLIERS` in `@nulo/wallet-bridge`.
  * All strategies get the pre-computed `feeMultiplier` in the context.
- * FJ / FJWC / Embedded pass it to `finalizeGasLimits`. FPC applies it
- * to `baseFees` BEFORE computing maxFee for the fee-payload actions.
+ * FJ / FJWC pass it to `finalizeGasLimits`; Embedded commits its capped
+ * fee instead, so no multiplier applies there. FPC applies it to
+ * `baseFees` BEFORE computing maxFee for the fee-payload actions.
  */
 
 import { MAX_PROCESSABLE_L2_GAS, MAX_TX_DA_GAS } from "@aztec-labs/constants"
@@ -152,7 +153,7 @@ export interface FeeStrategy {
  *  consumer), not the deploying account's constructor, so the classic
  *  standalone discovery has always stubbed undeployed accounts. What is NOT
  *  trustworthy for an init-wrapped build is the stub's GAS (stub constructor
- *  ≠ real constructor — the B1 exclusion) — so `isInitWrapped` forces a
+ *  ≠ real constructor) — so `isInitWrapped` forces a
  *  validated sizing re-sim there regardless of discovered effects. */
 export function probedFirstSimOpts(
 	probe: DiscoveryProbe | undefined,
@@ -179,7 +180,7 @@ export function validatedSimOpts(built: { account: { address: AztecAddress } }):
  *  request's `origin` is the multicall entrypoint, not the account. The
  *  stubbed first sim can still DISCOVER, but its gas reflects the STUB
  *  constructor — so a folded run must always take a validated sizing re-sim
- *  here (B1 excluded init-wrapped shapes from stub-gas parity). RPC-free. */
+ *  here. RPC-free. */
 export function isInitWrapped(built: { txRequest: TxExecutionRequest; account: { address: AztecAddress } }): boolean {
 	return built.txRequest.origin?.toString() !== built.account.address.toString()
 }
@@ -249,8 +250,8 @@ export function assertCustomGasLimitsWithinCap(fee: FeeOptions | undefined, txsL
 /** Final gas-limit + maxFee calculation after a simulation. FJ / FJWC /
  *  Embedded call this; FPC has a custom post-simulation path.
  *
- *  `feeMultiplier` — when unset, falls back to `DEFAULT_FEE_MULTIPLIER`.
- *  Embedded passes 1 explicitly to stay within the dApp's budget.
+ *  `feeMultiplier` — when unset, falls back to `DEFAULT_FEE_MULTIPLIER`. It
+ *  prices only the refetch below, which an embedded payment never reaches.
  *
  *  `txsLimits` — the build-time-retained per-tx admission cap (further bounded
  *  by the protocol's `MAX_TX_DA_GAS` / `MAX_PROCESSABLE_L2_GAS`). When present:

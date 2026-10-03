@@ -6,7 +6,7 @@
  *
  * Under a probe (dApp estimate fold), the sim runs STUBBED and doubles as
  * authwit discovery: no effects ⇒ done in ONE sim (stub gas == validated gas,
- * the measured B1 invariant); discovered effects ⇒ VALIDATED rebuild + re-sim
+ * as measured); discovered effects ⇒ VALIDATED rebuild + re-sim
  * so the freshly signed witnesses are verified before the estimate leaves.
  */
 
@@ -37,7 +37,7 @@ export class FeeJuiceStrategy implements FeeStrategy {
 				discovered = await ctx.probe.extractEffects(simulatedTx, { node: built.node, network: built.network })
 				// Discovered effects OR an init-wrapped build force a validated
 				// rebuild+re-sim: effects so the witnesses are VERIFIED; init-wrap
-				// because the stub's constructor gas is untrustworthy (B1 exclusion).
+				// because the stub's constructor gas is untrustworthy.
 				if (discovered.length || isInitWrapped(built)) {
 					if (discovered.length) ctx.op.actions.push(...discovered)
 					if (ctx.signal?.aborted) throw new JobCancelledSentinel("")

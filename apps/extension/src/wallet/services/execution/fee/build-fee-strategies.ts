@@ -6,7 +6,7 @@ import { FpcStrategy } from "./fpc-strategy"
 import type { FeeSettings } from "../spec"
 
 /**
- * Q-04 pilot: the fee-strategy dispatch map as a pure, explicitly-typed
+ * The fee-strategy dispatch map as a pure, explicitly-typed
  * builder. The composition root (`ExecutionService.init()`) still constructs
  * `FeeStrategyDeps` at its original point — the eager/lazy capture modes of
  * every dependency are the CALLER's, unchanged — and still owns the field
