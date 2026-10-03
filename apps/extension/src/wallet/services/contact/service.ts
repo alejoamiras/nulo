@@ -7,6 +7,7 @@ import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
 import { assertRestoreEpoch, captureRestoreEpochs, restoreRowProfileId } from "@/wallet/services/restore-fence"
+import { profileDeletedError } from "@/wallet/services/profile/profile-deletion-state"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { nextRandomId, preferOrReallocId } from "@/wallet/services/id-allocators"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
@@ -119,7 +120,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 			// landed during it, before the row becomes observable via the emit.
 			if (!deletion.isCurrent(fence.profileId, fence.epoch)) {
 				await this.storage.delete(contact.id)
-				throw new Error(`profile ${fence.profileId} deleted`)
+				throw profileDeletedError(fence.profileId)
 			}
 
 			this.emit("onContactAdded", contact)

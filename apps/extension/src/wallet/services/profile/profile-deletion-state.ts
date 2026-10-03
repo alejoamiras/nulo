@@ -17,6 +17,11 @@
  *  profile's re-unlock included — makes the fence dead (`ProfileService.assertFence`). */
 export type ExecutionFence = { profileId: string; epoch: number; session: number }
 
+/** The refusal a fenced commit throws after compensating a write that a deletion overtook. */
+export function profileDeletedError(profileId: string): Error {
+	return new Error(`profile ${profileId} deleted`)
+}
+
 export class ProfileDeletionState {
 	private readonly reserved = new Set<string>()
 	private readonly epochs = new Map<string, number>()

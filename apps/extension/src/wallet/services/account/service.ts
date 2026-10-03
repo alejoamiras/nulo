@@ -295,8 +295,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	 * inside their `getValues → compute index → set` sequence, producing
 	 * duplicate accounts at indices 0 and 1.
 	 */
-	// maxHoldMs: null — the prior hand-rolled promise chain had no watchdog; keep
-	// it that way so this stays byte-for-byte equivalent (Q-08 audit).
+	// maxHoldMs: null — no watchdog: a held tuple lock is never force-released.
 	private readonly tupleLocks = new KeyedLock({ maxHoldMs: null })
 	private serializePerTuple<T>(profileId: string, chainId: number, type: AccountType, op: () => Promise<T>): Promise<T> {
 		return this.tupleLocks.withLock(`${profileId}:${chainId}:${type}`, op)
@@ -419,8 +418,8 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		if (account.type === AccountType.Imported) {
 			const keyRow = await this.importedKeys.get(profileId, chainId, address)
 			if (!keyRow) throw new ImportedAccountUnusableError(address, "signing key missing")
-			// Fresh-auth posture preserved (audit LOW-2): the DEK unseals under the SUPPLIED
-			// password directly — session-independent, deletion-guarded — never via SessionManager.
+			// Fresh auth: the DEK unseals under the SUPPLIED password directly —
+			// session-independent, deletion-guarded — never via SessionManager.
 			const dek = await this.profileService.exportImportedKeysDek(profileId, password)
 			let skBytes: Uint8Array<ArrayBuffer> | undefined
 			let skCopy: Buffer | undefined
@@ -613,10 +612,9 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		return [...out]
 	}
 
-	/** Awaited profile-scoped account purge, called by the deletion coordinator.
-	 *  (Relocated from the removed fire-and-forget `onProfileDeleted` subscriber so
-	 *  deletion is awaited end-to-end — finding D.) Idempotent: delete-of-gone is a
-	 *  no-op, so a resumed/re-run coordinator converges. */
+	/** Awaited profile-scoped account purge, called by the deletion coordinator so deletion is
+	 *  awaited end-to-end. Idempotent: delete-of-gone is a no-op, so a resumed/re-run
+	 *  coordinator converges. */
 	public async purgeForProfile(profileId: string): Promise<void> {
 		await this.ensureInitialized()
 		this.logDebug(`purgeForProfile ${profileId}: remove related accounts`)

@@ -315,7 +315,6 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		} catch (error) {
 			// Convert the internal sentinel to the structured RPC-boundary
 			// error so the popup's `classifyCancellableRejection` works.
-			// Same conversion done by `executeTransfer`.
 			maybeRethrowAsRpcCancel(error, task)
 			task.fail(error)
 			throw error
@@ -369,7 +368,6 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		} catch (error) {
 			// Convert the internal sentinel to the structured RPC-boundary
 			// error so the popup's `classifyCancellableRejection` works.
-			// Same conversion done by `executeTransfer`.
 			maybeRethrowAsRpcCancel(error, task)
 			task.fail(error)
 			throw error
