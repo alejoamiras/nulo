@@ -11,14 +11,17 @@
  * A `referenceBlock`-reorg throw from the reader propagates UNCHANGED — it is the D6 detection
  * signal the service catches to trigger reconciliation.
  */
-import type {
-	PublicEventCursor,
-	PublicScanTips,
-	PublicTokenClassStatus,
-	PublicTransferEvent,
-	PublicTransferFetchArgs,
-	PublicTransferPage,
+import {
+	type PublicEventCursor,
+	type PublicScanTips,
+	type PublicTokenClassStatus,
+	type PublicTransferEvent,
+	type PublicTransferFetchArgs,
+	type PublicTransferPage,
+	comparePublicPositions,
 } from "@nulo/aztec-runtime/pxe/public-events"
+
+export { comparePublicPositions }
 
 export type PublicIndexerLogger = (level: "warn" | "debug", msg: string, ...rest: unknown[]) => void
 
@@ -46,13 +49,6 @@ export interface PublicScanResult {
 }
 
 export const DEFAULT_MAX_PAGES_PER_SCAN = 5
-
-/** Strict lexicographic compare of two cursor positions. */
-export function comparePublicPositions(a: PublicEventCursor, b: PublicEventCursor): number {
-	if (a.blockNumber !== b.blockNumber) return a.blockNumber - b.blockNumber
-	if (a.txIndexWithinBlock !== b.txIndexWithinBlock) return a.txIndexWithinBlock - b.txIndexWithinBlock
-	return a.logIndexWithinTx - b.logIndexWithinTx
-}
 
 export class PublicEventIndexer {
 	public constructor(
