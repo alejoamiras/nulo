@@ -41,3 +41,8 @@
 
 - **Phase 1 head:** `typecheck:all` exits 0, and both new files lint clean.
 - **Phase 2 head:** `lint`, `typecheck:all`, `test:all`, `test:ci-gating` (plans gate: 0 findings) and `audit:vue` (which includes `build`) all exit 0. The build left no change to the generated declaration files.
+
+## Code review round 1: CONVERGED
+
+- **Codex (GPT-6 Astra, xhigh), high confidence.** All five plan findings are addressed. Against `169bed04`, these are equivalent: deletion scope, warn arguments, the error fallback, the timer, the reverse loop and splice, the epochs, the lifecycle and the lock release. No microtask was introduced. The three named policies are proportionate, the tick literals are sound, catalog order is preserved, and the shallow artifact comparison still catches a rebound accessor.
+- **One nit, adopted:** the verified policy's doc said "wait for the blocker to close, then reject", which states the wrong outcome. It now reads "wait for the blocker to close; reject if the deadline expires". The change is comment-only; lint and the aztec-runtime suite were rerun green.

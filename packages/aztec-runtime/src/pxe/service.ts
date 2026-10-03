@@ -65,8 +65,8 @@ export * from "./spec"
 type BlockedDeletePolicy =
 	/** Best-effort sweep: a blocked delete is skipped (resolves false), so the sweep never hangs. */
 	| { onBlocked: "skip"; warnArgs: (name: string) => unknown[] }
-	/** Verified erasure: wait for the blocker to close, then reject — never a false "deleted",
-	 *  and never a null rejection reason. */
+	/** Verified erasure: wait for the blocker to close; reject if the deadline expires — never a
+	 *  false "deleted", and never a null rejection reason. */
 	| { onBlocked: "wait"; timeoutMs: number; warnArgs: (name: string) => unknown[] }
 
 const LEGACY_SWEEP: BlockedDeletePolicy = {
