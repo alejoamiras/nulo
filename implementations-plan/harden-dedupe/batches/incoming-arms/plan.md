@@ -13,15 +13,15 @@ branch: hd/14-incoming-arms, stacked on harden-dedupe
 
 Findings Q-18 and Q-27 (l), from `audit/quality/2026-09-30-dedup-high/`. `IncomingTransferService` discovers receipts from two sources, private notes and public `Transfer` events, and runs each through a hand-copied arm. Its scope clears and its repository's purge inventory are also written twice. Q-27 (l) is the public-event cursor comparator, defined once in `aztec-runtime` and again in the extension.
 
-This batch consolidates only what can move without changing a single await, epoch re-check, write, emit or payload byte. The two arms disagree on where they re-check the service epoch, so the commit pipelines, record builders and dedupe stay as they are, and that disagreement goes to the panel (Ask 1).
+This batch consolidates only what can move without changing a single await, epoch re-check, write, emit or payload byte. The two arms disagree on where they re-check the service epoch, so the commit pipelines, record builders and dedupe stay as they are; the panel kept that disagreement as it is and routed it to follow-ups (see § Decisions).
 
 ## Outcome & Quality Bar
 
 - **For whom:** the next person who changes the first-receive prompt, adds a trust state or adds a sixth incoming-transfer store. Today the prompt payload is written three times, the unknown→pending promotion twice, and the five-store inventory twice.
 - **Excellent:**
   - The pending-prompt payload, the trust promotion, the note-scheduler teardown, the scope-clear scaffold, the repository's purge inventory and the cursor comparator each have one definition.
-  - Every epoch re-check sits after the same await as today. A Phase 1 interleaving matrix fails if one is dropped, moved or added.
-  - A microtask fingerprint of each touched critical section is byte-identical before and after.
+  - Every epoch re-check sits after the same await as today. A permanent interleaving matrix, asserting each bumped row's ordered call log as well as its outcome, fails if a check is dropped, moved or added. A redundant synchronous duplicate of an existing check is not observable there; it is a source-review item.
+  - A temporary microtask fingerprint of each touched critical section and each real repository clear is byte-identical before and after Phase 2; the counts are logged, then the fingerprints are removed.
 - **Good enough:** the record builders, both commit functions and both dedupe sequences stay per arm. Each one's await order, re-check placement or persisted key order differs today (see § What stays).
 
 ## Architecture & Implementation
@@ -31,8 +31,8 @@ Read on `harden-dedupe` at `7450928c`. All paths are under `apps/extension/src/w
 ### The concurrency model this arc must not disturb
 
 - **The epoch is a plain counter.** `serviceEpoch` lives at `service.ts:227` and is bumped by `bumpServiceEpoch` at `:271-273`. Each critical section captures `epochAtStart` before its first await and compares it later.
-- **Bumps can land at any await, not only on lock handoff.** `hydrateSchedulers` bumps OFF the lock, at its entry (`:916-917`). Its callers are `onActiveProfileChanged`, `onAccountAdded`, `onTokenAdded` and `rebuildAfterDelete`, all event-driven. So a bump can arrive at any microtask boundary while a critical section holds `serviceLock`.
-- **Destructive bumpers hold the lock.** These are `clearProfile`, `clearChain`, `onTokenDeleted` and `onAccountDeleted`. They interleave with a parked critical section only through the lock's 5-minute watchdog (`packages/wallet-core/src/utils/lock.ts:4`, force-release in `dispatch`).
+- **Bumps can land at any await, not only on lock handoff.** `hydrateSchedulers` bumps at its entry (`:916-917`). Its event-driven callers, `onActiveProfileChanged`, `onAccountAdded` (`:403`), `onTokenAdded` and `rebuildAfterDelete`, call it OFF the lock, so a bump can arrive at any microtask boundary while a critical section holds `serviceLock`. `init` (`:353`) also calls it, before any scan, and `clearProfile` and `clearChain` call it inside their lock.
+- **Destructive bumpers hold the lock.** These are `clearProfile`, `clearChain`, `onTokenDeleted`, `onAccountDeleted`, and `onAccountAdded`'s cursor reset (`:388`). They interleave with a parked critical section only through the lock's 5-minute watchdog (`packages/wallet-core/src/utils/lock.ts:4`, force-release in `dispatch`).
 - **So what matters is the sequence of synchronous segments between awaits.** A check and the write it guards must stay in one segment. A helper that adds an async frame adds microtasks. Those do not change the set of possible interleavings, but they do change which one a deterministic test or a microtask-scheduled bumper produces. This arc therefore adds no async frame anywhere: every extracted helper is either synchronous, or an async function that replaces exactly one async function with the identical await sequence.
 
 ### Await and re-check map, today
@@ -89,17 +89,18 @@ Read on `harden-dedupe` at `7450928c`. All paths are under `apps/extension/src/w
    - The public caller passes `{ profileId, networkId, accountAddress: ctx.account, contract }`, `ev.amountRaw` and `() => this.serviceEpoch !== epochAtStart`.
    - `ev.amountRaw` is now read at call time, not after two awaits. `ev` is a schema-parsed event that the scan owns and nothing mutates (Fact 6), so the value is the same.
    - `TrustScope` is `{ profileId; networkId; accountAddress; contract }`.
+   - Its doc states two invariants only: the trust write succeeds before its emit, and the stand-down is read right after the trust read, before the `unknown` test, and only the public caller supplies it.
 3. **Note-scheduler teardown.** A private, synchronous `stopNoteScheduler(key)` holds the three statements copied at `:447-451` and `:1226-1229`, mirroring `stopPublicScheduler` (`:1039-1045`). Each site keeps its condition: the active-profile test at `:446`, and the emptied-set test at `:1225`.
-4. **Token lookup.** A module-level `findToken(tokens, contract, chainId)` replaces the `.find` at `:1390`, `:2081` and `:1541`, with the predicate written `(t) => t.contract === contract && t.chainId === chainId` as today. Replay's arguments, `trust.contract` and `network.chainId`, are now read once rather than per element. Both are plain decoded rows, so the reads have no side effects.
+4. **Token lookup.** A module-level `findToken(tokens, contract, chainId)` replaces the `.find` at `:1390`, `:2081` and `:1541`, and the `.some` at `:693` as `findToken(...) !== undefined`, with the predicate written `(t) => t.contract === contract && t.chainId === chainId` as today. Replay's and `isTokenStillRegistered`'s arguments (`trust.contract`, `network.chainId`, `contract`) are now read once rather than per element; they are plain decoded rows or strings, so the reads have no side effects. Tokens are objects, so `.find(...) !== undefined` and `.some(...)` agree.
 5. **The scope-clear scaffold.** `clearProfile` (`:702-729`) and `clearChain` (`:731-755`) keep their `ensureInitialized` and lock acquisition. Each passes `() => this.clearScopeLocked(scopeFor)`, a non-async arrow, to `withServiceLock`.
    - `clearScopeLocked` runs: `bumpServiceEpoch()`; `const scope = scopeFor()`; `dropEpisodes(scope.dropsEpisode)`; `scope.evictFees()`; then `try { await scope.wipe(); await this.hydrateSchedulers() } finally { scope.evictFees() }`.
-   - `scopeFor` is called after the bump because `clearChain` evaluates `scanEpisodeNetworkPrefix` eagerly after the bump today (`:742`). Building the strategy first would move that evaluation across the bump.
+   - `scopeFor` is called after the bump because `clearChain` evaluates `scanEpisodeNetworkPrefix` eagerly after the bump today (`:742`). Phase 1 observes that call and asserts the epoch it sees.
    - `wipe` is a non-async arrow (`() => this.repo.clearChain(profileId, networkId)`), so it awaits the same promise as today.
    - The two rationale comments merge into one on the helper, without the `codex R2 H1` tag.
-6. **The repository inventory.** `repository.ts:221-231` and `:234-244` become non-async methods that return `this.clearScope(() => \`${profileId}|\`)` and `this.clearScope(() => \`${profileId}|${networkId}|\`)`.
-   - The private async `clearScope(prefix)` makes the five `deleteKeysWhere` calls in today's table order (records, trust, cursors, outbox, arrivals).
-   - The records predicate is `key.startsWith(\`note:${prefix()}\`) || key.startsWith(\`pub:${prefix()}\`)`; the other four use `key.startsWith(prefix())`.
-   - The thunk builds each scope string per key, as the inline templates do today, so nothing is stringified for an empty table. Both public methods keep the explicit parts they take today.
+6. **The repository inventory.** `repository.ts:221-231` and `:234-244` become non-async methods that return `this.clearScope(\`${profileId}|\`)` and `this.clearScope(\`${profileId}|${networkId}|\`)`.
+   - The private async `clearScope(prefix: string)` makes the five `deleteKeysWhere` calls in today's table order (records, trust, cursors, outbox, arrivals). The records predicate is `key.startsWith(\`note:${prefix}\`) || key.startsWith(\`pub:${prefix}\`)`; the other four use `key.startsWith(prefix)`.
+   - Each public method builds its own prefix from the parts it takes today, so `clearChain(p, undefined)` still matches only `p|undefined|`. The arguments are strings at every caller, so building the prefix once instead of per key produces the same strings.
+   - The public methods have no async frame of their own; a temporary fingerprint around each real clear proves the caller resumes at the same tick.
    - `deleteKeysWhere` (`:252-256`) is unchanged.
 7. **The cursor comparator (Q-27 l).** `packages/aztec-runtime/src/pxe/public-events.ts:193-197` `comparePositions` is renamed and exported as `comparePublicPositions`, with its body and parameter names `a` and `b` byte-identical; its one call site is `:352`. `public-event-indexer.ts:50-55` deletes its copy, imports the export for its call at `:106`, and re-exports it under the same name, so its test's import is untouched.
    - The audit's suggested new leaf module is rejected. The extension already value-imports this module (`spec.ts:35` `PublicEventCursorSchema`, `utils/received-display.ts:9`), so a leaf would keep no code from loading. Exporting is the smaller change and adds no exports-map entry.
@@ -113,7 +114,11 @@ Read on `harden-dedupe` at `7450928c`. All paths are under `apps/extension/src/w
   - Sharing them needs a hook object larger than the six lines it would save, or a behaviour change.
 - **Dedupe** stays per arm. The note arm reads both sets eagerly, before `getRecord`. The public arm reads the journal only on a miss, after `getRecord`, then re-checks. Merging them changes which collaborators are called, and the `getTransactions failed` / `getOperations failed` warnings an existing note record produces.
 - **Reusing `_setTrustStateLocked` (`:605-615`) for the promotion**, as the audit suggests, is rejected. It wraps `setTrust` in another async frame, which delays the visibility read and every later step by at least one microtask.
-- `isTokenStillRegistered` (`:693`) uses `.some`, is not in the finding's instance list, and stays.
+
+8. **Comments made accurate, in 2a, with no behaviour change.**
+   - `:2071-2075` drops the false "the note arm's own" attribution and "originally lacked": every awaited read can park across a watchdog handoff that admits a wipe, and the epoch is re-checked after each read block, before any write.
+   - `:1454-1460` stops dismissing the storage and config awaits: the note arm deliberately re-checks only at N0, N4b and N8; the other windows exist and are reachable only through the watchdog.
+   - `:1427-1432` and `:2122-2125` lose "one sync pair" (an awaited write separates them) and keep "the write succeeds before the emit"; both are replaced by the merged doc of item 2.
 
 ### Guard set per site (identical after the change)
 
@@ -149,7 +154,7 @@ Every new function is a few flat lines, well under 15; no accepted function is t
   - Key-prefix deletion (it reaches codec-invalid rows past the profile-privacy boundary), bump-before-evict, wipe-and-hydrate under one lock and the `finally` re-eviction are unchanged and pinned.
 - **The lock surface is unchanged.** Every helper runs in the critical section its code runs in today. No `isCurrent` read, fence or epoch capture moves.
 - **Hostile cursors.** The comparator body is byte-identical, including the parameter names `a` and `b`. A malformed position therefore raises the same engine-generated `TypeError` text on Bun, Chrome and Firefox. No module enters any bundle: the extension already loads `public-events.ts`.
-- **Malformed scope arguments.** The two thunks keep each scope string's evaluation point and count, so even an argument whose string conversion throws behaves as today. No test is spent on that input, per the owner's realistic-scenarios rule.
+- **Scope arguments.** Every caller passes strings, and `scanEpisodeNetworkPrefix` is a pure template, so building each scope string once produces today's strings. The service keeps building its clear strategy after the bump.
 - **Logging and layering.** No log line is added or changed. The extension may import `aztec-runtime`. `aztec-runtime` gains one export; it is a private package and not staged for npm.
 
 ## Assumptions
@@ -164,93 +169,62 @@ Every new function is a few flat lines, well under 15; no accepted function is t
 6. Public events reach the service through `PublicTransferPageSchema.parseAsync` (`packages/aztec-runtime/src/pxe/client.ts:351-352`), and the scan never mutates them.
 7. `comparePositions` (`public-events.ts:193-197`) and `comparePublicPositions` (`public-event-indexer.ts:51-55`) have identical bodies and parameter names.
 8. The probe numbers under § Microtask equivalence come from a scratch script, since deleted.
+9. `@webext-core/fake-browser` backs `FakeBrowserApi` storage (`packages/wallet-core/src/testing/fake-browser-api.ts:41-75`); the repository fingerprints confirm it settles on microtasks.
 
 **Inferences:**
 
 - The production callers of both clears pass strings; the RPC surface has no in-tree caller.
-- Moving a synchronous property read (`ev.amountRaw`, `trust.contract`, `network.chainId`) earlier within one critical section is unobservable, because the objects are parse results that the critical section owns.
+- Moving a synchronous property read (`ev.amountRaw`, `trust.contract`, `network.chainId`, `contract`) earlier within one critical section is unobservable, because the objects are parse results that the critical section owns.
 
-**Asks** (for the panel):
-
-1. **The Q-18 epoch re-check points**, which the program plan routes to this arc's panel under the invisible, strictly safer route. The note arm lacks three checks the public arm has before a write:
-   - (A) after the trust read, before the promotion, as P5;
-   - (B) after `markBalanceDirty`, before the record, as P8;
-   - (C) after the visibility read, before `Added`, as P10.
-
-   Early bails after N1–N4 are not offered: with (A) they protect nothing more, and they only skip reads. **Recommendation: adopt none here; record a follow-up.** Each window is reachable only through a 5-minute watchdog handoff, or after a profile switch whose writes land in the right scope and whose prompt the popup already filters (Fact 4). If the panel adopts any of them, Phase 3 below applies.
-2. **Partial close of Q-18.** The builders, commits and dedupe stay per arm (§ What stays). Confirm they become a program follow-up, to be merged after any alignment from Ask 1.
+**Asks:** none open. Both were answered by the plan audit (§ Decisions).
 
 ## Phases
 
 ### Phase 1: pin today's interleavings, payloads and order (test only)
 
-All tests are table-driven, with expected values written as literals and never derived from production code.
+All tests are table-driven, with expected values written as literals and never derived from production code. No test uses timer fakes.
 
-- **`service.scenarios.test.ts`, the epoch re-check matrix.**
-  - For each row of both maps, use `holdCall(..., "after")` on that await's collaborator: the repository mock, the token, transaction, journal, note or config stubs. While it is held, bump `serviceEpoch`, then release.
-  - Assert six flags: trust written, `onIncomingTrustChanged`, `onIncomingTransferPending`, outbox written, record written, `onIncomingTransferAdded`.
-  - Fixtures:
-    - unknown trust: N1–N10, P1–P9;
-    - seeded trusted: N9–N11, P8–P10;
-    - an existing record without a timestamp: N4b;
-    - an existing public record whose block moved, scanned with `reconcile`: P2.
-  - Each fixture also has an unbumped control row.
-  - The rows where a write lands after the bump (N1–N7: the promotion; N9–N11: record and `Added`; P6, P7: the promotion) are titled `(DRIFT PIN)`.
-- **Dedupe call order.** On an outgoing hit, the note arm calls `getTransactions`, `getOperations`, `getRecord`; the public arm calls `getRecord`, `getTransactions` and never `getOperations`.
-- **Microtask fingerprints.**
-  - A bounded `queueMicrotask` spinner runs alongside the operation. Every collaborator call and every emit is stamped with the spinner's count, relative to the first stamp inside the critical section, so lock internals before entry are excluded.
-  - Seven literal fingerprints: the note critical section with unknown and with trusted trust, the public one with unknown and with trusted, one replay emit, `clearProfile`, and `clearChain`.
-  - The block's header says a later edit re-records them only with a stated reason.
-- **Payloads.** Each of the three prompt emits is deep-equal to a literal, and `Object.keys` equals the eight-key order. The values are wire-shaped: `0x` plus 64-hex addresses and contract, a u128 decimal `amountRaw`, `tokenDecimals: 18`.
-- **Clears.** For both methods, with an announced stall seeded so that `dropEpisodes` emits:
-  - an order log: the epoch already bumped at the health emit, then the fee eviction, then the repository wipe called with the bumped epoch, then hydration's first read, then the final eviction;
-  - a wipe that rejects: the call rejects with that error, the cache is evicted after, there is no hydration, and the epoch advanced by exactly 1;
-  - on success, the epoch advanced by 2.
-- **Teardown.** Add only what the existing account-lifecycle and token-delete suites lack:
-  - deleting an active-profile account stops its interval and drops both map entries;
-  - deleting an inactive profile's account leaves them;
-  - a two-contract set keeps its scheduler, a one-contract set stops it.
-- **`repository.test.ts`.**
-  - Each scope clear empties all five tables, including a codec-invalid row in each.
-  - It keeps `p11` and `n11` neighbours and a record key with an unknown kind prefix.
-  - The keys removed through `storage.local` follow today's table order.
-- **The comparator.**
-  - `public-event-indexer.test.ts`: rows for the block, tx and log branches with exact return values, and equality.
-  - `packages/aztec-runtime/src/pxe/public-events.test.ts`: one two-log page per branch. A page where only the log index decreases is dropped; equal positions are dropped; a page where only the log index increases is kept.
+- **`service.scenarios.test.ts`, the epoch re-check matrix (permanent).**
+  - For each row of both maps, `holdCall(..., "after")` holds that await's collaborator: the repository mock, or the token, transaction, journal, note or config stubs. While it is held, the test bumps `serviceEpoch`, then releases.
+  - Each row asserts six flags (trust written, `onIncomingTrustChanged`, `onIncomingTransferPending`, outbox written, record written, `onIncomingTransferAdded`) AND the ordered log of collaborator calls and emits, with a marker where the bump landed. The log is what catches a removed check that a later check would mask: without `:2080`, P1's flags stay all-false because P2 stops execution, but the log gains `getRecord`.
+  - `holdCall(..., "after")` runs the collaborator before holding it, so the fake's effect precedes the bump marker: at N6 and P6 the fake trust write, at N7 and P7 the write and the `onIncomingTrustChanged` emit. The log records that order; it says nothing about production write timing, since `repository.setTrust` awaits its own read first (`repository.ts:131`).
+  - Fixtures: unknown trust (N1–N10, P1–P9); seeded trusted (N9–N11, P8–P10); an existing record without a timestamp (N4b); an existing public record whose block moved, scanned with `reconcile` (P2). Each has an unbumped control row, and N0 and P0 each have a stale-entry control (the epoch bumped before the critical section starts: no collaborator inside it is called).
+  - The rows where a write lands after the bump (N1–N7 promotion, N9–N11 record and `Added`, P6–P7 promotion) are titled `(DRIFT PIN)`.
+  - A redundant synchronous duplicate of an existing check is not observable here; that stays a source-review item.
+- **Dedupe call order (permanent).** On an outgoing hit, the note arm calls `getTransactions`, `getOperations`, `getRecord`; the public arm calls `getRecord`, `getTransactions` and never `getOperations`.
+- **Microtask fingerprints (temporary proof).**
+  - A `queueMicrotask` spinner with an explicit cap runs alongside the operation and stops in `finally`. The operation must complete before the cap; exhausting it fails the test explicitly, and the spinner count at the last stamp must be below the cap.
+  - Boot polls (`startPollScheduler`'s immediate first poll, `:1020`, for both arms) and any import- or timer-driven setup are settled before the spinner starts.
+  - Every collaborator call and emit inside the critical section is stamped with the spinner count, relative to the first in-section stamp, filtered by arguments or scope where a collaborator is shared (`getTokensRaw`, `getTrust`, `getValue`). The final stamp is the caller's resumption.
+  - Seven service fingerprints (the note critical section with unknown and with trusted trust, the public one with unknown and with trusted, one replay emit, `clearProfile`, `clearChain`) and two in `repository.test.ts` around each REAL repository clear, measured to the caller's resumption. Running them first confirms `FakeBrowserApi` storage settles on microtasks alone.
+  - They stay through Phase 2, the green Phase 2 counts are logged in this arc's lessons file, and a final test-only commit removes them: they pin tick counts, which are not behaviour.
+- **Payloads (permanent).** Each of the three prompt emits is deep-equal to a literal, and `Object.keys` equals the eight-key order. The values are wire-shaped: `0x` plus 64-hex addresses and contract, a u128 decimal `amountRaw`, `tokenDecimals: 18`.
+- **Clears (permanent).** For both methods, with an announced stall seeded so `dropEpisodes` emits:
+  - an order log: the epoch already bumped at the health emit, then the fee eviction, then the wipe called with the bumped epoch, then hydration's first read, then the final eviction;
+  - for `clearChain`, `scanEpisodeNetworkPrefix` (wrapped pass-through by a partial `vi.mock` of `./scan-episodes`) is first called inside the clear with the epoch already bumped;
+  - a wipe that rejects: the call rejects with that error, the cache is evicted after, there is no hydration, and the epoch advanced by exactly 1; on success, by 2.
+- **Teardown (permanent).** Only what the existing suites lack: deleting an active-profile account stops its interval and drops both map entries; an inactive profile's account leaves them; a two-contract set keeps its scheduler, a one-contract set stops it.
+- **`repository.test.ts` (permanent).** Each scope clear empties all five tables, including a codec-invalid row in each; keeps `p11` and `n11` neighbours and a record key with an unknown kind prefix; and removes keys through `storage.local` in today's table order.
+- **The comparator (permanent).** `public-event-indexer.test.ts`: rows for the block, tx and log branches with exact return values, and equality. `packages/aztec-runtime/src/pxe/public-events.test.ts`: one two-log page per branch; equal positions and a log-index-only decrease are dropped, a log-index-only increase is kept.
 - **Comment fix.** The false header at `service.scenarios.test.ts:4137-4141` now names the note arm's actual checks (N0, N4b, N8).
 
 The phase is green against the unchanged code, in its own commit, so the test files are frozen before Phase 2.
 
-**Mutation check** (scratch, reverted from copies, logged in this arc's file under the program's `lessons/`):
+**Mutation check** (scratch, reverted from copies, logged in this arc's lessons file):
 
-- The public stand-down dropped: P5 row red.
-- A stand-down passed by the note caller: N5 drift row red.
-- The P8 check moved before `markBalanceDirty`: P8 row red.
+- P1's `:2080` check removed; P4's `:2119` check removed: their call-log rows red.
+- The public stand-down dropped: P5 red. A stand-down passed by the note caller: N5 red.
+- The P8 check moved before `markBalanceDirty`: P8 red.
 - `pendingEvent` spreading its scope: the key-order rows red.
-- `return await` inside the trust method, or an `async` `wipe` arrow: the fingerprints red.
-- `scopeFor` called before the bump: the clear order log red.
+- `return await` inside the trust method, or an `async` `wipe` arrow: the service fingerprints red.
+- `async clearX() { return this.clearScope(...) }`, or `return await this.clearScope(...)`, in the repository: the repository fingerprints red.
+- `scopeFor` called before the bump: the `scanEpisodeNetworkPrefix` epoch row red.
 - The table order swapped in `clearScope`: the removal-order row red.
 - `<` for `<=` at either comparator call: the equality rows red.
 
 ### Phase 2: consolidate, tests frozen
 
-Four commits, each green on the frozen tests:
-
-- 2a: `pendingEvent`, `TrustScope` and `resolveReceiptTrust`;
-- 2b: `stopNoteScheduler` and `findToken`;
-- 2c: `clearScopeLocked` and the repository's `clearScope`;
-- 2d: the comparator.
-
-Rewritten doc comments drop their history tags (`codex audit-6`, `codex R2 H1`), per CLAUDE.md, only on the lines this arc rewrites.
-
-### Phase 3: epoch alignment (only if the panel adopts any point of Ask 1)
-
-Per adopted point:
-
-- one red commit flips that point's `(DRIFT PIN)` rows to the refusal and retitles them;
-- one green commit adds the check. (A) is the note caller passing the same stand-down; (B) and (C) are inline `serviceEpoch !== epochAtStart` checks.
-
-Each adopted point gets an entry under Decisions and in the PR body, as Behaviour rule 2 requires. The fingerprints of the affected critical sections are re-recorded in the green commit, with the reason.
+Four commits, each green on the frozen tests: 2a `pendingEvent`, `TrustScope`, `resolveReceiptTrust` and the comment fixes of item 8; 2b `stopNoteScheduler` and `findToken`; 2c `clearScopeLocked` and the repository's `clearScope`; 2d the comparator. Then 2e, test-only: remove the fingerprints after logging their green counts.
 
 **Validation gate (after each phase):**
 
@@ -258,7 +232,7 @@ Each adopted point gets an entry under Decisions and in the PR body, as Behaviou
   - `bun run --cwd apps/extension test src/wallet/services/incoming-transfer`, three times in a row, then `bun run --cwd packages/aztec-runtime test src/pxe`;
   - `bun run lint`, `bun run typecheck:all`, `bun run test:all`, `bun run test:ci-gating`, `bun run audit:vue`;
   - `bun run build`, then `git diff --exit-code apps/extension/src/types/`.
-- **Pass criteria:** every command exits 0; the declaration files are unchanged; Phase 2's `git diff --stat` lists no test file.
+- **Pass criteria:** every command exits 0; the declaration files are unchanged; 2a–2d's `git diff --stat` lists no test file.
 - **Screenshots:** none; no `.vue` or CSS file changes.
 - **Layers:** unit and lint locally. In CI, the network suites' `incoming-transfers`, `incoming-public-transfers` and `incoming-arrival` run both arms against a real node on Chrome and Firefox, per the program gates.
 
@@ -275,19 +249,36 @@ One arc, `hd/14-incoming-arms`. The driver sets its parent at delivery. Code rev
 
 ## UI impact
 
-None. No `.vue` or CSS file changes and no copy changes. Every event payload and persisted row is byte-identical, which the Phase 1 payload and fingerprint pins prove.
+None. No `.vue` or CSS file changes and no copy changes. Every event payload and persisted row is byte-identical, which the Phase 1 payload pins and the temporary fingerprints prove.
 
-## Drift left for the alignment arc
+## Drift kept as today (routed to follow-ups)
 
-- **Epoch discipline differs between the arms.**
-  - The note arm has no re-check after its token, record, dedupe or trust reads, after `markBalanceDirty`, or before `Added`; the public arm has all of these.
-  - The note arm's only mid-section check after a fast read is after its timestamp read (N8), which the public arm has no counterpart for.
-  - This is Ask 1; if it is not adopted, it is a program follow-up.
-- **Dedupe order and call counts differ** (§ What stays), including the warnings an existing note record can log.
-- **Record timing differs:** the note arm takes `discoveredAt` before `dirtyAt`, the public arm after.
-- **Comments contradict each other.**
-  - `service.ts:1454-1460` says the fast awaits are not revocation windows, because destructive bumpers hold the lock.
-  - `:2071-2075` says every awaited read can park across a handoff, and calls the public arm's discipline "the note arm's own", which it is not. It also carries history ("originally lacked").
-  - Both stay until the alignment decision. The test-side copy is fixed in Phase 1.
+Nothing here is user-visible, so nothing goes to the alignment arc. Items 1 to 3 are preserved unchanged and go to `implementations-plan/follow-ups.md` at close-out.
+
+1. **Epoch discipline differs between the arms**, and this is a security follow-up. The note arm has no re-check after its token, record, dedupe or trust reads, after `markBalanceDirty`, or before `Added`; the public arm has these. A note continuation parked in `markBalanceDirty` can resume after a watchdog-admitted wipe and insert its built record (`:1482`), and a trust continuation can recreate pending trust: post-purge resurrection, a deletion and privacy violation, not a cross-account one. Adding the public arm's checks (A, B, C) would not fence `repository.setTrust`'s own internal await, so it is not complete revocation protection either.
+2. **Dedupe order and call counts differ** (§ What stays), including the warnings an existing note record can log. Residual: reconsider merging the commits and dedupe after alignment, not a commitment.
+3. **Record timing differs:** the note arm takes `discoveredAt` before `dirtyAt`, the public arm after.
+4. **The contradicting comments** are fixed in 2a (item 8); no behaviour changes.
 
 ## Decisions (delegated)
+
+### Plan audit, Codex round 1 (GPT-6 Astra, xhigh): REVISE, high confidence. Opus panelist: APPROVE
+
+Both legs confirmed the production design: the await shape matches through caller resumption (Codex probed the extracted originals against the replacements in memory), every guard position is intact, and the eight-key payload, the repository's per-key prefixes and table order and the comparator export and re-export are correct. Every finding was adopted:
+
+1. **Blocker (Codex): six flags miss removed guards.** Removing `:2080` still yields six false flags because P2 stops execution, and removing `:2119` because P5 does. Adopted: bumped rows assert the ordered call log too; both removal mutants, stale-entry controls for N0 and P0, and the moved-P8 mutant are in the mutation list. The claim is narrowed: a redundant synchronous duplicate check is a source-review item.
+2. **Repository timing (both legs).** The scenarios suite fakes the repository, so the repository's frame count was unproven. Adopted: a fingerprint around each real repository clear, measured through caller resumption, after confirming `FakeBrowserApi` settles on microtasks; the async-wrapper and `return await` mutants must fail it.
+3. **Spinner specification (both legs).** Adopted: completion before the cap, explicit failure on exhaustion, stop in `finally`, boot polls and setup settled first, stamps filtered by arguments or scope, the last stamp below the cap, no timer fakes.
+4. **Fingerprints are proof, not permanent pins (Opus; Codex no objection).** Codex saw 1,000 stable repetitions on Bun 1.4.2, but tick counts are not behaviour and every later edit to `service.ts` would re-record them. Adopted: kept through Phase 2, counts logged, removed in 2e. The matrix and call logs stay.
+5. **The scope-construction mutant had no observer (Codex).** Adopted: the `scanEpisodeNetworkPrefix` call is observed and its epoch asserted; bump-before-scope stays.
+6. **Comments fixed now (both legs).** Adopted as item 8, in 2a, with the merged doc limited to two invariants.
+7. **Late effects labelled accurately (Codex).** Adopted: the call log marks the bump; the plan no longer infers production write timing from the fake.
+8. **`clearScope(prefix: string)` (Opus).** Adopted: arguments are strings and `scanEpisodeNetworkPrefix` is pure; each method keeps its own prefix, so `clearChain(p, undefined)` still matches only `p|undefined|`.
+9. **`findToken` covers the fourth copy at `:693`.** Adopted, as `findToken(...) !== undefined`.
+10. **Concurrency model text (Opus).** Adopted: the in-lock bump in `onAccountAdded` (`:388`), and `init` and the two clears as callers of `hydrateSchedulers`.
+11. **Drift routing (Opus).** Adopted: nothing is user-visible, so the section is retitled; drifts 1 to 3 go to follow-ups at close-out, drift 4 is fixed now.
+
+### Ask calls
+
+1. **Ask 1, the Q-18 epoch points (A) after the trust read, (B) after `markBalanceDirty`, (C) before `Added`:** both legs adopt none. A security follow-up records the resurrection path above, and the program report carries it. Phase 3 is dropped.
+2. **Ask 2, partial close of Q-18:** both legs accept. Commits and dedupe become a residual follow-up to reconsider after alignment, not a commitment. The record builders close as won't-dedupe: two record variants, and a shared spread would reorder persisted keys.
