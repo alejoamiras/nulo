@@ -6,7 +6,7 @@ claude_model: opus
 codex_model: astra
 code_review: off
 eli5_mode: none (the program Artifact replaces per-batch ELI5 pages; see the program plan's Decisions)
-branch: hd/05-error-registry, stacked on hd/03-visual-shells-a
+branch: hd/05-error-registry, stacked on harden-dedupe
 ---
 
 # error-registry: one list of the wire errors a code rebuilds as
@@ -111,12 +111,12 @@ Make the `errors.ts` change above with the test file untouched.
 
 1. **Codex audit** (GPT-6 Astra, xhigh) of the arc diff, with the adversarial, assumption-attack and implementation-critique asks. Include the no-over-engineering rule verbatim ("Report bugs and small, targeted improvements only. Do not propose speculative abstractions, extra configuration surface, new layers, or rewrites — the smallest change that fixes each real problem. If code works and is clear, leave it alone.") and the comment-quality rule verbatim ("Audit the comments for value per character. Flag any comment that narrates what the code visibly does, restates its line, references implementation plans / phases / reviews, or spends a paragraph where a sentence works — and flag places where a non-obvious invariant or constraint deserves a comment it doesn't have. Comments are permanent context every future reader, human or LLM, pays to re-read: they must be few, dense, and exact.").
 2. **Fix loop:** triage each finding, fix, commit, log the round in this arc's file under the program's `lessons/`, and resume the same session. Stop when a round has no material finding; at 5 rounds, park the arc.
-3. **Delivery:** push, open a ready PR against `hd/03-visual-shells-a` (gh stack on base `harden-dedupe`), then add both e2e labels. When the program gates are green, squash-merge into `harden-dedupe`.
+3. **Delivery:** push, open a ready PR against `harden-dedupe` (the bottom of the gh stack), then add both e2e labels. When the program gates are green, squash-merge into `harden-dedupe`.
 4. **Close-out** is the program's job: this plan closes with the program plan.
 
 ## Delivery
 
-One arc, `hd/05-error-registry`, stacked on `hd/03-visual-shells-a` (arc 4 follows it; see Decisions). Code review: off.
+One arc, `hd/05-error-registry`, stacked directly on `harden-dedupe` and landing first (see Decisions). Code review: off.
 
 ## UI impact
 
@@ -142,4 +142,4 @@ The audit's case table: six exceptions to a plain `new C(message, details)` (`Ca
 
 ### Stack order
 
-Arc 5 now stacks on arc 3 and arc 4 follows it: this is an independent single-file arc that can be built while arc 4's harness work is pending, which keeps builds at most one arc ahead.
+Arc 5 lands first, directly on `harden-dedupe`, ahead of arcs 3 and 4: it was ready first, it is independent of them, and it touches one file, while arc 3 is still building.
