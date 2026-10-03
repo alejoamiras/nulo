@@ -179,6 +179,68 @@ describe("TransactionService.addTransaction — D13 execution fence", () => {
 		const tx = await add("0xh4", undefined)
 		expect(tx.hash).toBe("0xh4")
 	})
+
+	/** Every field set, each to a distinct value. */
+	const addFull = (fence: ExecutionFence, hash = "0xfull") =>
+		service.addTransaction(
+			{ type: 1, name: "dapp" } as never,
+			3,
+			ACCOUNT,
+			[{ contract: "0xc", method: "m", args: ["1"] }] as never,
+			"0x07",
+			2 as never,
+			hash,
+			"https://rpc.example",
+			"880",
+			{ l2GasLimit: 200, daGasLimit: 100, teardownL2GasLimit: 20, teardownDaGasLimit: 10, feePerL2Gas: "3", feePerDaGas: "2" },
+			fence,
+			"net-9",
+		)
+
+	test("the persisted row's raw bytes, in the literal's key order", async () => {
+		vi.setSystemTime(1_700_000_000_000)
+		const fence = { profileId: "p1", epoch: deletionState.capture("p1"), session: 1 }
+		await addFull(fence)
+		const raw = (await api.storage.local.get("nulo:core:txs@0xfull"))["nulo:core:txs@0xfull"]
+		expect(raw).toBe(
+			'{"origin":{"type":1,"name":"dapp"},"chainId":3,"profileId":"p1","networkId":"net-9","account":"0xacc",' +
+				'"calls":[{"contract":"0xc","method":"m","args":["1"]}],"nonce":"0x07","feePaymentMethod":2,"hash":"0xfull",' +
+				'"createdAt":1700000000000,"updatedAt":1700000000000,"status":0,"estimatedFee":"880",' +
+				'"gasDetails":{"l2GasLimit":200,"daGasLimit":100,"teardownL2GasLimit":20,"teardownDaGasLimit":10,"feePerL2Gas":"3","feePerDaGas":"2"},' +
+				'"submittedEndpointUrl":"https://rpc.example"}',
+		)
+	})
+
+	test("inside the lock: epoch, owner, duplicate lookup, write, event, pending, in that order; a duplicate writes nothing", async () => {
+		const trace: string[] = []
+		const internals = service as unknown as {
+			txs: { get: (k: string) => Promise<unknown>; set: (k: string, v: unknown) => Promise<void> }
+			pending: Map<string, unknown>
+			accountService: { getAccount: (...a: unknown[]) => Promise<unknown> }
+			emit: (...a: unknown[]) => void
+		}
+		const wrap = (target: Record<string, unknown>, key: string, label: string) => {
+			const original = (target[key] as (...a: unknown[]) => unknown).bind(target)
+			target[key] = (...a: unknown[]) => {
+				trace.push(label)
+				return original(...a)
+			}
+		}
+		wrap(deletionState as never, "assertCurrent", "assertCurrent")
+		wrap(internals.accountService as never, "getAccount", "getAccount")
+		wrap(internals.txs as never, "get", "txs.get")
+		wrap(internals.txs as never, "set", "txs.set")
+		wrap(internals as never, "emit", "emit")
+		wrap(internals.pending as never, "set", "pending.set")
+		const fence = { profileId: "p1", epoch: deletionState.capture("p1"), session: 1 }
+
+		await addFull(fence)
+		expect(trace).toEqual(["assertCurrent", "getAccount", "txs.get", "txs.set", "emit", "pending.set"])
+
+		trace.length = 0
+		await expect(addFull(fence)).rejects.toThrow("duplicated hash")
+		expect(trace).toEqual(["assertCurrent", "getAccount", "txs.get"])
+	})
 })
 
 describe("TransactionService.restore — deletion fence (N-14, threaded profileId)", () => {

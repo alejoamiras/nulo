@@ -14,7 +14,7 @@ import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { Gas, GasFees, GasSettings } from "@aztec-labs/stdlib/gas"
 import { JobCancelledError, JournaledRejection, OperationNotRecordedError, SessionEndedError } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
-import { TransferType } from "@/wallet/services/transaction/service"
+import { OriginType, TransferType } from "@/wallet/services/transaction/service"
 import type { ProveAndSendContext } from "./execution-coordinator"
 import type { TransferRequest } from "./operation-planner"
 import { TransferExecutor, type TransferExecutorDeps } from "./transfer-executor"
@@ -111,6 +111,27 @@ function makeHarness(overrides: Partial<TransferExecutorDeps> = {}) {
 	return { deps, task, built, proveAndSend, executor: new TransferExecutor(deps) }
 }
 
+const RECORD_FIELDS = [
+	"origin",
+	"chainId",
+	"account",
+	"calls",
+	"nonce",
+	"feePaymentMethod",
+	"hash",
+	"submittedEndpointUrl",
+	"estimatedFee",
+	"gasDetails",
+	"fence",
+	"networkId",
+] as const
+
+/** The activity record `addTransaction` received, by field name. */
+function recordedTx(deps: TransferExecutorDeps): Record<(typeof RECORD_FIELDS)[number], unknown> {
+	const args = (deps.addTransaction as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
+	return Object.fromEntries(RECORD_FIELDS.map((field, i) => [field, args[i]])) as Record<(typeof RECORD_FIELDS)[number], unknown>
+}
+
 describe("TransferExecutor.execute", () => {
 	test("the task's TransferContent is stamped with the request's networkId", async () => {
 		// The producer stamp is what lets the activity view scope transfer tasks
@@ -139,9 +160,9 @@ describe("TransferExecutor.execute", () => {
 		const ctx = (proveAndSend.mock.calls[0] as unknown[])[0] as { scopes: unknown[] }
 		expect(ctx.scopes).toEqual(["0xacct-addr"])
 		// Activity record stays transfer-only: planner's fn/token, never txCalls.
-		const txCallArgs = (deps.addTransaction as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
-		expect((txCallArgs[3] as Array<{ method: string }>)[0].method).toBe("transfer_private")
-		expect(txCallArgs[4]).toBe("42")
+		const record = recordedTx(deps)
+		expect((record.calls as Array<{ method: string }>)[0].method).toBe("transfer_private")
+		expect(record.nonce).toBe("42")
 		expect(task.complete).toHaveBeenCalledTimes(1)
 		// Controller registered under journalId, removed in finally.
 		expect(deps.lane.registerInFlight).toHaveBeenCalledWith("j1", FENCE.session, expect.any(AbortController))
@@ -172,8 +193,7 @@ describe("TransferExecutor.execute", () => {
 		// Reuse path resolves its own network/node/pxe/account bindings.
 		expect(deps.getNetwork).toHaveBeenCalledWith("net-1")
 		expect(deps.getAccountContract).toHaveBeenCalledWith("p1", 7, "0xme")
-		const txCallArgs = (deps.addTransaction as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
-		expect(txCallArgs[4]).toBe("99")
+		expect(recordedTx(deps).nonce).toBe("99")
 	})
 
 	test("journal creation throwing: the transfer is refused before any build", async () => {
@@ -593,6 +613,247 @@ describe("TransferExecutor.estimateFee sponsor funding", () => {
 		})
 
 		await expect(executor.estimateFee(makeReq({ feeSettings: FPC_SETTINGS }), controller.signal)).rejects.toThrow(JobCancelledSentinel)
+		expect(deps.estimateReuse.stash).not.toHaveBeenCalled()
+	})
+})
+
+describe("TransferExecutor: the activity record, field by field", () => {
+	const GAS_DETAILS = {
+		l2GasLimit: 200,
+		daGasLimit: 100,
+		teardownL2GasLimit: 20,
+		teardownDaGasLimit: 10,
+		feePerL2Gas: "3",
+		feePerDaGas: "2",
+	}
+	const CALLS = [
+		{
+			contract: "0xtoken",
+			method: "transfer_private",
+			args: ["0xme", "0xyou", "5"],
+			transfers: [
+				{
+					token: { name: "Test", symbol: "TST", decimals: 18 },
+					type: TransferType.Private,
+					from: "0xme",
+					to: "0xyou",
+					amount: "5",
+				},
+			],
+		},
+	]
+
+	test("a fresh build records the transfer shape and the built network's id", async () => {
+		const h = makeHarness()
+		Object.assign(h.built, {
+			network: { id: "net-built", chainId: 7, primaryEndpointId: "e1", endpoints: [{ id: "e1", rpcUrl: "http://submitted" }] },
+		})
+		await h.executor.execute(makeReq(), undefined, FENCE)
+		expect(recordedTx(h.deps)).toStrictEqual({
+			origin: { type: OriginType.UI },
+			chainId: 7,
+			account: "0xme",
+			calls: CALLS,
+			nonce: "42",
+			feePaymentMethod: { kind: "fee_juice" },
+			hash: "0xhash",
+			submittedEndpointUrl: "http://submitted",
+			estimatedFee: "880",
+			gasDetails: GAS_DETAILS,
+			fence: FENCE,
+			networkId: "net-built",
+		})
+	})
+
+	test("a reused estimate records the entry's provenance and the re-resolved network's id", async () => {
+		const reusedNetwork = { id: "net-live", chainId: 9, primaryEndpointId: "e1", endpoints: [{ id: "e1", rpcUrl: "http://live" }] }
+		const h = makeHarness({
+			getNetwork: vi.fn(async () => reusedNetwork as never),
+			estimateReuse: {
+				tryConsume: vi.fn(async () => ({
+					txRequest: makeTxRequest(),
+					initializesAccount: false,
+					nonce: { toString: () => "99" },
+					feePaymentMethod: { kind: "reused" },
+					token: TOKEN,
+					fnName: "transfer_private",
+					args: ["0xme", "0xyou", 5n],
+				})),
+				stash: vi.fn(),
+			} as never,
+		})
+		await h.executor.execute(makeReq(), "est-1", FENCE)
+		expect(recordedTx(h.deps)).toStrictEqual({
+			origin: { type: OriginType.UI },
+			chainId: 9,
+			account: "0xme",
+			calls: CALLS,
+			nonce: "99",
+			feePaymentMethod: { kind: "reused" },
+			hash: "0xhash",
+			submittedEndpointUrl: "http://live",
+			estimatedFee: "880",
+			gasDetails: GAS_DETAILS,
+			fence: FENCE,
+			networkId: "net-live",
+		})
+	})
+})
+
+describe("TransferExecutor.estimateFee: the reuse snapshot", () => {
+	const NOW = 1_700_000_000_000
+	const PRIMARY_SECOND = {
+		id: "net-1",
+		chainId: 7,
+		primaryEndpointId: "e2",
+		endpoints: [
+			{ id: "e1", rpcUrl: "http://first" },
+			{ id: "e2", rpcUrl: "http://primary" },
+		],
+	}
+
+	function snapshotHarness(overrides: Partial<TransferExecutorDeps> = {}, network: object = PRIMARY_SECOND) {
+		const h = makeHarness({ getActiveProfile: vi.fn(async () => ({ id: "p-active" }) as never), ...overrides })
+		const txRequest = makeTxRequest() as { txContext: { gasSettings: { maxFeesPerGas: object } } }
+		txRequest.txContext.gasSettings.maxFeesPerGas = { feePerDaGas: 7n, feePerL2Gas: 11n }
+		Object.assign(h.built, { network, txRequest })
+		return h
+	}
+
+	const stashed = (deps: TransferExecutorDeps) => (deps.estimateReuse.stash as ReturnType<typeof vi.fn>).mock.calls as unknown[][]
+
+	test("the entry: the built fee, the primary by id, the active profile, the pending set, the build", async () => {
+		vi.useFakeTimers({ now: NOW, toFake: ["Date"] })
+		try {
+			const { executor, deps, built } = snapshotHarness()
+			const result = await executor.estimateFee(makeReq())
+			expect(stashed(deps)).toStrictEqual([
+				[
+					result.estimateId,
+					{
+						networkId: "net-1",
+						accountAddress: "0xme",
+						tokenId: 1,
+						transferType: TransferType.Private,
+						recipientAddress: "0xyou",
+						amount: 5n,
+						feeSettingsHash: "fj|default",
+						// The active profile at stash time, not the fence's p1.
+						profileId: "p-active",
+						// The built request's maxFeesPerGas; the node is never asked.
+						baseFeeFingerprint: "7:11",
+						primaryEndpointId: "e2",
+						primaryEndpointUrl: "http://primary",
+						pendingHashes: ["0xpending"],
+						txRequest: built.txRequest,
+						initializesAccount: true,
+						nonce: built.nonce,
+						feePaymentMethod: built.feePaymentMethod,
+						token: TOKEN,
+						fnName: "transfer_private",
+						args: ["0xme", "0xyou", 5n],
+						builtAt: NOW,
+					},
+				],
+			])
+			expect(deps.getNode).not.toHaveBeenCalled()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("a pending tx that lands during the profile read is in the snapshot", async () => {
+		const pending = [{ hash: "0xpending" }]
+		const { executor, deps } = snapshotHarness({
+			getPendingForAccount: vi.fn(() => [...pending] as never),
+			getActiveProfile: vi.fn(async () => {
+				pending.push({ hash: "0xraced" })
+				return { id: "p-active" } as never
+			}),
+		})
+		await executor.estimateFee(makeReq())
+		expect((stashed(deps)[0][1] as { pendingHashes: string[] }).pendingHashes).toEqual(["0xpending", "0xraced"])
+	})
+
+	test.each([
+		["a dangling primaryEndpointId", { ...PRIMARY_SECOND, primaryEndpointId: "e9" }],
+		["no endpoints array", { id: "net-1", chainId: 7, primaryEndpointId: "e2" }],
+	])("%s: no estimateId, the fee still returned", async (_label, network) => {
+		const { executor, deps } = snapshotHarness({}, network)
+		const result = await executor.estimateFee(makeReq())
+		expect(result.estimateId).toBeUndefined()
+		expect(result.maxFee).toBeDefined()
+		expect(deps.estimateReuse.stash).not.toHaveBeenCalled()
+	})
+
+	test("no endpoints array: the skip line carries the lookup's TypeError", async () => {
+		const { executor, deps } = snapshotHarness({}, { id: "net-1", chainId: 7, primaryEndpointId: "e2" })
+		await executor.estimateFee(makeReq())
+		expect(deps.logDebug).toHaveBeenCalledWith("estimateTransferFee: cache write skipped", expect.any(TypeError))
+	})
+
+	test("a locked wallet at stash time: no estimateId, the skip line carries Wallet locked", async () => {
+		const { executor, deps } = snapshotHarness({ getActiveProfile: vi.fn(async () => undefined) })
+		const result = await executor.estimateFee(makeReq())
+		expect(result.estimateId).toBeUndefined()
+		expect(deps.estimateReuse.stash).not.toHaveBeenCalled()
+		expect(deps.logDebug).toHaveBeenCalledWith("estimateTransferFee: cache write skipped", new Error("Wallet locked"))
+	})
+
+	test.each(["fjwc", "embedded"])("%s: not eligible, no stash and no profile read", async (kind) => {
+		const { executor, deps } = snapshotHarness()
+		const feeSettings = {
+			paymentMethod: kind === "fjwc" ? { kind, claimAmount: "1", claimSecret: "s", messageLeafIndex: "0" } : { kind },
+		}
+		const result = await executor.estimateFee(makeReq({ feeSettings: feeSettings as never }))
+		expect(result.estimateId).toBeUndefined()
+		expect(deps.estimateReuse.stash).not.toHaveBeenCalled()
+		expect(deps.getActiveProfile).not.toHaveBeenCalled()
+	})
+
+	test("eligibility control: fpc stashes", async () => {
+		const { executor, deps } = snapshotHarness()
+		const result = await executor.estimateFee(makeReq({ feeSettings: { paymentMethod: { kind: "fpc", fpcId: "f" } } as never }))
+		expect(result.estimateId).toBeDefined()
+		expect(deps.estimateReuse.stash).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("TransferExecutor.estimateFee: each cancel checkpoint", () => {
+	test.each([
+		["before planning", "pre", "buildTransferOperation"],
+		["during planning", "buildTransferOperation", "buildAndEstimate"],
+		["during the build", "buildAndEstimate", "readPublicStorageOnce"],
+	] as const)("an abort %s rejects with the journal-less sentinel and runs nothing after", async (_label, abortIn, notCalled) => {
+		const controller = new AbortController()
+		const { executor, deps, built } = makeHarness()
+		// A build naming a sponsor, so the step after the build's checkpoint (the probe) reads storage.
+		const gasSettings = new GasSettings(new Gas(100, 200), new Gas(10, 20), new GasFees(2n, 3n), new GasFees(0n, 0n))
+		Object.assign(built, {
+			txRequest: { txContext: { gasSettings } },
+			sponsor: { fpcId: "fpc-9", address: AztecAddress.fromNumberUnsafe(0x5f) },
+		})
+		if (abortIn === "pre") controller.abort()
+		if (abortIn === "buildTransferOperation") {
+			const plan = deps.planner.buildTransferOperation as ReturnType<typeof vi.fn>
+			const original = plan.getMockImplementation() as (req: TransferRequest) => Promise<unknown>
+			plan.mockImplementation(async (req: TransferRequest) => {
+				controller.abort()
+				return original(req)
+			})
+		}
+		if (abortIn === "buildAndEstimate") {
+			;(deps.buildAndEstimate as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+				controller.abort()
+				return built as never
+			})
+		}
+		const fpc = { paymentMethod: { kind: "fpc", fpcId: "fpc-9" } } as never
+		const error = await executor.estimateFee(makeReq({ feeSettings: fpc }), controller.signal).catch((e: unknown) => e)
+		expect(error).toBeInstanceOf(JobCancelledSentinel)
+		expect((error as JobCancelledSentinel).jobId).toBe("")
+		const target = notCalled === "buildTransferOperation" ? deps.planner.buildTransferOperation : deps[notCalled]
+		expect(target).not.toHaveBeenCalled()
 		expect(deps.estimateReuse.stash).not.toHaveBeenCalled()
 	})
 })

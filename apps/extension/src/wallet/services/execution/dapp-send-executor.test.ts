@@ -28,7 +28,16 @@ import { DappSendExecutor, type DappSendExecutorDeps } from "./dapp-send-executo
 import { DiscoveryAwareEstimator } from "./discovery-aware-estimator"
 import type { ProveAndSendContext } from "./execution-coordinator"
 import { AUTHWITS_CHANGED_MESSAGE, ESTIMATE_INCOMPLETE_MESSAGE, PREVIEW_FOREIGN_MESSAGE, PreviewSnapshots } from "./preview-snapshots"
+import { fingerprintOperation } from "./operation-fingerprint"
 import { ExecutionService } from "./service"
+
+// A pass-through spy: the extraction itself is aztec.js's; its arguments are the executor's.
+const extractOffchainOutputSpy = vi.hoisted(() => vi.fn())
+vi.mock("@aztec-labs/aztec.js/contracts", async (importOriginal) => {
+	const original = await importOriginal<{ extractOffchainOutput: (...args: unknown[]) => unknown }>()
+	extractOffchainOutputSpy.mockImplementation(original.extractOffchainOutput)
+	return { ...original, extractOffchainOutput: extractOffchainOutputSpy }
+})
 
 const collectOffchainEffectsMock = vi.hoisted(() => vi.fn(() => [] as Array<{ data: unknown[]; contractAddress: unknown }>))
 vi.mock("@aztec-labs/stdlib/tx", async (importOriginal) => ({
@@ -207,6 +216,27 @@ function makeAztecOp(overrides: Record<string, unknown> = {}) {
 	} as never
 }
 
+const RECORD_FIELDS = [
+	"origin",
+	"chainId",
+	"account",
+	"calls",
+	"nonce",
+	"feePaymentMethod",
+	"hash",
+	"submittedEndpointUrl",
+	"estimatedFee",
+	"gasDetails",
+	"fence",
+	"networkId",
+] as const
+
+/** The activity record `addTransaction` received, by field name. */
+function recordedTx(deps: DappSendExecutorDeps): Record<(typeof RECORD_FIELDS)[number], unknown> {
+	const args = (deps.addTransaction as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
+	return Object.fromEntries(RECORD_FIELDS.map((field, i) => [field, args[i]])) as Record<(typeof RECORD_FIELDS)[number], unknown>
+}
+
 describe("DappSendExecutor.executeSendTransaction", () => {
 	test("happy path: journal begin → simulating → build → proveAndSend(scopes=[account]) → record from txCalls", async () => {
 		const { executor, deps, proveAndSend, built } = makeHarness()
@@ -239,10 +269,10 @@ describe("DappSendExecutor.executeSendTransaction", () => {
 		const ctx = (proveAndSend.mock.calls[0] as unknown[])[0] as { scopes: unknown[] }
 		expect(ctx.scopes).toEqual([built.account.address])
 		// Activity record uses the build's txCalls verbatim (dApp shape, not transfer shape).
-		const txArgs = (deps.addTransaction as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
-		expect(txArgs[2]).toBe("0xacct")
-		expect(txArgs[3]).toBe(built.txCalls)
-		expect(txArgs[4]).toBe("42")
+		const record = recordedTx(deps)
+		expect(record.account).toBe("0xacct")
+		expect(record.calls).toBe(built.txCalls)
+		expect(record.nonce).toBe("42")
 		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")
 	})
 
@@ -278,8 +308,7 @@ describe("DappSendExecutor.executeSendTransaction", () => {
 		} as never
 		await executor.executeSendTransaction(op, ORIGIN, undefined, FENCE)
 
-		const txArgs = (deps.addTransaction as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
-		expect(txArgs[7]).toBe("https://rpc.submit")
+		expect(recordedTx(deps).submittedEndpointUrl).toBe("https://rpc.submit")
 	})
 
 	test("failure: journal → failed with dapp_execute-normalized error, error rethrown", async () => {
@@ -585,9 +614,9 @@ describe("DappSendExecutor.executeNoFromSendTx (via default_entrypoint)", () => 
 		collectOffchainEffectsMock.mockReturnValue([])
 		const { executor, deps } = makeHarness()
 		await executor.executeAztecSendTx(makeNoFromOp(), ORIGIN, undefined, undefined, FENCE)
-		const txArgs = (deps.addTransaction as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
-		expect(txArgs[4]).toBe("0x0000000000000000000000000000000000000000000000000000000000000000")
-		expect(txArgs[5]).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
+		const record = recordedTx(deps)
+		expect(record.nonce).toBe("0x0000000000000000000000000000000000000000000000000000000000000000")
+		expect(record.feePaymentMethod).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
 	})
 })
 
@@ -955,9 +984,9 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 			"0xhash",
 		)
 		// The reused nonce + payment method flow into the activity record.
-		const txArgs = (deps.addTransaction as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
-		expect(txArgs[4]).toBe("77")
-		expect(txArgs[5]).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
+		const record = recordedTx(deps)
+		expect(record.nonce).toBe("77")
+		expect(record.feePaymentMethod).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
 		// (N-15) the cached build's provenance reaches the send context — a
 		// dropped executor assignment would classify a real init race generic.
 		const reuseCtx = (proveAndSend.mock.calls[0] as unknown[])[0] as { initializesAccount?: boolean }
@@ -1595,5 +1624,465 @@ describe("DappSendExecutor.estimateOperationFee sponsor funding", () => {
 
 		await expect(executor.estimateOperationFee(forgingOp(), FPC_SETTINGS, controller.signal)).rejects.toThrow(JobCancelledSentinel)
 		expect(deps.operationEstimateReuse.stash).not.toHaveBeenCalled()
+	})
+})
+
+describe("DappSendExecutor: the activity record, field by field", () => {
+	const GAS_DETAILS = {
+		l2GasLimit: 200,
+		daGasLimit: 100,
+		teardownL2GasLimit: 20,
+		teardownDaGasLimit: 10,
+		feePerL2Gas: "3",
+		feePerDaGas: "2",
+	}
+	const NO_FROM = (overrides: Record<string, unknown> = {}) =>
+		makeAztecOp({ executionMode: "default_entrypoint", feeSettings: { paymentMethod: { kind: "embedded" } }, ...overrides })
+
+	test("send_transaction: the build's calls, nonce and payment, the op's networkId", async () => {
+		const { executor, deps, built } = makeHarness()
+		const op = {
+			kind: "send_transaction",
+			networkId: "net-op",
+			accountAddress: "0xacct",
+			feeSettings: { paymentMethod: { kind: "fj" } },
+			actions: [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }],
+		} as never
+		await executor.executeSendTransaction(op, ORIGIN, undefined, FENCE)
+		expect(recordedTx(deps)).toStrictEqual({
+			origin: ORIGIN,
+			chainId: 7,
+			account: "0xacct",
+			calls: built.txCalls,
+			nonce: "42",
+			feePaymentMethod: { kind: "fee_juice" },
+			hash: "0xhash",
+			submittedEndpointUrl: "https://rpc.submit",
+			estimatedFee: "880",
+			gasDetails: GAS_DETAILS,
+			fence: FENCE,
+			networkId: "net-op",
+		})
+	})
+
+	test("aztec_sendTx, fresh build: the same shape", async () => {
+		const { executor, deps, built } = makeHarness()
+		await executor.executeAztecSendTx(makeAztecOp({ networkId: "net-op" }), ORIGIN, undefined, undefined, FENCE)
+		expect(recordedTx(deps)).toStrictEqual({
+			origin: ORIGIN,
+			chainId: 7,
+			account: "0xacct",
+			calls: built.txCalls,
+			nonce: "42",
+			feePaymentMethod: { kind: "fee_juice" },
+			hash: "0xhash",
+			submittedEndpointUrl: "https://rpc.submit",
+			estimatedFee: "880",
+			gasDetails: GAS_DETAILS,
+			fence: FENCE,
+			networkId: "net-op",
+		})
+	})
+
+	test("aztec_sendTx, reuse hit: the entry's provenance, the re-resolved network, the op's networkId", async () => {
+		const live = { id: "net-live", chainId: 9, primaryEndpointId: "ep1", endpoints: [{ id: "ep1", rpcUrl: "https://rpc.live" }] }
+		const txCalls = [{ contract: "0xc", method: "reused_method", args: [] }]
+		const entry = {
+			txRequest: makeTxRequest(),
+			initializesAccount: false,
+			nonce: { toString: () => "77" },
+			feePaymentMethod: AccountFeePaymentMethodOptions.EXTERNAL,
+			txCalls,
+			pendingPublicAuthwits: [],
+			discoveredHashes: [],
+		}
+		const { executor, deps } = makeHarness({
+			getNetwork: vi.fn(async () => live as never),
+			operationEstimateReuse: { tryConsume: vi.fn(async () => entry), stash: vi.fn(), evict: vi.fn() } as never,
+		})
+		deps.previewSnapshots.stash("est-1", { interactionId: "i-1", index: 0, fingerprint: null, discoveredHashes: [] })
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE, APPROVAL("est-1"))
+		expect(recordedTx(deps)).toStrictEqual({
+			origin: ORIGIN,
+			chainId: 9,
+			account: "0xacct",
+			calls: txCalls,
+			nonce: "77",
+			feePaymentMethod: AccountFeePaymentMethodOptions.EXTERNAL,
+			hash: "0xhash",
+			submittedEndpointUrl: "https://rpc.live",
+			estimatedFee: "880",
+			gasDetails: GAS_DETAILS,
+			fence: FENCE,
+			networkId: "net-1",
+		})
+	})
+
+	test("NO_FROM: nonce zero, external payment, the op's networkId", async () => {
+		collectOffchainEffectsMock.mockReturnValue([])
+		const { executor, deps, built } = makeHarness()
+		await executor.executeAztecSendTx(NO_FROM({ networkId: "net-op" }), ORIGIN, undefined, undefined, FENCE)
+		expect(recordedTx(deps)).toStrictEqual({
+			origin: ORIGIN,
+			chainId: 7,
+			account: "0xacct",
+			calls: built.txCalls,
+			nonce: Fr.ZERO.toString(),
+			feePaymentMethod: AccountFeePaymentMethodOptions.EXTERNAL,
+			hash: "0xhash",
+			submittedEndpointUrl: "https://rpc.submit",
+			estimatedFee: "880",
+			gasDetails: GAS_DETAILS,
+			fence: FENCE,
+			networkId: "net-op",
+		})
+	})
+
+	test("the recorder awaits addTransaction before it writes the pending authwits", async () => {
+		const authwits = [{ account: "0xacct", hash: "0xph", content: { kind: "message_hash", messageHash: "0xm" } }]
+		let resolveAdd: (v: unknown) => void = () => {}
+		const addTransaction = vi.fn(() => new Promise((r) => (resolveAdd = r)))
+		const { executor, deps, built } = makeHarness({ addTransaction: addTransaction as never })
+		Object.assign(built, { pendingPublicAuthwits: authwits })
+		const sending = executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE)
+		for (let i = 0; i < 50 && addTransaction.mock.calls.length === 0; i++) await Promise.resolve()
+		expect(addTransaction).toHaveBeenCalledTimes(1)
+		for (let i = 0; i < 20; i++) await Promise.resolve()
+		expect(deps.recordPendingAuthwits).not.toHaveBeenCalled()
+		resolveAdd({})
+		await sending
+		expect(deps.recordPendingAuthwits).toHaveBeenCalledTimes(1)
+	})
+
+	test.each([
+		["the shared recorder resolves to nothing", false, undefined],
+		["the NO_FROM recorder resolves to addTransaction's own value", true, "the-tx-row"],
+	])("%s", async (_label, noFrom, expected) => {
+		collectOffchainEffectsMock.mockReturnValue([])
+		let recorded: unknown = "unset"
+		const proveAndSend = vi.fn(async (ctx: { recordTransaction: (h: string) => Promise<unknown> }) => {
+			recorded = await ctx.recordTransaction("0xhash")
+			return { txHash: { toString: () => "0xhash" }, offchainOutput: {} }
+		})
+		const h = makeHarness({ addTransaction: vi.fn(async () => "the-tx-row" as never) })
+		Object.assign(h.deps.coordinator, { proveAndSend })
+		await h.executor.executeAztecSendTx(noFrom ? NO_FROM() : makeAztecOp(), ORIGIN, undefined, undefined, FENCE)
+		expect(recorded).toBe(expected)
+	})
+})
+
+describe("DappSendExecutor.estimateOperationFee: the reuse snapshot", () => {
+	const NOW = 1_700_000_000_000
+	const FPC_SETTINGS = { paymentMethod: { kind: "fpc", fpcId: "fpc-1" } }
+	const PRIMARY_SECOND = {
+		id: "net-1",
+		chainId: 7,
+		primaryEndpointId: "ep2",
+		endpoints: [
+			{ id: "ep1", rpcUrl: "https://first" },
+			{ id: "ep2", rpcUrl: "https://primary" },
+		],
+	}
+
+	function snapshotHarness(overrides: Parameters<typeof makeHarness>[0] = {}, network: object = PRIMARY_SECOND) {
+		const h = makeHarness({ getActiveProfile: vi.fn(async () => ({ id: "p-active" })), ...overrides })
+		const txRequest = makeTxRequest() as { txContext: { gasSettings: { maxFeesPerGas: object } } }
+		txRequest.txContext.gasSettings.maxFeesPerGas = { feePerDaGas: 7n, feePerL2Gas: 11n }
+		Object.assign(h.built, { network, txRequest, chainIdentity: { l1ChainId: 1, rollupVersion: 6 } })
+		return h
+	}
+
+	const stashed = (deps: DappSendExecutorDeps) =>
+		(deps.operationEstimateReuse.stash as ReturnType<typeof vi.fn>).mock.calls as unknown[][]
+
+	test("the entry: the built fee and chain pair, the primary by id, the active profile, the FPC row", async () => {
+		vi.useFakeTimers({ now: NOW, toFake: ["Date"] })
+		try {
+			const { executor, deps, built } = snapshotHarness()
+			const result = await executor.estimateOperationFee(makeAztecOp(), FPC_SETTINGS as never)
+			const fingerprint = fingerprintOperation({
+				networkId: "net-1",
+				accountAddress: "0xacct",
+				executionMode: "standard",
+				from: "0xacct",
+				actions: [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }],
+				fee: {},
+				feeSettings: FPC_SETTINGS as never,
+			})
+			expect(stashed(deps)).toStrictEqual([
+				[
+					result.estimateId,
+					{
+						fingerprint,
+						accountAddress: "0xacct",
+						networkId: "net-1",
+						feeSettings: FPC_SETTINGS,
+						profileId: "p-active",
+						chainIdentity: { l1ChainId: 1, rollupVersion: 6 },
+						baseFeeFingerprint: "7:11",
+						primaryEndpointId: "ep2",
+						primaryEndpointUrl: "https://primary",
+						pendingHashes: [],
+						fpcIdentity: { id: "fpc-1", type: 2, address: "0xfpc", chainId: 7, isProtocol: true },
+						txRequest: built.txRequest,
+						initializesAccount: true,
+						nonce: built.nonce,
+						feePaymentMethod: built.feePaymentMethod,
+						txCalls: built.txCalls,
+						pendingPublicAuthwits: built.pendingPublicAuthwits,
+						discoveredHashes: [],
+						builtAt: NOW,
+					},
+				],
+			])
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("an fpc entry: a pending tx that lands during the FPC read is in the snapshot", async () => {
+		const pending: { hash: string }[] = [{ hash: "0xpending" }]
+		const { executor, deps } = snapshotHarness({
+			getPendingForAccount: vi.fn(() => [...pending]),
+			getFpcInfo: vi.fn(async () => {
+				pending.push({ hash: "0xraced" })
+				return { id: "fpc-1", type: 2, address: "0xfpc", chainId: 7, isProtocol: true } as never
+			}),
+		})
+		await executor.estimateOperationFee(makeAztecOp(), FPC_SETTINGS as never)
+		expect((stashed(deps)[0][1] as { pendingHashes: string[] }).pendingHashes).toEqual(["0xpending", "0xraced"])
+	})
+
+	test("an fj entry reads no FPC row and carries no fpcIdentity", async () => {
+		const { executor, deps } = snapshotHarness()
+		await executor.estimateOperationFee(makeAztecOp(), { paymentMethod: { kind: "fj" } } as never)
+		expect(deps.getFpcInfo).not.toHaveBeenCalled()
+		expect((stashed(deps)[0][1] as { fpcIdentity?: unknown }).fpcIdentity).toBeUndefined()
+	})
+
+	const payload = (feeOptions: object, args: unknown[] = []) => ({
+		planner: {
+			processAztecJsPayload: vi.fn(async () => ({
+				actions: [{ kind: "call", contract: "0xc", method: "dapp_method", args }],
+				feePaymentMethod: undefined,
+				feeOptions,
+			})),
+		} as never,
+	})
+
+	test.each([
+		["send_transaction", () => ({ kind: "send_transaction", networkId: "net-1", accountAddress: "0xacct", actions: [] }), {}, "fj"],
+		["default_entrypoint (not embedded)", () => makeAztecOp({ executionMode: "default_entrypoint" }), {}, "fj"],
+		["a detected embedded fee", () => makeAztecOp(), payload({ embeddedFeePayment: "fpc" }), "fj"],
+		["a dApp maxFeesPerGas", () => makeAztecOp(), payload({ maxFeesPerGas: { feePerDaGas: 5, feePerL2Gas: 6 } }), "fj"],
+		["the fjwc kind", () => makeAztecOp(), {}, "fjwc"],
+		["the embedded kind", () => makeAztecOp(), {}, "embedded"],
+		["a non-fingerprintable operation", () => makeAztecOp(), payload({}, [() => 1]), "fj"],
+	])("%s: no stash, no profile read", async (_label, makeOp, overrides, kind) => {
+		const { executor, deps } = snapshotHarness(overrides as never)
+		const result = await executor.estimateOperationFee(makeOp() as never, { paymentMethod: { kind } } as never)
+		expect(result.estimateId).toBeUndefined()
+		expect(deps.operationEstimateReuse.stash).not.toHaveBeenCalled()
+		expect(deps.getActiveProfile).not.toHaveBeenCalled()
+	})
+
+	test("eligibility control: a plain fj aztec_sendTx stashes", async () => {
+		const { executor, deps } = snapshotHarness()
+		const result = await executor.estimateOperationFee(makeAztecOp(), { paymentMethod: { kind: "fj" } } as never)
+		expect(result.estimateId).toBeDefined()
+		expect(deps.operationEstimateReuse.stash).toHaveBeenCalledTimes(1)
+	})
+
+	test("a dangling primaryEndpointId: no stash, no profile read, nothing logged", async () => {
+		const { executor, deps } = snapshotHarness({}, { ...PRIMARY_SECOND, primaryEndpointId: "ep9" })
+		const result = await executor.estimateOperationFee(makeAztecOp(), { paymentMethod: { kind: "fj" } } as never)
+		expect(result.estimateId).toBeUndefined()
+		expect(deps.getActiveProfile).not.toHaveBeenCalled()
+		expect(deps.logDebug).not.toHaveBeenCalledWith("estimateOperationFee: cache write skipped", expect.anything())
+	})
+
+	test("no endpoints array: the skip line carries the lookup's TypeError", async () => {
+		const { executor, deps } = snapshotHarness({}, { id: "net-1", chainId: 7, primaryEndpointId: "ep2" })
+		const result = await executor.estimateOperationFee(makeAztecOp(), { paymentMethod: { kind: "fj" } } as never)
+		expect(result.estimateId).toBeUndefined()
+		expect(deps.logDebug).toHaveBeenCalledWith("estimateOperationFee: cache write skipped", expect.any(TypeError))
+	})
+
+	test("no active profile: no stash and no log", async () => {
+		const { executor, deps } = snapshotHarness({ getActiveProfile: vi.fn(async () => undefined) })
+		const result = await executor.estimateOperationFee(makeAztecOp(), { paymentMethod: { kind: "fj" } } as never)
+		expect(result.estimateId).toBeUndefined()
+		expect(deps.operationEstimateReuse.stash).not.toHaveBeenCalled()
+		expect(deps.logDebug).not.toHaveBeenCalledWith("estimateOperationFee: cache write skipped", expect.anything())
+	})
+})
+
+describe("DappSendExecutor: the journal title thunk and the offchain output", () => {
+	const NO_FROM = (overrides: Record<string, unknown> = {}) =>
+		makeAztecOp({ executionMode: "default_entrypoint", feeSettings: { paymentMethod: { kind: "embedded" } }, ...overrides })
+
+	test.each([
+		["standard", false],
+		["NO_FROM", true],
+	])("%s: the claimed title per call list", async (_label, noFrom) => {
+		collectOffchainEffectsMock.mockReturnValue([])
+		const cases: Array<[unknown, unknown]> = [
+			[undefined, undefined],
+			[[], undefined],
+			[[{ name: "claim_and_end_setup" }, { name: "claim_public" }], [{ method: "claim_public" }]],
+			[[{ name: "dapp_method" }], [{ method: "dapp_method" }]],
+		]
+		for (const [calls, expected] of cases) {
+			const { executor, deps } = makeHarness()
+			const exec = calls === undefined ? {} : { calls }
+			const op = noFrom ? NO_FROM({ exec }) : makeAztecOp({ exec })
+			await executor.executeAztecSendTx(op, ORIGIN, undefined, undefined, FENCE)
+			expect((deps.lane.claimOrCreateJournal as ReturnType<typeof vi.fn>).mock.calls[0]?.[3]).toStrictEqual(expected)
+		}
+	})
+
+	test.each([
+		["standard", false, 0],
+		["NO_FROM", true, 1],
+	])("%s: the call list is read for the title only after acquireSlot", async (_label, noFrom, readsBeforeSlot) => {
+		collectOffchainEffectsMock.mockReturnValue([])
+		const trace: string[] = []
+		const { executor, deps } = makeHarness()
+		const acquire = deps.lane.acquireSlot as ReturnType<typeof vi.fn>
+		const original = acquire.getMockImplementation() as (...a: unknown[]) => Promise<unknown>
+		acquire.mockImplementation(async (...a: unknown[]) => {
+			trace.push("acquireSlot")
+			return original(...a)
+		})
+		const exec = {}
+		Object.defineProperty(exec, "calls", {
+			get() {
+				trace.push("calls")
+				return [{ name: "dapp_method" }]
+			},
+		})
+		await executor.executeAztecSendTx(noFrom ? NO_FROM({ exec }) : makeAztecOp({ exec }), ORIGIN, undefined, undefined, FENCE)
+		// NO_FROM's opening debug line counts the calls once before it enqueues.
+		expect(trace.indexOf("acquireSlot")).toBe(readsBeforeSlot)
+	})
+
+	test.each([
+		["standard", false],
+		["NO_FROM", true],
+	])("%s: the offchain output is extracted at the anchor timestamp, as a bigint", async (_label, noFrom) => {
+		collectOffchainEffectsMock.mockReturnValue([])
+		extractOffchainOutputSpy.mockClear()
+		const effects: unknown[] = []
+		const provedTx = {
+			publicInputs: { constants: { anchorBlockHeader: { globalVariables: { timestamp: 5 } } } },
+			getOffchainEffects: () => effects,
+		}
+		const proveAndSend = vi.fn(async (ctx: { wantOffchainOutput?: (p: unknown) => unknown }) => ({
+			txHash: { toString: () => "0xhash" },
+			offchainOutput: ctx.wantOffchainOutput?.(provedTx),
+		}))
+		const h = makeHarness()
+		Object.assign(h.deps.coordinator, { proveAndSend })
+		await h.executor.executeAztecSendTx(noFrom ? NO_FROM() : makeAztecOp(), ORIGIN, undefined, undefined, FENCE)
+		expect(extractOffchainOutputSpy.mock.calls).toStrictEqual([[effects, 5n]])
+	})
+})
+
+describe("DappSendExecutor: each estimate cancel checkpoint", () => {
+	const expectCancelled = async (pending: Promise<unknown>) => {
+		const error = await pending.catch((e: unknown) => e)
+		expect(error).toBeInstanceOf(JobCancelledSentinel)
+		expect((error as JobCancelledSentinel).jobId).toBe("")
+	}
+
+	test("operation estimate, pre-aborted: nothing runs", async () => {
+		const { executor, deps } = makeHarness()
+		const controller = new AbortController()
+		controller.abort()
+		await expectCancelled(executor.estimateOperationFee(makeAztecOp(), { paymentMethod: { kind: "fj" } } as never, controller.signal))
+		expect(deps.captureExecutionFence).not.toHaveBeenCalled()
+	})
+
+	test("operation estimate, abort during the payload parse: no build", async () => {
+		const controller = new AbortController()
+		const { executor, buildAndEstimateFolded, buildAndEstimateValidated } = makeHarness({
+			planner: {
+				processAztecJsPayload: vi.fn(async () => {
+					controller.abort()
+					return { actions: [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }], feeOptions: {} }
+				}),
+			} as never,
+		})
+		await expectCancelled(executor.estimateOperationFee(makeAztecOp(), { paymentMethod: { kind: "fj" } } as never, controller.signal))
+		expect(buildAndEstimateFolded).not.toHaveBeenCalled()
+		expect(buildAndEstimateValidated).not.toHaveBeenCalled()
+	})
+
+	test("operation estimate, abort during the build: no sponsor probe, no stash", async () => {
+		const controller = new AbortController()
+		const { executor, deps, built, buildAndEstimateFolded } = makeHarness()
+		const gasSettings = new GasSettings(new Gas(100, 200), new Gas(10, 20), new GasFees(2n, 3n), new GasFees(0n, 0n))
+		Object.assign(built, {
+			txRequest: { authWitnesses: [], txContext: { gasSettings } },
+			sponsor: { fpcId: "fpc-9", address: AztecAddress.fromNumberUnsafe(0x5f) },
+		})
+		buildAndEstimateFolded.mockImplementation(async () => {
+			controller.abort()
+			return built
+		})
+		const fpc = { paymentMethod: { kind: "fpc", fpcId: "fpc-9" } } as never
+		await expectCancelled(executor.estimateOperationFee(makeAztecOp({ feeSettings: fpc }), fpc, controller.signal))
+		expect(deps.readPublicStorageOnce).not.toHaveBeenCalled()
+		expect(deps.operationEstimateReuse.stash).not.toHaveBeenCalled()
+	})
+
+	test("discovery estimator, abort during discovery: no build", async () => {
+		const controller = new AbortController()
+		const { executor, deps } = makeHarness({
+			authwit: {
+				discoverPrivateAuthwits: vi.fn(async () => {
+					controller.abort()
+					return { actions: [], discovered: [] }
+				}),
+			},
+		})
+		const op = { kind: "send_transaction", networkId: "net-1", accountAddress: "0xacct", actions: [] } as never
+		await expectCancelled(executor.estimateOperationFee(op, { paymentMethod: { kind: "fjwc" } } as never, controller.signal))
+		expect(deps.buildAndEstimateValidated).not.toHaveBeenCalled()
+	})
+
+	const NO_FROM = () => makeAztecOp({ executionMode: "default_entrypoint", feeSettings: { paymentMethod: { kind: "embedded" } } })
+	const PREVIEW = { interactionId: "i-1", index: 0 }
+
+	test("NO_FROM preview, pre-aborted: nothing runs", async () => {
+		const { executor, deps } = makeHarness()
+		const controller = new AbortController()
+		controller.abort()
+		await expectCancelled(executor.previewOperationAuthwits(NO_FROM(), PREVIEW as never, controller.signal))
+		expect(deps.captureExecutionFence).not.toHaveBeenCalled()
+	})
+
+	test("NO_FROM preview, abort during the build: no discovery", async () => {
+		const controller = new AbortController()
+		const { executor, deps, built, pxe } = makeHarness()
+		;(deps.txBuilder.buildNoFrom as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+			controller.abort()
+			return built
+		})
+		await expectCancelled(executor.previewOperationAuthwits(NO_FROM(), PREVIEW as never, controller.signal))
+		expect(pxe.simulateTx).not.toHaveBeenCalled()
+	})
+
+	test("NO_FROM preview, abort during discovery: no snapshot", async () => {
+		collectOffchainEffectsMock.mockReturnValue([])
+		const controller = new AbortController()
+		const { executor, deps, pxe } = makeHarness()
+		const stash = vi.spyOn(deps.previewSnapshots, "stash")
+		pxe.simulateTx.mockImplementationOnce(async () => {
+			controller.abort()
+			return { privateExecutionResult: {} }
+		})
+		await expectCancelled(executor.previewOperationAuthwits(NO_FROM(), PREVIEW as never, controller.signal))
+		expect(stash).not.toHaveBeenCalled()
 	})
 })
