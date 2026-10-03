@@ -108,7 +108,12 @@ The json surface also runs the call-shape probe: in the extension page, `getCurr
 
 ## Results
 
-_Filled at the end of the build._
+- **Red, then green.** Row 2 failed against both unchanged windows (`remove(undefined)`); rows 1 and 3 passed. With the fix all six rows pass. The tests and the fix landed together in `2f0ea1ec`.
+- **Mutants:** 8 of 8 killed, and again after the round-1 test edits.
+- **Gates:** `lint`, `typecheck:all`, `test:all`, `test:ci-gating` and `audit:vue` pass at `2f0ea1ec`. The round-1 commit `a210edfe` touches only the two test files, which pass and lint clean.
+- **Shots,** base `4a60ce05` against `2f0ea1ec` (the build sources are the same at `a210edfe`): 8 of 8 identical, and 8 of 8 identical in the `--stability` run.
+- **Call-shape probe:** `getCurrent(cb)` and `getCurrent(undefined, cb)` reported the same window id with no `lastError` on Chrome 152 and Firefox 153, at both builds.
+- **Code review (Codex):** round 1 REVISE with two test-file findings, both adopted (`a210edfe`); round 2 CONVERGED.
 
 ## Delivery
 
@@ -125,4 +130,19 @@ Both findings adopted:
 
 ### Route 2: the json and logger window close guard
 
-_Filled at the end of the build, with the PR-body text._
+The program plan's route-2 criteria, one by one:
+
+- **Invisible:** no pixel, copy, dApp wire code or message, or persisted byte changes. Only a window without an id behaves differently, and `getCurrent` from a window this page runs in always reports an id. The zero-diff shots of both windows prove the pixels.
+- **Strictly safer:** it only adds a refusal where today's result is wrong. `remove(undefined)` throws inside the callback and leaves the window open; now nothing is called and the window stays open. Every other path is unchanged, including the `TypeError` on a callback that receives no window.
+- **Red-then-green:** row 2 of both new test files fails against the previous files and passes now.
+- **Pre-cleared:** the program plan's Behaviour rule names this guard. dapp-windows split it into its own arc.
+
+**PR body text:**
+
+> ### Behaviour change (route 2): the json and logger windows remove only a window that has an id
+>
+> Both windows close themselves when the active profile goes away. They called `chrome.windows.remove(window.id)` unguarded; they now call `closeCurrentWindow()`, the guarded helper every other dApp window uses. The callback binding (`window`), the synchronous call from the profile event and the `TypeError` on a callback that receives no window are unchanged. The call becomes `getCurrent(undefined, cb)`, which the zero-diff run probed on the real build: the same window, no `lastError`, on Chrome and Firefox.
+>
+> - Invisible: no pixel, copy, wire or persisted byte changes. Only a window without an id behaves differently, which `getCurrent` does not report for a window a page runs in. Both windows' zero-diff shots (Chrome and Firefox, dark and light, plus a stability run) prove the pixels.
+> - Strictly safer: it only skips a `remove(undefined)` that threw and left the window open anyway.
+> - Red-then-green: the new `json/index.test.ts` and `logger/index.test.ts` fail against the previous files (a window without an id is passed to `remove`) and pass now. They also pin the removal by id inside the event and the `lastError`-path `TypeError`.
