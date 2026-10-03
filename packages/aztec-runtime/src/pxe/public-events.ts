@@ -190,7 +190,7 @@ export function _resetPublicEventMemosForTests(): void {
 }
 
 /** Strict lexicographic compare of two cursor positions. */
-function comparePositions(a: PublicEventCursor, b: PublicEventCursor): number {
+export function comparePublicPositions(a: PublicEventCursor, b: PublicEventCursor): number {
 	if (a.blockNumber !== b.blockNumber) return a.blockNumber - b.blockNumber
 	if (a.txIndexWithinBlock !== b.txIndexWithinBlock) return a.txIndexWithinBlock - b.txIndexWithinBlock
 	return a.logIndexWithinTx - b.logIndexWithinTx
@@ -349,7 +349,7 @@ function validatePageOrdering(
 			})
 			return false
 		}
-		if (prev !== undefined && comparePositions(pos, prev) <= 0) {
+		if (prev !== undefined && comparePublicPositions(pos, prev) <= 0) {
 			log?.("warn", "public-events: page is not strictly increasing (or precedes cursor) — dropping page", {
 				contract,
 				prev,

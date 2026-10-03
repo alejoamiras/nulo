@@ -218,29 +218,24 @@ export class IncomingTransferRepository {
 	// --- Cleanup ---
 
 	/** Delete every record / trust / cursor / outbox / arrival row belonging to `profileId`. Profile-delete fanout. */
-	public async clearProfile(profileId: string): Promise<void> {
-		// KEY-prefix deletion for ALL five tables — never a value-predicate. `get()` returns `undefined`
-		// for a codec-INVALID row (it KEEPS the row and logs), so a value sweep would silently SKIP it,
-		// leaving on-chain-derived data past the profile-privacy boundary (code-review #3). Record ids
-		// carry a `note:`/`pub:` kind prefix; every other table's keys start with `${profileId}|`.
-		await this.deleteKeysWhere(this.records, (key) => key.startsWith(`note:${profileId}|`) || key.startsWith(`pub:${profileId}|`))
-		await this.deleteKeysWhere(this.trust, (key) => key.startsWith(`${profileId}|`))
-		await this.deleteKeysWhere(this.cursors, (key) => key.startsWith(`${profileId}|`))
-		await this.deleteKeysWhere(this.outbox, (key) => key.startsWith(`${profileId}|`))
-		await this.deleteKeysWhere(this.arrivals, (key) => key.startsWith(`${profileId}|`))
+	public clearProfile(profileId: string): Promise<void> {
+		return this.clearScope(`${profileId}|`)
 	}
 
 	/** Delete every record / trust / cursor / outbox / arrival row belonging to `(profileId, networkId)`. Chain-purge fanout. */
-	public async clearChain(profileId: string, networkId: string): Promise<void> {
-		// Key-prefix (not value-predicate) for the same corrupt-row reason as `clearProfile`.
-		await this.deleteKeysWhere(
-			this.records,
-			(key) => key.startsWith(`note:${profileId}|${networkId}|`) || key.startsWith(`pub:${profileId}|${networkId}|`),
-		)
-		await this.deleteKeysWhere(this.trust, (key) => key.startsWith(`${profileId}|${networkId}|`))
-		await this.deleteKeysWhere(this.cursors, (key) => key.startsWith(`${profileId}|${networkId}|`))
-		await this.deleteKeysWhere(this.outbox, (key) => key.startsWith(`${profileId}|${networkId}|`))
-		await this.deleteKeysWhere(this.arrivals, (key) => key.startsWith(`${profileId}|${networkId}|`))
+	public clearChain(profileId: string, networkId: string): Promise<void> {
+		return this.clearScope(`${profileId}|${networkId}|`)
+	}
+
+	/** The five tables, in order, by key prefix and never by value: `get()` returns `undefined` for a
+	 *  codec-invalid row and keeps it, so a value sweep would leave it behind. Record ids carry a
+	 *  `note:`/`pub:` kind prefix; every other key starts with the scope. */
+	private async clearScope(prefix: string): Promise<void> {
+		await this.deleteKeysWhere(this.records, (key) => key.startsWith(`note:${prefix}`) || key.startsWith(`pub:${prefix}`))
+		await this.deleteKeysWhere(this.trust, (key) => key.startsWith(prefix))
+		await this.deleteKeysWhere(this.cursors, (key) => key.startsWith(prefix))
+		await this.deleteKeysWhere(this.outbox, (key) => key.startsWith(prefix))
+		await this.deleteKeysWhere(this.arrivals, (key) => key.startsWith(prefix))
 	}
 
 	/**

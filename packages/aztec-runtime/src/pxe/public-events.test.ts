@@ -217,6 +217,22 @@ describe("fetchPublicTokenTransferEvents — hostile-page validation", () => {
 		expect(result.dropped).toBe(true) // a DROP, not EOF — reconciliation must not treat it as complete
 	})
 
+	test.each<[string, [number, number, number], [number, number, number], boolean]>([
+		["the block decides (lower block, higher tx and log)", [5, 0, 0], [4, 9, 9], false],
+		["the tx index decides (same block, lower tx, higher log)", [5, 2, 0], [5, 1, 9], false],
+		["the log index decides (same block and tx)", [5, 1, 3], [5, 1, 2], false],
+		["equal positions", [5, 1, 3], [5, 1, 3], false],
+		["a log-index-only increase", [5, 1, 3], [5, 1, 4], true],
+	])("page ordering: %s", async (_name, [b1, t1, l1], [b2, t2, l2], kept) => {
+		const page = [
+			makeLog({ from: ADDR_A, to: ADDR_B, amount: 1n, blockNumber: b1, txIndexWithinBlock: t1, logIndexWithinTx: l1 }),
+			makeLog({ from: ADDR_A, to: ADDR_B, amount: 2n, blockNumber: b2, txIndexWithinBlock: t2, logIndexWithinTx: l2 }),
+		]
+		const result = await fetchPublicTokenTransferEvents(makeNode({ page, checkpointed: 10 }), CONTRACT, {})
+		expect(result.dropped).toBe(!kept)
+		expect(result.events).toHaveLength(kept ? 2 : 0)
+	})
+
 	test("first log at/before afterCursor is rejected (whole page dropped)", async () => {
 		const page = [makeLog({ from: ADDR_A, to: ADDR_B, amount: 1n, blockNumber: 5, txIndexWithinBlock: 0, logIndexWithinTx: 0 })]
 		const node = makeNode({ page, checkpointed: 10 })

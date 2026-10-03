@@ -74,6 +74,10 @@ type PublicEventContext = {
 	epochAtStart: number
 }
 
+type TrustScope = { profileId: string; networkId: string; accountAddress: string; contract: string }
+
+type ScopeClear = { dropsEpisode: (key: string) => boolean; evictFees: () => void; wipe: () => Promise<void> }
+
 type TrustFence = (isCurrent: () => boolean) => { live: () => boolean; kept: () => boolean }
 
 type OutboxRowKey = { profileId: string; networkId: string; accountAddress: string; tokenId: number }
@@ -444,11 +448,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		// to the active profile (otherwise we'd kill the active
 		// profile's scheduler for a same-address inactive account).
 		if (activeProfileId && account.profileId === activeProfileId) {
-			const key = this.schedulerKey(networkId, account.address)
-			const interval = this.schedulers.get(key)
-			if (interval) clearInterval(interval)
-			this.schedulers.delete(key)
-			this.watchedContracts.delete(key)
+			this.stopNoteScheduler(this.schedulerKey(networkId, account.address))
 		}
 
 		// Wipe records belonging to THIS account on THIS network.
@@ -690,7 +690,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		try {
 			const network = await this.networkService.getNetwork(networkId)
 			const tokens = await this.tokenService.getTokensRaw(profileId)
-			return tokens.some((t) => t.contract === contract && t.chainId === network.chainId)
+			return findToken(tokens, contract, network.chainId) !== undefined
 		} catch {
 			// On any lookup failure, fail CLOSED (return false) — refusing
 			// a trust flip is safer than honoring one on a contract whose
@@ -701,57 +701,49 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 
 	public async clearProfile(profileId: string): Promise<void> {
 		await this.ensureInitialized()
-		await this.withServiceLock(async () => {
-			// Bump the epoch FIRST (before any eviction or await): an off-lock getReceiptFee that started
-			// before this clear must observe the change so its post-fetch cache write is skipped — otherwise
-			// it could repopulate the cache during the repo-delete await, after we've evicted.
-			this.bumpServiceEpoch()
-			// The fee cache is keyed by networkId (not profileId), so a profile's networkIds aren't
-			// recoverable here — clear it wholesale. It's tiny (only viewed public receipts) and a stale
-			// entry is harmless anyway (its record is gone, so getReceiptFee returns null before the cache).
-			this.dropEpisodes((key) => key.startsWith(`${profileId}|`))
-			this.feeCache.clear()
-			try {
-				await this.repo.clearProfile(profileId)
-				// Lock held across the wipe AND scheduler rebuild so a queued poll
-				// can't fire between the two and repopulate state we just cleared
-				// (codex R2 H1). hydrateSchedulers bumps serviceEpoch internally
-				// so any in-flight scan whose snapshot predates this wipe bails.
-				await this.hydrateSchedulers()
-			} finally {
-				// Re-clear AFTER hydration (in finally so it's absolute even if the wipe/rebuild threw): a
-				// getReceiptFee that captured the post-first-bump epoch could have written an entry in the
-				// window before hydrate's second bump. Its record is already gone (so the entry is
-				// unreachable anyway), but sweep it to keep the map honest.
-				this.feeCache.clear()
-			}
-		})
+		// The fee cache is keyed by networkId, so a profile's entries cannot be picked out: it is cleared
+		// wholesale. It holds only viewed public receipts, and an entry whose record is gone is unreachable.
+		await this.withServiceLock(() =>
+			this.clearScopeLocked(() => ({
+				dropsEpisode: (key) => key.startsWith(`${profileId}|`),
+				evictFees: () => this.feeCache.clear(),
+				wipe: () => this.repo.clearProfile(profileId),
+			})),
+		)
 	}
 
 	public async clearChain(profileId: string, networkId: string): Promise<void> {
 		await this.ensureInitialized()
-		await this.withServiceLock(async () => {
-			// Bump the epoch FIRST (before eviction or any await) so an in-flight off-lock getReceiptFee
-			// can't repopulate the cache after we evict — see clearProfile for the full rationale.
-			this.bumpServiceEpoch()
-			// Evict this network's fee-cache entries (keyed `${networkId}|…`) so a chain purge doesn't
-			// leave them dangling for the worker's lifetime.
-			const evict = () => {
-				for (const key of this.feeCache.keys()) if (key.startsWith(`${networkId}|`)) this.feeCache.delete(key)
-			}
-			const episodePrefix = scanEpisodeNetworkPrefix(profileId, networkId)
-			this.dropEpisodes((key) => key.startsWith(episodePrefix))
-			evict()
-			try {
-				await this.repo.clearChain(profileId, networkId)
-				await this.hydrateSchedulers()
-			} finally {
-				// Re-evict AFTER hydration (in finally so it's absolute even if the wipe/rebuild threw):
-				// closes the window where a getReceiptFee holding the post-first-bump epoch wrote an
-				// (already-unreachable) entry before hydrate's second bump. See clearProfile.
-				evict()
-			}
-		})
+		await this.withServiceLock(() =>
+			this.clearScopeLocked(() => {
+				const episodePrefix = scanEpisodeNetworkPrefix(profileId, networkId)
+				return {
+					dropsEpisode: (key) => key.startsWith(episodePrefix),
+					evictFees: () => {
+						for (const key of this.feeCache.keys()) if (key.startsWith(`${networkId}|`)) this.feeCache.delete(key)
+					},
+					wipe: () => this.repo.clearChain(profileId, networkId),
+				}
+			}),
+		)
+	}
+
+	/** Wipe one scope; the caller holds the lock. The epoch is bumped before anything else, so an
+	 *  off-lock fee read that began earlier skips its cache write, and the scope is built after the
+	 *  bump. The wipe and the scheduler rebuild share the lock, so no queued poll repopulates the scope
+	 *  between them. Fees are evicted again in `finally`: a fee read holding the first bump's epoch can
+	 *  write before the rebuild's own bump. */
+	private async clearScopeLocked(scopeFor: () => ScopeClear): Promise<void> {
+		this.bumpServiceEpoch()
+		const scope = scopeFor()
+		this.dropEpisodes(scope.dropsEpisode)
+		scope.evictFees()
+		try {
+			await scope.wipe()
+			await this.hydrateSchedulers()
+		} finally {
+			scope.evictFees()
+		}
 	}
 
 	// --- arrivals ---
@@ -1035,6 +1027,13 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		})
 	}
 
+	private stopNoteScheduler(key: string): void {
+		const interval = this.schedulers.get(key)
+		if (interval) clearInterval(interval)
+		this.schedulers.delete(key)
+		this.watchedContracts.delete(key)
+	}
+
 	/** Tear down the public-event scheduler for `(networkId, contract)`. */
 	private stopPublicScheduler(networkId: string, contract: string): void {
 		const key = this.publicSchedulerKey(networkId, contract)
@@ -1222,12 +1221,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			const contracts = this.watchedContracts.get(key)
 			if (!contracts) continue
 			contracts.delete(contract)
-			if (contracts.size === 0) {
-				const interval = this.schedulers.get(key)
-				if (interval) clearInterval(interval)
-				this.schedulers.delete(key)
-				this.watchedContracts.delete(key)
-			}
+			if (contracts.size === 0) this.stopNoteScheduler(key)
 		}
 	}
 
@@ -1387,7 +1381,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 
 		// Live re-reads INSIDE the lock.
 		const tokens = await this.tokenService.getTokensRaw(profileId)
-		const token = tokens.find((t) => t.contract === contract && t.chainId === chainId)
+		const token = findToken(tokens, contract, chainId)
 		if (!token) return // Token removed concurrently.
 
 		// Re-read tx-suppression sets live. The outer-scan-loop
@@ -1408,7 +1402,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		const amountRaw = parseNoteAmount(note)
 		if (amountRaw === null) return
 
-		const trustState = await this.resolveNoteTrust(ctx, token, amountRaw)
+		const trustState = await this.resolveReceiptTrust(ctx, token, amountRaw)
 		await this.commitDiscoveredNote(ctx, note, token, amountRaw, trustState)
 	}
 
@@ -1424,40 +1418,36 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		}
 	}
 
-	/** Read trust FRESH inside the lock — kills the residual race codex audit-6
-	 *  identified (the LOCAL trustState going stale across PXE await chains in
-	 *  the prior design). First-receive: transition unknown → pending (the
-	 *  setTrust write and the trust-changed emit are one sync pair) and emit
-	 *  the pending event so the popup can prompt the user; the visibility gate
-	 *  respects the user's `incomingTransfersVisible` toggle. */
-	private async resolveNoteTrust(ctx: NoteScanContext, token: Token, amountRaw: string): Promise<IncomingTrustState> {
-		const { profileId, networkId, accountAddress, contract } = ctx
-		const liveTrust = (await this.repo.getTrust(profileId, networkId, contract))?.state ?? "unknown"
-		if (liveTrust !== "unknown") return liveTrust
+	/** Trust read inside the lock; a first receipt moves `unknown` to `pending` and prompts behind
+	 *  the visibility gate. The trust write succeeds before its emit. `standDown` is read right after
+	 *  the trust read, before the `unknown` test, and only the public arm supplies it. */
+	private resolveReceiptTrust(scope: TrustScope, token: Token, amountRaw: string): Promise<IncomingTrustState>
+	private resolveReceiptTrust(
+		scope: TrustScope,
+		token: Token,
+		amountRaw: string,
+		standDown: () => boolean,
+	): Promise<IncomingTrustState | undefined>
+	private async resolveReceiptTrust(
+		scope: TrustScope,
+		token: Token,
+		amountRaw: string,
+		standDown?: () => boolean,
+	): Promise<IncomingTrustState | undefined> {
+		const { profileId, networkId, contract } = scope
+		const trustState = (await this.repo.getTrust(profileId, networkId, contract))?.state ?? "unknown"
+		if (standDown?.()) return undefined
+		if (trustState !== "unknown") return trustState
 		const updated = await this.repo.setTrust(profileId, networkId, contract, "pending")
 		this.emit("onIncomingTrustChanged", updated)
-		if (await this.isVisibilityEnabled()) {
-			this.emit("onIncomingTransferPending", {
-				profileId,
-				networkId,
-				accountAddress,
-				contract,
-				tokenId: token.id,
-				tokenSymbol: token.symbol,
-				tokenDecimals: token.decimals,
-				amountRaw,
-			})
-		}
+		if (await this.isVisibilityEnabled()) this.emit("onIncomingTransferPending", pendingEvent(scope, token, amountRaw))
 		return "pending"
 	}
 
-	/** Same park-point discipline as the backfill branch: nothing may be
-	 *  written (outbox row, record, Added emit) after a mid-await epoch move —
-	 *  the other awaits in this CS are fast storage/config reads, and every
-	 *  DESTRUCTIVE bumper holds this lock, so the two PXE-bound awaits are the
-	 *  only revocation windows that matter. D4 write-side (both arms): the
-	 *  outbox row is written BEFORE the record — a discovered note changed the
-	 *  chain-factual balance regardless of trust/display state. */
+	/** The outbox row is written before the record: a discovered note changed the chain balance
+	 *  whatever its trust or display state. This arm re-checks the epoch only at its section's entry
+	 *  and after each timestamp read; its storage and config awaits are revocation windows too, which
+	 *  a wipe reaches only through the lock watchdog. */
 	private async commitDiscoveredNote(
 		ctx: NoteScanContext,
 		note: RawNote,
@@ -1538,22 +1528,16 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				// snapshots predate this critical section; a concurrent
 				// onTokenDeleted may have made them stale.
 				const liveTokens = await this.tokenService.getTokensRaw(profileId)
-				const token = liveTokens.find((t) => t.contract === trust.contract && t.chainId === network.chainId)
+				const token = findToken(liveTokens, trust.contract, network.chainId)
 				if (!token) return
 				const liveTrust = await this.repo.getTrust(profileId, networkId, trust.contract)
 				if (liveTrust?.state !== "pending") return
 
 				const first = scoped[0]
-				this.emit("onIncomingTransferPending", {
-					profileId,
-					networkId,
-					accountAddress,
-					contract: trust.contract,
-					tokenId: token.id,
-					tokenSymbol: token.symbol,
-					tokenDecimals: token.decimals,
-					amountRaw: first.amountRaw,
-				})
+				this.emit(
+					"onIncomingTransferPending",
+					pendingEvent({ profileId, networkId, accountAddress, contract: trust.contract }, token, first.amountRaw),
+				)
 			})
 		}
 	}
@@ -2068,17 +2052,14 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		await this.withServiceLock(() => this.commitPublicEventLocked(ctx, ev, opts))
 	}
 
-	/** The per-event locked critical section. Every awaited read in it can park
-	 *  across a watchdog handoff that admits a wipe (clearProfile/onTokenDeleted
-	 *  bump + purge); the epoch is re-checked after each read block, before any
-	 *  write — the note arm's own post-park discipline, which this newer arm
-	 *  originally lacked. */
+	/** The per-event locked critical section. Every awaited read can park across a watchdog handoff
+	 *  that admits a wipe; the epoch is re-checked after each read block, before any write. */
 	private async commitPublicEventLocked(ctx: PublicEventContext, ev: PublicTransferEvent, opts?: { reconcile?: boolean }): Promise<void> {
 		const { profileId, networkId, contract, chainId, epochAtStart } = ctx
 		if (this.serviceEpoch !== epochAtStart) return
 		const tokens = await this.tokenService.getTokensRaw(profileId)
 		if (this.serviceEpoch !== epochAtStart) return
-		const token = tokens.find((t) => t.contract === contract && t.chainId === chainId)
+		const token = findToken(tokens, contract, chainId)
 		if (!token) return // token removed concurrently
 
 		const id = publicRecordId(profileId, networkId, ev.txHash, ev.logIndexWithinTx)
@@ -2101,7 +2082,8 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		}
 
 		if (await this.isDedupedPublicEvent(ctx, ev.txHash)) return
-		const trustState = await this.resolvePublicTrust(ctx, token, ev)
+		const scope = { profileId, networkId, accountAddress: ctx.account, contract }
+		const trustState = await this.resolveReceiptTrust(scope, token, ev.amountRaw, () => this.serviceEpoch !== epochAtStart)
 		if (trustState === undefined) return
 		if (this.serviceEpoch !== epochAtStart) return
 		await this.commitPublicRecord(ctx, ev, token, trustState)
@@ -2117,36 +2099,6 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		const inflight = await this.collectInflightTxHashes(profileId, networkId, account)
 		if (inflight.has(txHash)) return true
 		return this.serviceEpoch !== ctx.epochAtStart
-	}
-
-	/** Trust read fresh inside the lock, with this arm's post-read epoch
-	 *  re-check (undefined = stand down). First-receive transitions unknown →
-	 *  pending (the setTrust write and the trust-changed emit are one sync
-	 *  pair) and emits the visibility-gated Pending event. */
-	private async resolvePublicTrust(
-		ctx: PublicEventContext,
-		token: Token,
-		ev: PublicTransferEvent,
-	): Promise<IncomingTrustState | undefined> {
-		const { profileId, networkId, contract, account } = ctx
-		const trustState = (await this.repo.getTrust(profileId, networkId, contract))?.state ?? "unknown"
-		if (this.serviceEpoch !== ctx.epochAtStart) return undefined
-		if (trustState !== "unknown") return trustState
-		const updated = await this.repo.setTrust(profileId, networkId, contract, "pending")
-		this.emit("onIncomingTrustChanged", updated)
-		if (await this.isVisibilityEnabled()) {
-			this.emit("onIncomingTransferPending", {
-				profileId,
-				networkId,
-				accountAddress: account,
-				contract,
-				tokenId: token.id,
-				tokenSymbol: token.symbol,
-				tokenDecimals: token.decimals,
-				amountRaw: ev.amountRaw,
-			})
-		}
-		return "pending"
 	}
 
 	/** D4 write-side: the outbox row is written BEFORE the record (ordering +
@@ -2437,6 +2389,24 @@ export function orphanedByReconciliation(
 	const aboveCheckpoint = record.l2BlockNumber > marker.upperBound
 	if (!aboveCheckpoint && canonicalByHeight.get(record.l2BlockNumber) === record.blockHash) return false
 	return true
+}
+
+function findToken(tokens: Token[], contract: string, chainId: number): Token | undefined {
+	return tokens.find((t) => t.contract === contract && t.chainId === chainId)
+}
+
+/** The first-receive prompt. Fields are listed, never spread: a scan context carries functions. */
+function pendingEvent(scope: TrustScope, token: Token, amountRaw: string): IncomingTransferPending {
+	return {
+		profileId: scope.profileId,
+		networkId: scope.networkId,
+		accountAddress: scope.accountAddress,
+		contract: scope.contract,
+		tokenId: token.id,
+		tokenSymbol: token.symbol,
+		tokenDecimals: token.decimals,
+		amountRaw,
+	}
 }
 
 /** Decode the UintNote amount from the parsed content map. Returns the
