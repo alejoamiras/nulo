@@ -5,6 +5,7 @@ import { createTestingPinia } from "@pinia/testing"
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { pressOn } from "../../../../../../tests/helpers/press-key"
+import { BUFFER_BINDINGS, withBuffer } from "../../../../../../tests/helpers/shipped-buffer"
 import SubPageHeader from "@/components/ui/SubPageHeader.vue"
 import { useAppStore } from "@/stores/app.store"
 import FullExportPage from "./full.vue"
@@ -395,5 +396,26 @@ describe("export/full.vue — sealed artifact", () => {
 		await vi.waitFor(() => expect(downloadFile).toHaveBeenCalledTimes(1))
 		const parsed = JSON.parse(downloadFile.mock.calls[0][0].data) as Record<string, unknown>
 		expect(parsed["active-chain-id"]).toBe(0)
+	})
+})
+
+describe.each(BUFFER_BINDINGS)("export/full.vue — encrypted file encoding (%s Buffer)", (_name, binding) => {
+	afterEach(() => vi.unstubAllGlobals())
+
+	it("downloads the sealed bytes as standard padded base64", async () => {
+		// 61 bytes of 0xfb: the encoding uses `+`, `/` and `==`.
+		const sealed = new Uint8Array(61).fill(0xfb)
+		vi.spyOn(EncryptionKey, "getPasshash").mockResolvedValue("hash" as never)
+		vi.spyOn(EncryptionKey, "fromPasshash").mockResolvedValue({ encrypt: async () => sealed } as never)
+		const wrapper = mountPage()
+		await reachBackupReady(wrapper)
+		withBuffer(binding)
+		await wrapper.find("[data-testid='protect-password-btn']").trigger("click")
+		await vi.waitFor(() => expect(wrapper.text()).toContain("Backup is successfully encrypted"))
+		await wrapper.find("[data-testid='download-backup-btn']").trigger("click")
+		await vi.waitFor(() => expect(downloadFile).toHaveBeenCalledTimes(1))
+		const { data, filename } = downloadFile.mock.calls[0][0]
+		expect(filename).toMatch(/^NuloEncryptedBackup_/)
+		expect(data).toBe(`${"+/v7".repeat(20)}+w==`)
 	})
 })

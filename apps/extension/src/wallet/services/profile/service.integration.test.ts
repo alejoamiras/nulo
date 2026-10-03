@@ -58,7 +58,8 @@ import { flushPromises } from "@vue/test-utils"
 import { ProfileService } from "./service"
 import { RESTORE_PENDING_ROOT, RestorePendingRepository } from "./restore-pending-repository"
 import { SESSION_STORAGE_ROOT, SESSION_TTL_ALARM_NAME } from "./session-manager"
-import { getMnemonic } from "@nulo/wallet-core/utils"
+import { fromBase64, getMnemonic, toBase64 } from "@nulo/wallet-core/utils"
+import { BUFFER_BINDINGS, withBuffer } from "../../../../tests/helpers/shipped-buffer"
 import { deriveMasterFromMnemonic } from "@nulo/wallet-crypto"
 
 /** Recovery words for a deterministic 32-byte entropy fill (the v2 restore pairing check
@@ -3718,4 +3719,101 @@ describe("credential rows, degraded opens and the restore stash", () => {
 			expect(allZero(entry.secret) && allZero(entry.dek)).toBe(true)
 		}, 30_000)
 	})
+})
+
+describe("byte codecs: export encoders and the lenient decodes of stored and restored secrets", () => {
+	/** 32 bytes of 0xfb: the encoding uses `+`, `/` and `=`, so alphabet and padding changes show. */
+	const FB32_B64 = "+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/s="
+	const urlSafe = (s: string) => s.replaceAll("+", "-").replaceAll("/", "_")
+	const usesAlphabetEdges = (s: string) => s.includes("+") && s.includes("/") && s.endsWith("=")
+	const profileRowKey = (id: string) => `nulo:core:profiles@${id}`
+
+	afterEach(() => vi.unstubAllGlobals())
+
+	/** A password profile created while `getRandomValues` fills 0xfb: fixed entropy, DEK and IVs. */
+	async function fixedProfile() {
+		const made = await makeService()
+		const spy = vi.spyOn(globalThis.crypto, "getRandomValues").mockImplementation(<T extends ArrayBufferView | null>(array: T): T => {
+			;(array as unknown as Uint8Array).fill(0xfb)
+			return array
+		})
+		try {
+			return { ...made, profile: await made.service.createProfile("P", "pass1234") }
+		} finally {
+			spy.mockRestore()
+		}
+	}
+
+	test("the export encoders write standard padded base64 of the stored bytes", async () => {
+		const { api, service, profile } = await fixedProfile()
+		const master = await deriveMasterFromMnemonic(await getMnemonic(new Uint8Array(32).fill(0xfb)))
+		const masterB64 = Buffer.from(master).toString("base64")
+		expect(usesAlphabetEdges(masterB64)).toBe(true)
+
+		const material = await service.exportBackupMaterial(profile.id, "pass1234")
+		expect(material).toEqual({ masterKey: masterB64, entropy: FB32_B64, importedKeysDek: FB32_B64, dekReplaced: false })
+		expect(await service.exportPlain(profile.id, "pass1234")).toBe(masterB64)
+
+		const row = JSON.parse((await api.storage.local.get())[profileRowKey(profile.id)] as string)
+		const dekSealed = row.dekSealed as string
+		expect(usesAlphabetEdges(dekSealed)).toBe(true)
+		expect(toBase64(fromBase64(dekSealed))).toBe(dekSealed)
+		expect(dekSealed).toHaveLength(84)
+		expect(fromBase64(dekSealed)[0]).toBe(0)
+	}, 30_000)
+
+	describe.each(BUFFER_BINDINGS)("%s Buffer", (_name, binding) => {
+		test.each([
+			["junk-suffixed", (s: string) => `${s}!`],
+			["URL-safe", urlSafe],
+		])(
+			"a restore whose three secrets are %s restores the canonical master",
+			async (_label, variant) => {
+				const pair = await restorePairFor(0xfb)
+				expect(usesAlphabetEdges(pair.masterKey)).toBe(true)
+				expect(pair.entropy).toBe(FB32_B64)
+				const { service } = await makeService()
+				withBuffer(binding)
+				const out = await service.restore(
+					{ id: "ignored", name: "R", type: "password" },
+					{
+						type: "password",
+						masterKey: asBase64MasterSecret(variant(pair.masterKey)),
+						entropy: variant(pair.entropy),
+						importedKeysDek: variant(FB32_B64),
+					},
+					"pass1234",
+				)
+				if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
+				expect(await service.exportPlain(out.id, "pass1234")).toBe(pair.masterKey)
+			},
+			30_000,
+		)
+
+		test("a junk-suffixed stored dekSealed still unseals the stored DEK", async () => {
+			const { api, service, profile } = await fixedProfile()
+			const key = profileRowKey(profile.id)
+			const row = JSON.parse((await api.storage.local.get())[key] as string)
+			await api.storage.local.set({ [key]: JSON.stringify({ ...row, dekSealed: `${row.dekSealed}!` }) })
+			withBuffer(binding)
+			const material = await service.exportBackupMaterial(profile.id, "pass1234")
+			expect(material.dekReplaced).toBe(false)
+			expect(material.importedKeysDek).toBe(FB32_B64)
+		}, 30_000)
+	})
+
+	test.each([
+		["master key", { masterKey: Buffer.alloc(31, 1).toString("base64") }, "Invalid master key length"],
+		["entropy", { entropy: Buffer.alloc(31, 1).toString("base64") }, "Invalid entropy length"],
+		["imported-keys DEK (absent)", { importedKeysDek: undefined }, "Invalid imported-keys dek length"],
+		["imported-keys DEK (short)", { importedKeysDek: Buffer.alloc(31, 1).toString("base64") }, "Invalid imported-keys dek length"],
+	])(
+		"a restore refuses a wrong-length %s",
+		async (_label, override, message) => {
+			const { service } = await makeService()
+			const secret = { ...(await restoreSecretFor(0xfb)), ...override } as Awaited<ReturnType<typeof restoreSecretFor>>
+			await expect(service.restore({ id: "ignored", name: "R", type: "password" }, secret, "pass1234")).rejects.toThrow(message)
+		},
+		30_000,
+	)
 })

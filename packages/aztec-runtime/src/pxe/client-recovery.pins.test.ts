@@ -46,7 +46,8 @@ describe("missing-key recovery terminal-retry pin", () => {
 	})
 
 	test("a second missing-key rejection on the retry is terminal, and the key is zeroized", async () => {
-		const key = new Uint8Array(32).fill(7)
+		// 0xfb bytes: the wire encoding uses `+`, `/` and `=`, so an alphabet or padding change shows.
+		const key = new Uint8Array(32).fill(0xfb)
 		// 1: original send → marker. 2: provision → ok. 3: retry → marker AGAIN.
 		behaviors.push(() => {
 			throw new PxeStoreKeyMissingError(`${PXE_STORE_KEY_MISSING}: no store key provisioned for profile p1`)
@@ -62,6 +63,7 @@ describe("missing-key recovery terminal-retry pin", () => {
 		await expect(client.getSenders(net)).rejects.toThrowError(`${PXE_STORE_KEY_MISSING}: still missing`)
 		// Exactly three wire calls: send, provision, single retry — never a second recovery.
 		expect(wire.map((w) => w.method)).toEqual(["getSenders", "provisionChainStoreKey", "getSenders"])
+		expect(wire[1]?.args).toEqual(["p1", "+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/s=", "gen-A"])
 		expect([...key]).toEqual(new Array(32).fill(0))
 	})
 
@@ -70,7 +72,7 @@ describe("missing-key recovery terminal-retry pin", () => {
 		// legitimate site runs before any PXE op — so a node answer that merely contains the
 		// marker crosses the port as a plain Error. Trusting the text would let a hostile node
 		// compose the key re-provision with the stale-anchor retry.
-		const provider = vi.fn(async () => ({ key: new Uint8Array(32).fill(7), generation: "gen-A" }))
+		const provider = vi.fn(async () => ({ key: new Uint8Array(32).fill(0xfb), generation: "gen-A" }))
 		behaviors.push(() => {
 			throw new Error(`${PXE_STORE_KEY_MISSING}: text planted by an upstream error`)
 		})

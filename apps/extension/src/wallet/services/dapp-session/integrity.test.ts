@@ -1,4 +1,5 @@
-import { beforeAll, describe, expect, test } from "vitest"
+import { afterEach, beforeAll, describe, expect, test, vi } from "vitest"
+import { BUFFER_BINDINGS, withBuffer } from "../../../../tests/helpers/shipped-buffer"
 import { AccessLevel } from "./service"
 import { canonicalizeDappSession, signDappSession, verifyDappSession, type SignableDappSession } from "./integrity"
 
@@ -63,5 +64,34 @@ describe("DappSession integrity (F-12)", () => {
 	test("empty or non-base64 mac → false, never throws", async () => {
 		expect(await verifyDappSession(key, row(), "")).toBe(false)
 		expect(await verifyDappSession(key, row(), "!!!not-base64!!!")).toBe(false)
+	})
+})
+
+describe.each(BUFFER_BINDINGS)("stored-MAC decode is lenient (%s Buffer)", (_name, binding) => {
+	afterEach(() => vi.unstubAllGlobals())
+
+	/** A fixed key and the first row whose MAC uses `+`, `/` and `=`, so each variant below differs
+	 *  from the canonical string. */
+	async function fixture(): Promise<{ fixedKey: CryptoKey; signed: SignableDappSession; mac: string }> {
+		const raw = new Uint8Array(32).map((_, i) => i * 7 + 1)
+		const fixedKey = await crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"])
+		for (let i = 0; i < 64; i++) {
+			const signed = row({ id: `s${i}` })
+			const mac = await signDappSession(fixedKey, signed)
+			if (mac.includes("+") && mac.includes("/") && mac.endsWith("=")) return { fixedKey, signed, mac }
+		}
+		throw new Error("no fixture MAC uses + / and =")
+	}
+
+	test("junk, URL-safe, unpadded and whitespace-split MACs still verify; junk bytes do not", async () => {
+		const { fixedKey, signed, mac } = await fixture()
+		withBuffer(binding)
+		expect(await verifyDappSession(fixedKey, signed, mac)).toBe(true)
+		expect(await verifyDappSession(fixedKey, signed, `${mac}!`)).toBe(true)
+		expect(await verifyDappSession(fixedKey, signed, mac.replaceAll("+", "-").replaceAll("/", "_"))).toBe(true)
+		expect(await verifyDappSession(fixedKey, signed, mac.replace(/=+$/, ""))).toBe(true)
+		expect(await verifyDappSession(fixedKey, signed, `${mac.slice(0, 20)} \n${mac.slice(20)}`)).toBe(true)
+		expect(await verifyDappSession(fixedKey, signed, "")).toBe(false)
+		expect(await verifyDappSession(fixedKey, signed, "!!!not-base64!!!")).toBe(false)
 	})
 })

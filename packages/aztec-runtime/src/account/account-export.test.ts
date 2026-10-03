@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { GrumpkinScalar } from "@aztec-labs/foundation/curves/grumpkin"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { describe, expect, test } from "vitest"
@@ -50,6 +51,28 @@ describe("account-export envelope (NULO-ACCOUNT-EXPORT v1)", () => {
 		// The claimed address recomputes from the signing key (the import-side authenticity check).
 		const recomputed = await NuloAccount.fromSigningKey(parsed.signingKey, nullLogger)
 		expect(recomputed.address.toString()).toBe(parsed.claimedAddress)
+	})
+
+	test("the checksum is lowercase hex sha256 of the canonical field pairs", () => {
+		const exp = buildAccountExport(SIGNING_KEY, L1, "0xabc")
+		const { checksum, ...body } = exp
+		const pairs = [
+			"format",
+			"version",
+			"regime",
+			"artifactSha256",
+			"classId",
+			"descriptorDigest",
+			"kdfDigest",
+			"l1ChainId",
+			"address",
+			"signingKey",
+		]
+		const reference = createHash("sha256")
+			.update(JSON.stringify(pairs.map((k) => [k, (body as Record<string, unknown>)[k]])), "utf8")
+			.digest("hex")
+		expect(checksum).toBe(reference)
+		expect(checksum).toBe("da1407172986163360ba038a04e4594032d7941b15d456143230251bac12577c")
 	})
 
 	test("the file embeds this build's frozen regime digests", () => {
