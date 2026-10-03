@@ -38,6 +38,16 @@ export function parseRawBalance(tb: BalanceLike): bigint | undefined {
 	return pub + priv
 }
 
+/** A row whose numbers cannot be trusted: a malformed side or a `decimals` outside 0..77. */
+export function isUnknownRow(tb: BalanceLike & TokenLike): boolean {
+	return isUnknownParsedRow(parseRawBalance(tb), tb)
+}
+
+/** {@link isUnknownRow} over a `raw` the caller already parsed from `tb`, so the row is read once. */
+export function isUnknownParsedRow(raw: bigint | undefined, tb: TokenLike): boolean {
+	return raw === undefined || !isValidDecimals(tb.token?.decimals)
+}
+
 export type FiatOf<T extends BalanceLike & TokenLike = BalanceLike & TokenLike> = (tb: T) => bigint | undefined
 
 /**
@@ -47,7 +57,7 @@ export type FiatOf<T extends BalanceLike & TokenLike = BalanceLike & TokenLike> 
  */
 export function safeFiatOf<T extends BalanceLike & TokenLike>(fiatOf: FiatOf<T>): FiatOf<T> {
 	return (tb) => {
-		if (parseRawBalance(tb) === undefined || !isValidDecimals(tb.token?.decimals)) return undefined
+		if (isUnknownRow(tb)) return undefined
 		try {
 			return fiatOf(tb)
 		} catch {

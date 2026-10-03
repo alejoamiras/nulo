@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest"
-import { HOME_TOKEN_ROWS, type OrderableRow, capTokenRows, classifyRow, forChain, orderTokenRows } from "./token-order"
+import { effect, reactive, stop } from "vue"
+import { HOME_TOKEN_ROWS, type OrderableRow, capTokenRows, classifyRow, forChain, isActiveScopeRow, orderTokenRows } from "./token-order"
 
 const row = (symbol: string, over: Partial<OrderableRow> & { contract?: string; name?: string; chainId?: number } = {}): OrderableRow => ({
 	token: {
@@ -117,5 +118,75 @@ describe("forChain", () => {
 		const rows = [row("A", { chainId: 1 }), row("B", { chainId: 2 })]
 		expect(forChain(rows, 1).map((r) => r.token.symbol)).toEqual(["A"])
 		expect(forChain(rows, undefined)).toEqual([])
+	})
+})
+
+describe("classifyRow — row reads", () => {
+	test("a row without a token throws before its numbers are judged", () => {
+		expect(() => classifyRow({ publicBalance: "1" } as unknown as OrderableRow, ctx({}))).toThrow(TypeError)
+	})
+
+	test("a held row's balance properties are read twice", () => {
+		const reads = { pub: 0, priv: 0 }
+		const counted = {
+			get publicBalance() {
+				reads.pub++
+				return "5"
+			},
+			get privateBalance() {
+				reads.priv++
+				return "0"
+			},
+			token: row("C").token,
+		} as OrderableRow
+		expect(classifyRow(counted, ctx({}))).toBe("held-unpriced")
+		expect(reads).toEqual({ pub: 2, priv: 2 })
+	})
+})
+
+describe("isActiveScopeRow", () => {
+	type Live = { account?: { address: string } | null; network?: { chainId: number } | null }
+	type Row = { account?: unknown; token?: { chainId?: unknown } | null }
+	/** The inline predicate every consumer carried before it had a name. */
+	const reference = (live: Live, tb: Row) => tb.account === live.account?.address && tb.token?.chainId === live.network?.chainId
+	const live = (): Live => ({ account: { address: "0xa" }, network: { chainId: 1 } })
+
+	test.each([
+		["match", live(), { account: "0xa", token: { chainId: 1 } }, true],
+		["account mismatch", live(), { account: "0xb", token: { chainId: 1 } }, false],
+		["chain mismatch", live(), { account: "0xa", token: { chainId: 2 } }, false],
+		["no token", live(), { account: "0xa" }, false],
+		["no network and no token", { account: { address: "0xa" }, network: null }, { account: "0xa" }, true],
+		["chain coerced, account matching", live(), { account: "0xa", token: { chainId: "1" } }, false],
+		["account coerced, chain matching", live(), { account: { toString: (): string => "0xa" }, token: { chainId: 1 } }, false],
+	] as const)("%s", (_name, l, tb, expected) => {
+		expect(isActiveScopeRow(l, tb)).toBe(expected)
+		expect(reference(l, tb)).toBe(expected)
+	})
+
+	test("it tracks the network only once the account matches, like the inline predicate", () => {
+		const state = reactive(live())
+		const foreign = { account: "0xb", token: { chainId: 1 } }
+		const own = { account: "0xa", token: { chainId: 1 } }
+		for (const check of [isActiveScopeRow, reference]) {
+			let runs = 0
+			const onForeign = effect(() => {
+				runs++
+				check(state, foreign)
+			})
+			;(state.network as { chainId: number }).chainId++
+			state.network = { chainId: 7 }
+			expect(runs).toBe(1)
+			stop(onForeign)
+
+			let ownRuns = 0
+			const onOwn = effect(() => {
+				ownRuns++
+				check(state, own)
+			})
+			;(state.network as { chainId: number }).chainId++
+			expect(ownRuns).toBe(2)
+			stop(onOwn)
+		}
 	})
 })

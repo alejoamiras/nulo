@@ -16,12 +16,13 @@ import { PriceServiceClient } from "@/wallet/services/price/client"
 /** Utils */
 import { stringCompare } from "@/utils/string"
 import { parseRawBalance, safeFiatOf } from "@/utils/token-amount"
-import { forChain, orderTokenRows } from "@/utils/token-order"
+import { orderTokenRows } from "@/utils/token-order"
 import { capHomeSlots, defaultKey, homeSlots, isDefaultPending } from "./home-slots"
 
 /** Composables */
 import { usePinnedTokens, pinScopeOf } from "@/composables/usePinnedTokens"
 import { usePrices } from "@/composables/usePrices"
+import { useTokenBalanceSnapshot } from "@/composables/useTokenBalanceSnapshot"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -187,47 +188,51 @@ function onTaskDeleted(task) {
 	}
 }
 
+// `scopeGen` identifies the current (account, network) scope. The watcher bumps it SYNCHRONOUSLY (before
+// any await) on every scope change; every snapshot captures it at request and drops if it changed by the
+// time it resolves. This closes the A→B→A cycle where an old scope's in-flight snapshot would otherwise
+// pass a bare equality check after the user switched back.
+let scopeGen = 0
+const withTaskFlags = (tb) => ({
+	...tb,
+	isUpdating: tasks.value.some((t) => t.content.tbId === tb.id && !t.finishedAt),
+	isMinting: tasks.value.some((t) => t.content.name === tb.token.name && t.content.symbol === tb.token.symbol && !t.finishedAt),
+})
+
 const tokenBalanceService = new TokenBalanceServiceClient()
+const {
+	fetchTokenBalances,
+	markDirty,
+	inActiveScope,
+	onBalanceUpdated,
+	dispose: disposeBalances,
+} = useTokenBalanceSnapshot({
+	client: tokenBalanceService,
+	live: appStore,
+	rows: tokenBalances,
+	state: balancesState,
+	scopeFence: () => {
+		const atStart = scopeGen
+		return () => scopeGen === atStart
+	},
+	mapRow: withTaskFlags,
+})
 tokenBalanceService.onTokenBalanceAdded.add(onBalanceAdded)
 tokenBalanceService.onTokenBalanceUpdated.add(onBalanceUpdated)
 tokenBalanceService.onTokenBalanceDeleted.add(onBalanceDeleted)
-// A snapshot in flight is older than any event that lands meanwhile: the event marks it stale and
-// the fetch refetches instead of overwriting the event's row with its own older answer.
-let fetchDirty = false
-// The balance service fans a shared address's rows out from every chain; only the active one counts.
-const inActiveScope = (tb) => tb.account === appStore.account?.address && tb.token?.chainId === appStore.network?.chainId
 function onBalanceAdded(tb) {
 	if (!inActiveScope(tb)) return
-	fetchDirty = true
+	markDirty()
 	if (tokenBalances.value.some((_tb) => _tb.id === tb.id)) return
 
-	tokenBalances.value.push({
-		...tb,
-		isUpdating: tasks.value.some((t) => t.content.tbId === tb.id && !t.finishedAt),
-		isMinting: tasks.value.some((t) => t.content.name === tb.token.name && t.content.symbol === tb.token.symbol && !t.finishedAt),
-	})
-}
-function onBalanceUpdated(tb) {
-	if (inActiveScope(tb)) fetchDirty = true
-	const idx = tokenBalances.value.findIndex((_tb) => _tb.id === tb.id)
-	if (idx !== -1) {
-		tokenBalances.value[idx] = tb
-	}
+	tokenBalances.value.push(withTaskFlags(tb))
 }
 function onBalanceDeleted(tb) {
-	if (inActiveScope(tb)) fetchDirty = true
+	if (inActiveScope(tb)) markDirty()
 	const idx = tokenBalances.value.findIndex((_tb) => _tb.id === tb.id)
 	if (idx !== -1) {
 		tokenBalances.value.splice(idx, 1)
 	}
-}
-// The first connect is the one the mount's fetch opened. A later one is a port drop: events may
-// have been missed and the request in flight was rejected, so resnapshot.
-let balanceConnectsSeen = 0
-tokenBalanceService.onConnected.add(onBalancesReconnected)
-function onBalancesReconnected() {
-	balanceConnectsSeen++
-	if (balanceConnectsSeen > 1) void fetchTokenBalances()
 }
 
 const journalService = new OperationJournalServiceClient()
@@ -259,11 +264,6 @@ async function fetchTokenImports() {
 	}
 }
 
-// `scopeGen` identifies the current (account, network) scope. The watcher bumps it SYNCHRONOUSLY (before
-// any await) on every scope change; every snapshot captures it at request and drops if it changed by the
-// time it resolves. This closes the A→B→A cycle where an old scope's in-flight snapshot would otherwise
-// pass a bare equality check after the user switched back.
-let scopeGen = 0
 let isUnmounted = false
 
 function refreshBalances() {
@@ -273,46 +273,6 @@ function refreshBalances() {
 function retryDefault(entry) {
 	retriedDefaults.value.add(defaultKey(entry))
 	emit("retry-seed", entry)
-}
-
-/** A rejected snapshot is retried once on a timer; after that a reconnect or a scope change retries. */
-const BALANCES_RETRY_MS = 2_000
-let balancesRetryTimer
-let fetchGeneration = 0
-const withTaskFlags = (tb) => ({
-	...tb,
-	isUpdating: tasks.value.some((t) => t.content.tbId === tb.id && !t.finishedAt),
-	isMinting: tasks.value.some((t) => t.content.name === tb.token.name && t.content.symbol === tb.token.symbol && !t.finishedAt),
-})
-
-// Only the latest request may land, a snapshot overtaken by a live event is refetched rather than
-// applied, and a refetch within a scope keeps the rows already shown (the watcher clears them on a
-// scope change). A rejection never reads as an empty list: the state stays short of `loaded`.
-async function fetchTokenBalances(isTimedRetry = false) {
-	const scopeAtStart = scopeGen
-	const generation = ++fetchGeneration
-	clearTimeout(balancesRetryTimer)
-	fetchDirty = false
-	const address = appStore.account?.address
-	const chainId = appStore.network?.chainId
-	if (!address) {
-		tokenBalances.value = []
-		balancesState.value = "loaded"
-		return
-	}
-	let fetched
-	try {
-		fetched = await tokenBalanceService.getTokenBalances(undefined, address)
-	} catch {
-		if (scopeGen !== scopeAtStart || generation !== fetchGeneration) return
-		if (balancesState.value !== "loaded") balancesState.value = "unavailable"
-		if (!isTimedRetry) balancesRetryTimer = setTimeout(() => void fetchTokenBalances(true), BALANCES_RETRY_MS)
-		return
-	}
-	if (scopeGen !== scopeAtStart || generation !== fetchGeneration) return
-	if (fetchDirty) return fetchTokenBalances()
-	tokenBalances.value = forChain(fetched, chainId).map(withTaskFlags)
-	balancesState.value = "loaded"
 }
 
 /** Resnapshot the task list for the ACTIVE scope. Runs on mount, scope changes, and TaskService
@@ -391,9 +351,8 @@ onBeforeUnmount(() => {
 	isUnmounted = true
 	scopeGen++
 	clearTimeout(ghostTimer)
-	clearTimeout(balancesRetryTimer)
 	taskService.disconnect()
-	tokenBalanceService.onConnected.remove(onBalancesReconnected)
+	disposeBalances()
 	tokenBalanceService.disconnect()
 	journalService.disconnect()
 	prices.dispose()

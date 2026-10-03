@@ -5,7 +5,7 @@
  */
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
-import { nextTick } from "vue"
+import { effect, nextTick, stop } from "vue"
 import { createAppStoreHarness } from "../../../../tests/helpers/app-store-harness"
 import { installChromeStorage } from "../../../../tests/helpers/chrome-storage-mock"
 import { TESTNET_TOKENS } from "@/wallet/services/token/default-tokens"
@@ -307,5 +307,56 @@ describe("SelectTokenPopup", () => {
 		H.balanceUpdated.emit({ ...row(1, "A"), token: { ...row(1, "A").token, symbol: "A2" }, account: OTHER_ACCOUNT })
 		await nextTick()
 		expect(rowSymbols(wrapper)).toEqual(["A", "MINE"])
+	})
+})
+
+describe("SelectTokenPopup — the scope predicate", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		installChromeStorage()
+		for (const ev of [H.balanceAdded, H.balanceUpdated, H.balanceDeleted, H.balanceConnected, H.quotesUpdated, H.priceConnected])
+			ev.clear()
+		H.quotes.current = {}
+		H.store.current = createAppStoreHarness()
+		H.store.current.profile = { id: "p1" }
+		H.store.current.account = { address: ACCOUNT }
+		H.store.current.network = { id: "net-main", chainId: CHAIN }
+	})
+
+	test("an update for a listed id that moved to another chain is not applied", async () => {
+		const wrapper = await mountOpen([row(1, "A")])
+		H.balanceUpdated.emit({ ...row(1, "A"), token: { ...row(1, "A").token, symbol: "A2", chainId: CHAIN + 1 } })
+		await nextTick()
+		expect(rowSymbols(wrapper)).toEqual(["A"])
+	})
+
+	test("a profile-only switch while open does not reload the list", async () => {
+		await mountOpen([row(1, "A")])
+		expect(H.getTokenBalances).toHaveBeenCalledTimes(1)
+		H.store.current.profile = { id: "p-other" }
+		await flushPromises()
+		expect(H.getTokenBalances).toHaveBeenCalledTimes(1)
+	})
+
+	test("the scope check reads the network only once the account matches", async () => {
+		await mountOpen([row(1, "A")])
+		let runs = 0
+		const foreign = effect(() => {
+			runs++
+			H.balanceUpdated.emit(row(9, "X", { account: OTHER_ACCOUNT }))
+		})
+		;(H.store.current.network as { chainId: number }).chainId = CHAIN + 7
+		H.store.current.network = { id: "net-main", chainId: CHAIN + 7 }
+		expect(runs).toBe(1)
+		stop(foreign)
+
+		let ownRuns = 0
+		const own = effect(() => {
+			ownRuns++
+			H.balanceUpdated.emit(row(8, "Y"))
+		})
+		;(H.store.current.network as { chainId: number }).chainId = CHAIN + 8
+		expect(ownRuns).toBe(2)
+		stop(own)
 	})
 })

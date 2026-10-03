@@ -126,8 +126,9 @@ vi.mock("@/utils/hero-ruler", () => ({
 	rulerWidth: (el: Element, scale: number) => standInWidth(el.textContent ?? "") * scale,
 }))
 
-import { nextTick } from "vue"
+import { effect, nextTick, stop } from "vue"
 import { CHAIN_IDS } from "@/utils/chain-ids"
+import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
 import { useAppStore } from "@/stores/app.store"
 import BalanceView from "./BalanceView.vue"
 
@@ -913,5 +914,201 @@ describe("BalanceView — an arrival on Home", () => {
 		wrapper.unmount()
 		expect(cancel).toHaveBeenCalledTimes(1)
 		expect(vi.getTimerCount()).toBe(0)
+	})
+})
+
+describe("BalanceView — the balance snapshot's fences", () => {
+	const CAP_MS = 12_000
+	const OTHER = "0xother"
+	const amount = (w: Awaited<ReturnType<typeof mountView>>["wrapper"]) => w.find('[data-testid="balance-amount"]')
+	const isSkeleton = (w: Awaited<ReturnType<typeof mountView>>["wrapper"]) => w.find('[data-testid="balance-hero-loading"]').exists()
+	/** Every account a snapshot request named, in order. */
+	let asked: (string | undefined)[] = []
+	type Held = { resolve: (rows: typeof SEED) => void; reject: (e: unknown) => void }
+	let held: Held[] = []
+	const holdNext = () => {
+		fetchRows = (account?: string) => {
+			asked.push(account)
+			return new Promise((resolve, reject) => {
+				held.push({ resolve, reject })
+			})
+		}
+	}
+	const answer = (rows: () => Promise<typeof SEED>) => {
+		fetchRows = (account?: string) => {
+			asked.push(account)
+			return rows()
+		}
+	}
+	const reconnect = () => connectedHandler?.()
+
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+		mockQuotes = FRESH()
+		asked = []
+		held = []
+		answer(async () => SEED)
+	})
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	test("A's snapshot rejected after the switch to B arms no retry; B's figure lands", async () => {
+		holdNext()
+		const { wrapper, appStore } = await mountView()
+		appStore.account = { address: OTHER } as never
+		await flushPromises()
+		expect(asked).toEqual(["0xacct", OTHER])
+		held[0].reject(new Error("port closed"))
+		await flushPromises()
+		await vi.advanceTimersByTimeAsync(2_100)
+		expect(asked).toHaveLength(2)
+		held[1].resolve([{ ...SEED[1], account: OTHER }])
+		await flushPromises()
+		expect(isSkeleton(wrapper)).toBe(false)
+		expect(amount(wrapper).text()).toContain("$0.00")
+	})
+
+	test("a loaded total survives a rejected refetch, before and after the cap", async () => {
+		const { wrapper } = await mountView()
+		expect(amount(wrapper).text()).toContain("$1,249.82")
+		answer(() => Promise.reject(new Error("port closed")))
+		reconnect()
+		reconnect()
+		await flushPromises()
+		expect(asked).toEqual(["0xacct", "0xacct"])
+		expect(isSkeleton(wrapper)).toBe(false)
+		expect(amount(wrapper).text()).toContain("$1,249.82")
+		await vi.advanceTimersByTimeAsync(CAP_MS)
+		expect(amount(wrapper).text()).toContain("$1,249.82")
+	})
+
+	test("with no account there is no request and the total is a real $0.00", async () => {
+		const { wrapper, appStore } = await mountView()
+		appStore.account = undefined as never
+		await flushPromises()
+		expect(asked).toEqual(["0xacct"])
+		expect(amount(wrapper).text()).toContain("$0.00")
+	})
+
+	test("only an in-scope update marks a run in flight stale, displayed or not", async () => {
+		await mountView()
+		reconnect()
+		holdNext()
+		reconnect()
+		updatedHandler?.({ ...SEED[0], id: "f-chain", token: { ...SEED[0].token, chainId: CHAIN_IDS.SANDBOX } })
+		updatedHandler?.({ ...SEED[0], id: "f-account", account: OTHER })
+		answer(async () => SEED)
+		held[0].resolve(SEED)
+		await flushPromises()
+		expect(asked).toHaveLength(2)
+
+		holdNext()
+		reconnect()
+		updatedHandler?.(SEED[0])
+		answer(async () => SEED)
+		held[1].resolve(SEED)
+		await flushPromises()
+		expect(asked).toHaveLength(4)
+
+		holdNext()
+		reconnect()
+		updatedHandler?.({ ...SEED[0], id: "b-unseen" })
+		answer(async () => SEED)
+		held[2].resolve(SEED)
+		await flushPromises()
+		expect(asked).toHaveLength(6)
+	})
+
+	test("the watcher fires on an equal-address account object and an in-place chain id, not on an in-place network id", async () => {
+		const { appStore } = await mountView()
+		appStore.account = { address: "0xacct", name: "renamed" } as never
+		await flushPromises()
+		expect(asked).toHaveLength(2)
+		;(appStore.network as unknown as { chainId: number }).chainId = CHAIN_IDS.SANDBOX
+		await flushPromises()
+		expect(asked).toHaveLength(3)
+		;(appStore.network as unknown as { id: string }).id = "n-renamed"
+		await flushPromises()
+		expect(asked).toHaveLength(3)
+	})
+
+	test("unmounting mid-run: the late rejection asks nothing more, and the connect listener added is the one removed", async () => {
+		holdNext()
+		const { wrapper } = await mountView()
+		const client = vi.mocked(TokenBalanceServiceClient).mock.results.at(-1)?.value as {
+			onConnected: { add: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn> }
+		}
+		wrapper.unmount()
+		held[0].reject(new Error("port closed"))
+		await flushPromises()
+		await vi.advanceTimersByTimeAsync(2_100)
+		expect(asked).toHaveLength(1)
+		expect(client.onConnected.remove).toHaveBeenCalledWith(client.onConnected.add.mock.calls[0][0])
+	})
+
+	test("a retry armed before the unmount never fires", async () => {
+		answer(() => Promise.reject(new Error("port closed")))
+		const { wrapper } = await mountView()
+		wrapper.unmount()
+		await vi.advanceTimersByTimeAsync(2_100)
+		expect(asked).toHaveLength(1)
+	})
+
+	test("A→B→A: the first A run, answered last, never lands", async () => {
+		holdNext()
+		const { wrapper, appStore } = await mountView()
+		appStore.account = { address: OTHER } as never
+		await flushPromises()
+		appStore.account = { address: "0xacct" } as never
+		await flushPromises()
+		expect(asked).toEqual(["0xacct", OTHER, "0xacct"])
+		held[2].resolve([SEED[1]])
+		await flushPromises()
+		held[0].resolve(SEED)
+		await flushPromises()
+		expect(amount(wrapper).text()).toContain("$0.00")
+	})
+
+	test("a rejected snapshot is retried once, and the retry's own rejection arms none", async () => {
+		answer(() => Promise.reject(new Error("port closed")))
+		await mountView()
+		await vi.advanceTimersByTimeAsync(2_000)
+		expect(asked).toHaveLength(2)
+		await vi.advanceTimersByTimeAsync(4_100)
+		expect(asked).toHaveLength(2)
+	})
+
+	test("the scope check reads the network only once the account matches", async () => {
+		const { appStore } = await mountView()
+		let runs = 0
+		const foreign = effect(() => {
+			runs++
+			updatedHandler?.({ ...SEED[0], id: "x", account: OTHER })
+		})
+		;(appStore.network as unknown as { chainId: number }).chainId = 9
+		appStore.network = { id: "n1", chainId: 9 } as never
+		expect(runs).toBe(1)
+		stop(foreign)
+
+		let ownRuns = 0
+		const own = effect(() => {
+			ownRuns++
+			updatedHandler?.({ ...SEED[0], id: "y" })
+		})
+		;(appStore.network as unknown as { chainId: number }).chainId = 10
+		expect(ownRuns).toBe(2)
+		stop(own)
+	})
+
+	test("a snapshot whose request already answered lands one microtask later, ahead of a later event", async () => {
+		await mountView()
+		reconnect()
+		answer(() => Promise.resolve(SEED))
+		reconnect()
+		await Promise.resolve()
+		updatedHandler?.(SEED[0])
+		await flushPromises()
+		expect(asked).toHaveLength(2)
 	})
 })

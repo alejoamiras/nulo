@@ -6,7 +6,7 @@
  * decided before the row's numbers are parsed, so a malformed pinned row keeps its slot.
  */
 import { stringCompare } from "@/utils/string"
-import { type FiatOf, isValidDecimals, parseRawBalance } from "@/utils/token-amount"
+import { type FiatOf, isUnknownRow, parseRawBalance } from "@/utils/token-amount"
 
 /** Home's row budget AND the pin cap — one number by design. */
 export const HOME_TOKEN_ROWS = 3
@@ -35,11 +35,6 @@ const CLASS_RANK: Record<RowClass, number> = {
 	unknown: 3,
 	unsynced: 4,
 	empty: 4,
-}
-
-/** A row whose numbers cannot be trusted: a malformed side or a `decimals` outside 0..77. */
-export function isUnknownRow(tb: OrderableRow): boolean {
-	return parseRawBalance(tb) === undefined || !isValidDecimals(tb.token.decimals)
 }
 
 export function classifyRow<T extends OrderableRow>(tb: T, ctx: OrderCtx<T>): RowClass {
@@ -94,4 +89,19 @@ export function capTokenRows<T>(rows: readonly T[], budget = HOME_TOKEN_ROWS): {
 export function forChain<T extends { token: { chainId: number } }>(rows: readonly T[], chainId: number | undefined): T[] {
 	if (chainId === undefined) return []
 	return rows.filter((tb) => tb.token.chainId === chainId)
+}
+
+/** The live identity a token row is matched against; the app store itself. */
+export type LiveTokenScope = {
+	account?: { address: string } | null
+	network?: { chainId: number } | null
+}
+
+/**
+ * The event-side twin of {@link forChain}: whether a live balance row belongs to the active account
+ * on the active chain. It reads `live.network` only once the account matches, so a computed calling
+ * it tracks no network on a foreign row.
+ */
+export function isActiveScopeRow(live: LiveTokenScope, tb: { account?: unknown; token?: { chainId?: unknown } | null }): boolean {
+	return tb.account === live.account?.address && tb.token?.chainId === live.network?.chainId
 }

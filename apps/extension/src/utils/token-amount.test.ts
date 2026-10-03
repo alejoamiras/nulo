@@ -90,3 +90,28 @@ describe("safeFiatOf", () => {
 		expect(safe(row())).toBeUndefined()
 	})
 })
+
+describe("safeFiatOf — row reads", () => {
+	test("a row without a token reads as unpriced and never reaches the lookup", () => {
+		const inner = vi.fn(() => 42n)
+		expect(safeFiatOf(inner)({ publicBalance: "1", privateBalance: "0" })).toBeUndefined()
+		expect(inner).not.toHaveBeenCalled()
+	})
+
+	test("each balance property is read once before the lookup", () => {
+		const reads = { pub: 0, priv: 0 }
+		const counted = {
+			get publicBalance() {
+				reads.pub++
+				return "5"
+			},
+			get privateBalance() {
+				reads.priv++
+				return "0"
+			},
+			token: { decimals: 6 },
+		}
+		expect(safeFiatOf(() => 7n)(counted)).toBe(7n)
+		expect(reads).toEqual({ pub: 1, priv: 1 })
+	})
+})

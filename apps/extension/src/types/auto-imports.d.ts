@@ -149,6 +149,7 @@ declare global {
   const initTransactionService: typeof import('../utils/core').initTransactionService
   const inject: typeof import('vue').inject
   const inputRoom: typeof import('../utils/hero-ruler').inputRoom
+  const isActiveScopeRow: typeof import('../utils/token-order').isActiveScopeRow
   const isAmountAboveDustThreshold: typeof import('../utils/incoming-dust').isAmountAboveDustThreshold
   const isApprovedSendInFlight: typeof import('../utils/in-flight-send').isApprovedSendInFlight
   const isBackgroundConnected: typeof import('../utils/core').isBackgroundConnected
@@ -165,7 +166,8 @@ declare global {
   const isRef: typeof import('vue').isRef
   const isRepeatOrComposing: typeof import('../composables/usePopupEntity').isRepeatOrComposing
   const isShallow: typeof import('vue').isShallow
-  const isUnknownRow: typeof import('../utils/token-order').isUnknownRow
+  const isUnknownParsedRow: typeof import('../utils/token-amount').isUnknownParsedRow
+  const isUnknownRow: typeof import('../utils/token-amount').isUnknownRow
   const isValidDecimals: typeof import('../utils/token-amount').isValidDecimals
   const isValidHex: typeof import('../utils/string').isValidHex
   const journalCardIcon: typeof import('../utils/journal-state').journalCardIcon
@@ -343,6 +345,7 @@ declare global {
   const useTemplateRef: typeof import('vue').useTemplateRef
   const useTicker: typeof import('../composables/ticker').useTicker
   const useToast: typeof import('../composables/toast.js').useToast
+  const useTokenBalanceSnapshot: typeof import('../composables/useTokenBalanceSnapshot').useTokenBalanceSnapshot
   const vSnackFooter: typeof import('../composables/snackInset').vSnackFooter
   const vSnackSheet: typeof import('../composables/snackInset').vSnackSheet
   const validateAndMigrateBackup: typeof import('../composables/useFullBackupImport').validateAndMigrateBackup
@@ -451,6 +454,9 @@ declare global {
   export type { SubmitSource, SendReview } from '../composables/useSendReview'
   import('../composables/useSendReview')
   // @ts-ignore
+  export type { TokenBalanceSnapshotState } from '../composables/useTokenBalanceSnapshot'
+  import('../composables/useTokenBalanceSnapshot')
+  // @ts-ignore
   export type { ProfileActivationSubject } from '../composables/waitForProfileActive'
   import('../composables/waitForProfileActive')
   // @ts-ignore
@@ -526,7 +532,7 @@ declare global {
   export type { FiatOf } from '../utils/token-amount'
   import('../utils/token-amount')
   // @ts-ignore
-  export type { OrderableRow, OrderCtx, RowClass } from '../utils/token-order'
+  export type { OrderableRow, OrderCtx, RowClass, LiveTokenScope } from '../utils/token-order'
   import('../utils/token-order')
   // @ts-ignore
   export type { TransferKind, MintKind, TransferSignature, MintSignature } from '../utils/token-transfer-vocabulary'
@@ -685,6 +691,7 @@ declare module 'vue' {
     readonly initTransactionService: UnwrapRef<typeof import('../utils/core')['initTransactionService']>
     readonly inject: UnwrapRef<typeof import('vue')['inject']>
     readonly inputRoom: UnwrapRef<typeof import('../utils/hero-ruler')['inputRoom']>
+    readonly isActiveScopeRow: UnwrapRef<typeof import('../utils/token-order')['isActiveScopeRow']>
     readonly isAmountAboveDustThreshold: UnwrapRef<typeof import('../utils/incoming-dust')['isAmountAboveDustThreshold']>
     readonly isApprovedSendInFlight: UnwrapRef<typeof import('../utils/in-flight-send')['isApprovedSendInFlight']>
     readonly isBackgroundConnected: UnwrapRef<typeof import('../utils/core')['isBackgroundConnected']>
@@ -701,7 +708,8 @@ declare module 'vue' {
     readonly isRef: UnwrapRef<typeof import('vue')['isRef']>
     readonly isRepeatOrComposing: UnwrapRef<typeof import('../composables/usePopupEntity')['isRepeatOrComposing']>
     readonly isShallow: UnwrapRef<typeof import('vue')['isShallow']>
-    readonly isUnknownRow: UnwrapRef<typeof import('../utils/token-order')['isUnknownRow']>
+    readonly isUnknownParsedRow: UnwrapRef<typeof import('../utils/token-amount')['isUnknownParsedRow']>
+    readonly isUnknownRow: UnwrapRef<typeof import('../utils/token-amount')['isUnknownRow']>
     readonly isValidDecimals: UnwrapRef<typeof import('../utils/token-amount')['isValidDecimals']>
     readonly isValidHex: UnwrapRef<typeof import('../utils/string')['isValidHex']>
     readonly journalCardIcon: UnwrapRef<typeof import('../utils/journal-state')['journalCardIcon']>
@@ -877,6 +885,7 @@ declare module 'vue' {
     readonly useTemplateRef: UnwrapRef<typeof import('vue')['useTemplateRef']>
     readonly useTicker: UnwrapRef<typeof import('../composables/ticker')['useTicker']>
     readonly useToast: UnwrapRef<typeof import('../composables/toast.js')['useToast']>
+    readonly useTokenBalanceSnapshot: UnwrapRef<typeof import('../composables/useTokenBalanceSnapshot')['useTokenBalanceSnapshot']>
     readonly vSnackFooter: UnwrapRef<typeof import('../composables/snackInset')['vSnackFooter']>
     readonly vSnackSheet: UnwrapRef<typeof import('../composables/snackInset')['vSnackSheet']>
     readonly validateAndMigrateBackup: UnwrapRef<typeof import('../composables/useFullBackupImport')['validateAndMigrateBackup']>

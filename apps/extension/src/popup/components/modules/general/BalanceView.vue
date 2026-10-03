@@ -15,7 +15,6 @@ import { balanceFormatted } from "@/utils/amount.js"
 import { copyWithToast } from "@/utils/clipboard"
 import { isValidDecimals, parseRawBalance, safeFiatOf } from "@/utils/token-amount"
 import { aggregateFiat } from "@/utils/token-aggregate"
-import { forChain } from "@/utils/token-order"
 import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 import { createBalanceCount } from "./balance-count"
 import { FULL_SIZE, fiatHeroCandidates, fitHero, holdHeroFit, tokenHeroCandidates } from "@/utils/hero-fit"
@@ -23,6 +22,7 @@ import { heroRoom, rulerWidth } from "@/utils/hero-ruler"
 
 /** Composables */
 import { usePrices } from "@/composables/usePrices"
+import { useTokenBalanceSnapshot } from "@/composables/useTokenBalanceSnapshot"
 import { useToast } from "@/composables/toast.js"
 const { openToast } = useToast()
 
@@ -174,18 +174,9 @@ const handleTokenBalanceClick = async () => {
 	handleCopy(balance, "Balance")
 }
 
-// The balance service returns a shared address's rows from every chain of the profile; the
-// aggregate is over the active chain only.
-const inActiveScope = (tb) => tb.account === appStore.account?.address && tb.token?.chainId === appStore.network?.chainId
-
 /** `loaded` = a snapshot for the active scope has SUCCEEDED; it then survives a later rejected refetch.
  *  `loading` and `unavailable` both mean the total is not known — never a reason to print $0.00. */
 const balancesState = ref("loading")
-// A snapshot in flight is older than any event that lands meanwhile; the event marks it stale.
-let fetchDirty = false
-const markDirty = () => {
-	fetchDirty = true
-}
 
 /** `seeded` counts: its balance row is created after the token row and may not have landed. */
 const WORKING_SEED = new Set(["pending", "seeding", "seeded"])
@@ -229,6 +220,13 @@ const heroPending = computed(() => (isTotalUnsettled.value || awaitingQuotes.val
 const isTotalKnown = computed(() => balancesState.value === "loaded")
 
 const tokenBalanceService = new TokenBalanceServiceClient()
+const {
+	fetchTokenBalances,
+	markDirty,
+	inActiveScope,
+	onBalanceUpdated,
+	dispose: disposeBalances,
+} = useTokenBalanceSnapshot({ client: tokenBalanceService, live: appStore, rows: tokenBalances, state: balancesState })
 tokenBalanceService.onTokenBalanceAdded.add(onBalanceAdded)
 tokenBalanceService.onTokenBalanceUpdated.add(onBalanceUpdated)
 tokenBalanceService.onTokenBalanceDeleted.add(onBalanceDeleted)
@@ -237,58 +235,9 @@ function onBalanceAdded(tb) {
 	tokenBalances.value.push(tb)
 	markDirty()
 }
-function onBalanceUpdated(tb) {
-	if (inActiveScope(tb)) markDirty()
-	const idx = tokenBalances.value.findIndex((_tb) => _tb.id === tb.id)
-	if (idx !== -1) {
-		tokenBalances.value[idx] = tb
-	}
-}
 function onBalanceDeleted(tb) {
 	tokenBalances.value = tokenBalances.value.filter((_tb) => _tb.id !== tb.id)
 	if (inActiveScope(tb)) markDirty()
-}
-// The first connect is the one the mount's fetch opened. Any later connect is a port drop and
-// reconnect: events may have been missed and the request in flight was rejected, so resnapshot —
-// the new generation fences that rejection out.
-let connectsSeen = 0
-tokenBalanceService.onConnected.add(onReconnected)
-function onReconnected() {
-	connectsSeen++
-	if (connectsSeen > 1) void fetchTokenBalances()
-}
-
-/** A rejected snapshot is retried once on a timer; after that a reconnect or a scope change retries. */
-const BALANCES_RETRY_MS = 2_000
-let retryTimer
-// A fetch for one scope may resolve after the user moved on; only the latest request may land,
-// and a snapshot overtaken by a live event is refetched rather than applied. A refetch inside a
-// scope keeps the rows and the state it has: `enterScope` is what clears them.
-let fetchGeneration = 0
-async function fetchTokenBalances(isTimedRetry = false) {
-	const generation = ++fetchGeneration
-	clearTimeout(retryTimer)
-	const address = appStore.account?.address
-	const chainId = appStore.network?.chainId
-	fetchDirty = false
-	if (!address) {
-		tokenBalances.value = []
-		balancesState.value = "loaded"
-		return
-	}
-	let rows
-	try {
-		rows = await tokenBalanceService.getTokenBalances(undefined, address)
-	} catch {
-		if (generation !== fetchGeneration) return
-		if (balancesState.value !== "loaded") balancesState.value = "unavailable"
-		if (!isTimedRetry) retryTimer = setTimeout(() => void fetchTokenBalances(true), BALANCES_RETRY_MS)
-		return
-	}
-	if (generation !== fetchGeneration) return
-	if (fetchDirty) return fetchTokenBalances()
-	tokenBalances.value = forChain(rows, chainId)
-	balancesState.value = "loaded"
 }
 
 /** A new scope owes nothing to the previous one: its rows, its loaded state and its cap all restart. */
@@ -334,11 +283,9 @@ onMounted(async () => {
 onBeforeUnmount(() => {
 	heroResizes?.disconnect()
 	document.fonts?.removeEventListener("loadingdone", fitHeroToLine)
-	fetchGeneration++
 	balanceCount.stop()
 	clearTimeout(capTimer)
-	clearTimeout(retryTimer)
-	tokenBalanceService.onConnected.remove(onReconnected)
+	disposeBalances()
 	tokenBalanceService.disconnect()
 	prices.dispose()
 	priceService.disconnect()
