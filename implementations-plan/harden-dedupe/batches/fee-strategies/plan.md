@@ -224,6 +224,8 @@ One arc, `hd/10-fee-strategies`, stacked on `harden-dedupe` in readiness order. 
 
 If a host cannot be staged, the card extraction is deferred whole. No pixel, copy or emitted-settings change is allowed.
 
+**Result:** every host and state above was staged on the real builds, 28 surfaces in all. Base `7450928c` against head `53e9dfce`: 112 of 112 shots identical on Chrome and Firefox, dark and light; `--stability` 112 of 112 identical. How the fee data was fixed, and why a preload could not do it on Firefox, is in the arc's lessons log.
+
 ## Deferred (program follow-ups)
 
 1. **`withEstimateTask`, the task wrapper (Q-05 (a)).** `await body(task)` adds a microtask before `complete()`, and completion broadcasts synchronously (Fact 3). A concurrent sibling task's completion would then reorder from `estimate → sibling` to `sibling → estimate`.
