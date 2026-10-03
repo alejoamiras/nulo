@@ -35,7 +35,7 @@ What each composing class keeps locally, and which shared longhands it meets on 
 - **Masks:** the clock-derived "Expires" line and the random profile ID.
 - **Base 585dda2a against head 40d10344, Chrome 152 and Firefox 153, dark and light:** 132 of 132 identical. That is 72 shots over 18 surfaces, plus 60 computed-style records over 15 probed surfaces. The record states are:
   - rest, hover, `:active` and keyboard focus, on rows and on all toolbar buttons, both token-detail buttons included;
-  - hover and focus on row actions, including the revoke reveal and the disconnect SVG's red fill;
+  - focus on contact edit and revoke (the revoke reveal), hover and focus on disconnect (its SVG's red fill);
   - the notes error card hovered, pressed and focused (E2: the red left border holds while the other sides take the hover colour);
   - every row of both network-detail containers, so each container's true last row (`::after` hidden) is recorded;
   - the twins' `.row_text` and `.actions` containers (`min-width`, `flex-shrink`);
@@ -49,6 +49,7 @@ What each composing class keeps locally, and which shared longhands it meets on 
 ## Codex loop
 
 - **Code round 1** (GPT-6 Astra, xhigh): NOT CONVERGED, two should-fix and two nits, all adopted. Its own rebuild of all 31 compositions agreed with the disjointness table, and it re-compared the stored artifacts (72/72 shots, 60/60 records), finding no cascade bug.
+- **Code round 2:** CONVERGED, one wording nit adopted: the evidence claimed hover on every row action, but contact edit and revoke get focus only. While it was reviewing, arc 4's compatibility check overwrote the stored arc 3 artifacts, so the base-against-head comparison was rerun on the restacked head (below). Concurrent runs must not share a batch's shot directory.
   1. **The probes omitted elements whose declarations moved:** the twins' `.row_text` and `.actions` containers, and the disconnect SVG's red fill. They are now in the watch lists.
   2. **The state checklist was partly unimplemented.** Added:
      - toolbar `:active` on the connected-apps list and authwits, and focus on the connected-app detail;

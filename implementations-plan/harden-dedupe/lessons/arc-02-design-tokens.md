@@ -23,3 +23,7 @@
 - Base 382f822b against head 1e94a9ea, Chrome and Firefox, dark and light: 40 of 40 identical. The surfaces are Home, Settings, Change password, Reset, the Receive popup over its scrim, onboarding Presto (whose banner carries its own `theme` attribute) and the landing. The two builds' CSS hashes differ, so the run compared changed CSS. A same-SHA stability run on 179777e5 was also 40 of 40. The later commits change tests and docs only.
 - Harness fix: Firefox first showed a 333 px diff from an icon animating inside the banner's shadow root. The freeze CSS now reaches every open shadow root, and running animations are stopped before each shot.
 - Round 2 broke `typecheck:all`: `drifted` was inferred from the value-token union, so pushing a colour name failed. Rounds 2 and 3 were gated on the package tests and lint only, so the full `audit:vue` caught it after the restack. Each round now runs `typecheck:all` too.
+
+## Merge gate
+
+- At head 585dda2a, every job in the five required workflows passed, none skipped: Quality, plus smoke, the five network shards, both heavy jobs and the real-proving canary on Chrome and on Firefox. Squash-merged as #762; its tree equals the arc head.

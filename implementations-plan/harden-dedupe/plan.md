@@ -235,8 +235,13 @@ Every deferred item becomes a follow-up when the program closes.
 ### Process
 
 - **No per-batch ELI5 pages.** The blueprint protocol gives every plan an ELI5 page. With 23 batches, that would be 23 throwaway pages nobody reads during a driverless run. The program's single Artifact explains each batch instead, and every batch plan records `eli5_mode: none`.
+- **Stack order follows readiness, not the table's numbering.** An arc whose files no earlier unmerged arc touches may land ahead of it. error-registry (5) landed before visual-shells-a (3) and visual-shells-b (4), and its plan records why. The numbers stay as labels.
 - **The approval gate is the panel's.** A batch plan's own Codex audit, plus an Opus pass on MID batches, stands in for the owner's approval of the plan. Only the behaviour-alignment arc waits on the owner.
 
 ## Batch plans
 
 Each LIGHT or MID batch gets `batches/<batch>/plan.md`; this index names each batch by its slug and links it once that batch's arc has landed.
+
+- [design-tokens](batches/design-tokens/plan.md): landed as #762.
+- [error-registry](batches/error-registry/plan.md): landed as #763.
+- [visual-shells-a](batches/visual-shells-a/plan.md): in review.

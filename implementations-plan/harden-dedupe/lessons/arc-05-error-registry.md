@@ -20,3 +20,7 @@
 
   Its comparison matched on 6,720 combinations and caught every mutation.
 - **Getter-bearing payloads: a non-issue, not fixed.** The constant-message constructors now evaluate a getter on `message` or `details`, and `ScopeViolationError` one on `details`, where the switch never read them. Every caller passes deserialized data or plain literals, so no wire difference is reachable.
+
+## Merge gate
+
+- At head 282b4728, every job in the five required workflows passed, none skipped: Quality, plus smoke, the five network shards, both heavy jobs and the real-proving canary on Chrome and on Firefox. Build Landing was skipped by its path filter, correctly. Squash-merged as #763; its tree equals the arc head.

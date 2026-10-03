@@ -155,7 +155,7 @@ Add `toolbar-button.module.css` and convert the five pages. **Gate:** the same c
 | state | where |
 |---|---|
 | rest, hover, `:active`, keyboard focus on the row target | contacts, connected apps, authwits, notes (the error card too, for E2), settings index, account state, network detail; the twins' `.row_text` and `.actions` containers are recorded with their rows |
-| hover and focus on a row action | contact edit, session disconnect (with its SVG's red fill), authwit revoke (the `:focus-within` reveal) |
+| focus on a row action, plus hover where it has one | focus on contact edit and authwit revoke (the `:focus-within` reveal); hover and focus on session disconnect (with its SVG's red fill) |
 | the divider hidden on a true last row | every list's last row (`:last-child`), both network-detail containers included; SettingField made the last of its type by lifting its following sibling out of the DOM for the probe, since Profile renders a `div` after it |
 | SettingItem sizes and disabled | account state (`large`), network detail (`small`, and the disabled "Active network" row), FPCs (`raw`) |
 | toolbar rest, hover, `:active`, focus, disabled | rest, hover, `:active` and focus on all five pages, both token-detail buttons included; `disabled` set on the refresh button for the probe, since nothing disables it today |
