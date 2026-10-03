@@ -98,7 +98,6 @@ function journalRows(terminalJournalOps: BuildActivityRowsParams["terminalJourna
 	return rows
 }
 
-/** Scope incoming to the active account+network when supplied. */
 function incomingRows(incomingTransfers: BuildActivityRowsParams["incomingTransfers"], scope: RowScope): ActivityRow[] {
 	const rows: ActivityRow[] = []
 	for (const inc of incomingTransfers) {
@@ -108,12 +107,12 @@ function incomingRows(incomingTransfers: BuildActivityRowsParams["incomingTransf
 	return rows
 }
 
-/** The account and network checks both feeds apply to an incoming record; an unknown scope field
- *  checks nothing. */
+/** The account, network and profile checks both feeds apply to an incoming record; an unknown scope
+ *  field checks nothing. */
 export function incomingInScope(inc: IncomingTransferRecord, scope: RowScope): boolean {
 	if (scope.accountAddress !== undefined && inc.accountAddress !== scope.accountAddress) return false
 	if (scope.networkId !== undefined && inc.networkId !== scope.networkId) return false
-	return true
+	return !isForeignProfile(scope.profileId, inc.profileId)
 }
 
 export function incomingRow(inc: IncomingTransferRecord): ActivityRowIncoming {

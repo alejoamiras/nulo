@@ -5,7 +5,7 @@
  * is a token page, and the list is sliced to the slots the in-flight cards leave). Deliberately not
  * `buildActivityRows`: unifying would broaden or drop rows.
  */
-import { type ActivityRow, incomingInScope, incomingRow, isForeignProfile, scopedTxRows } from "@/utils/activity-rows"
+import { type ActivityRow, incomingInScope, incomingRow, scopedTxRows } from "@/utils/activity-rows"
 import type { IncomingTransferRecord } from "@/wallet/services/incoming-transfer/spec"
 import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
 import type { Tx } from "@/wallet/services/transaction/spec"
@@ -46,14 +46,13 @@ export function buildRecentActivityRows(p: {
 	return rows
 }
 
-/** History's incoming scope between the preview's own two guards: the token first, the profile last. */
+/** The token check runs first, so another token's receipt never has its scope fields read. */
 function tokenScopedIncomingRows(incoming: IncomingTransferRecord[], scope: RecentRowScope, token: RecentTokenScope): RecentActivityRow[] {
 	const rows: RecentActivityRow[] = []
 	for (const inc of incoming) {
 		// Token-scoped views (token-detail page) only show incoming for the active token. The home view shows all.
 		if (token && inc.tokenId !== token.id) continue
 		if (!incomingInScope(inc, scope)) continue
-		if (isForeignProfile(scope.profileId, inc.profileId)) continue
 		rows.push(incomingRow(inc))
 	}
 	return rows
