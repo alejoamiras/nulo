@@ -63,6 +63,6 @@
 
 ### Gates
 
-- `lint`, `typecheck:all`, `check:plans`, `test:all` (extension 8,948 tests; wallet-core 273; wallet-bridge 599), `test:ci-gating` (255 pass) and `audit:vue`: all green. The build leaves the auto-import files unchanged beyond `realSleep`.
+- `lint`, `typecheck:all`, `check:plans`, `test:all` (extension 8,946 tests after the split; wallet-core 273; wallet-bridge 599), `test:ci-gating` (255 pass) and `audit:vue`: all green. The build leaves the auto-import files unchanged beyond `realSleep`.
 - npm: `stage.ts wallet-crypto --version 0.1.0` at the parent and at the head gives the same 10 files with identical sha256s.
-- Shots: 12 of 12 identical (three logger states × Chrome and Firefox × dark and light), and 12 of 12 identical in the `--stability` run (the base against itself). Both runs waited out the harness lock held by sibling arcs.
+- Shots, re-taken after the split (parent `1c0c67ad` against code head `dcf6c531`): 12 of 12 identical (three logger states × Chrome and Firefox × dark and light), and 12 of 12 identical in the `--stability` run (the base against itself). Both runs waited out the harness lock held by sibling arcs.
