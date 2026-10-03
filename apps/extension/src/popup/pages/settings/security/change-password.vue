@@ -20,6 +20,7 @@ const { openToast } = useToast()
 
 /** Components */
 import CollapsingHeroLayout from "@/components/composite/CollapsingHeroLayout.vue"
+import PasswordVisibilityToggle from "@/components/composite/PasswordVisibilityToggle.vue"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -127,20 +128,11 @@ onBeforeUnmount(() => {
 					data-testid="current-password-input"
 				>
 					<template #suffix>
-						<button
-							type="button"
-							@click="isPasswordType = !isPasswordType"
-							tabindex="-1"
-							:class="$style.visibility_btn"
-							:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
+						<PasswordVisibilityToggle
+							:hidden="isPasswordType"
 							data-testid="current-password-input-visibility-toggle"
-						>
-							<MaterialIcon
-								:name="isPasswordType ? 'visibility' : 'visibility_off'"
-								:size="18"
-								color="secondary"
-							/>
-						</button>
+							@toggle="isPasswordType = !isPasswordType"
+						/>
 					</template>
 				</Input>
 			</div>
@@ -170,20 +162,11 @@ onBeforeUnmount(() => {
 					data-testid="new-password-input"
 				>
 					<template #suffix>
-						<button
-							type="button"
-							@click="isPasswordType = !isPasswordType"
-							tabindex="-1"
-							:class="$style.visibility_btn"
-							:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
+						<PasswordVisibilityToggle
+							:hidden="isPasswordType"
 							data-testid="new-password-input-visibility-toggle"
-						>
-							<MaterialIcon
-								:name="isPasswordType ? 'visibility' : 'visibility_off'"
-								:size="18"
-								color="secondary"
-							/>
-						</button>
+							@toggle="isPasswordType = !isPasswordType"
+						/>
 					</template>
 					<template #bottom>
 						<Flex align="center" gap="6" :class="$style.hint_row">
@@ -263,16 +246,6 @@ onBeforeUnmount(() => {
 	text-transform: uppercase;
 	letter-spacing: 0.18em;
 	color: var(--nulo-secondary);
-}
-
-.visibility_btn {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	background: transparent;
-	border: none;
-	cursor: pointer;
-	padding: 4px 0 4px 8px;
 }
 
 .hint_row {

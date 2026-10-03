@@ -10,6 +10,7 @@
 /** Components */
 import AuthProfilePill from "@/popup/components/modules/auth/AuthProfilePill.vue"
 import PasskeyCeremonyDialog from "@/components/passkey/PasskeyCeremonyDialog.vue"
+import PasswordVisibilityToggle from "@/components/composite/PasswordVisibilityToggle.vue"
 
 /** Composables */
 import { awaitProfileActivation, BootstrapFailedError, UnlockTimeoutError } from "@/composables/unlockWait"
@@ -262,20 +263,11 @@ watch(
 							autocorrect="off"
 						>
 							<template #suffix>
-								<button
-									type="button"
-									tabindex="-1"
-									@click="isPasswordType = !isPasswordType"
-									:class="$style.visibility_btn"
+								<PasswordVisibilityToggle
+									:hidden="isPasswordType"
 									data-testid="auth-password-input-visibility-toggle"
-									:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
-								>
-									<MaterialIcon
-										:name="isPasswordType ? 'visibility' : 'visibility_off'"
-										:size="18"
-										color="secondary"
-									/>
-								</button>
+									@toggle="isPasswordType = !isPasswordType"
+								/>
 							</template>
 						</Input>
 					</div>
@@ -388,18 +380,6 @@ watch(
 	gap: 16px;
 	width: 100%;
 	max-width: 320px;
-}
-
-.visibility_btn {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-
-	background: transparent;
-	border: none;
-	cursor: pointer;
-
-	padding: 4px 0 4px 8px;
 }
 
 .error_text {

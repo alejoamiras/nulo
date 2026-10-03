@@ -1,4 +1,5 @@
 <script setup>
+import PasswordVisibilityToggle from "@/components/composite/PasswordVisibilityToggle.vue"
 /**
  * Credentials section for the create-profile page in `password` mode:
  * a new-password input + repeat input + a small strength hint. Owns
@@ -28,20 +29,11 @@ const isPasswordType = ref(true)
 				data-testid="register-password-input"
 			>
 				<template #suffix>
-					<button
-						type="button"
-						tabindex="-1"
-						@click="isPasswordType = !isPasswordType"
-						:class="$style.visibility_btn"
+					<PasswordVisibilityToggle
+						:hidden="isPasswordType"
 						data-testid="register-password-input-visibility-toggle"
-						:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
-					>
-						<MaterialIcon
-							:name="isPasswordType ? 'visibility' : 'visibility_off'"
-							:size="18"
-							color="secondary"
-						/>
-					</button>
+						@toggle="isPasswordType = !isPasswordType"
+					/>
 				</template>
 				<template #bottom>
 					<Flex align="center" gap="6" :class="$style.hint_row">
@@ -76,16 +68,6 @@ const isPasswordType = ref(true)
 	text-transform: uppercase;
 	letter-spacing: 0.18em;
 	color: var(--nulo-secondary);
-}
-
-.visibility_btn {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	background: transparent;
-	border: none;
-	cursor: pointer;
-	padding: 4px 0 4px 8px;
 }
 
 .hint_row {
