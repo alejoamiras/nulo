@@ -48,3 +48,16 @@
   | `<` for `<=` at the runtime's comparator call | final | the equal-positions row and two hostile-page rows |
 
 - **Shell discipline in an isolated worktree.** Compound commands that mention git are refused; scripts in the scratchpad and one plain `git -C` command per call worked throughout.
+
+## Code review round 1: CONVERGED
+
+- **Codex: CONVERGED, high confidence, no blocker or should-fix.** It ran 525 source-extracted Bun comparisons of base versus implementation and found zero differences in epoch reads, writes, emits, lock release or caller resumption. It also confirmed:
+  - removing P1 or P4 now fails through the call logs;
+  - the N0 and P0 stale-entry controls are present;
+  - the repository fingerprints reproduce, and an async wrapper moves resumption to tick 45;
+  - the scope-construction observer works.
+- **Nits, all applied:**
+  - The plan called the N6/N7 and P6/P7 drift pins post-bump writes, but the fake trust write precedes the bump. They are now described as preserved post-bump continuations, and each row's call log says which writes or emits land late.
+  - The plan justified removing the fingerprints with "tick counts are not behaviour". The real rationale replaces it: extra ticks can affect these races and the matrices do not catch every added async wrapper, so the removal rests on this round's complete comparison, with the harness and results recoverable from history.
+  - The `TrustScope`, `ScopeClear` and `stopNoteScheduler` comments restated their declarations and were deleted.
+- **Restacked onto `harden-dedupe` at `169bed04`**, after arcs 6 (#766) and 8 (#767) landed. `git rebase --onto origin/harden-dedupe 7450928c` applied cleanly, and every commit stayed signed.
