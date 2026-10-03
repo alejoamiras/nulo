@@ -998,15 +998,13 @@ export class DappSendExecutor {
 	}
 }
 
-/** The task title's call list for a dApp send. The shared picker, NOT the raw first call: a self-pay
- *  claim's fee payload leads the list (e.g. [claim_and_end_setup, claim_public]) and the raw pick titles
- *  it "Claim Fee Juice" while proving, flipping to the real method once the settled record is built. */
+/** The shared picker, not the raw first call: it skips a leading self-pay fee payload, so the proving
+ *  title and the settled record's agree. */
 function primaryMethodCalls(op: AztecSendTxOperation): { method: string }[] | undefined {
 	const primaryMethod = Array.isArray(op.exec?.calls) ? pickPrimaryMethod(op.exec.calls) : undefined
 	return primaryMethod ? [{ method: primaryMethod }] : undefined
 }
 
-/** The dApp-facing offchain output of a proved tx, stamped with its anchor block's timestamp. */
 function offchainOutputOf(provedTx: TxProvingResult) {
 	const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
 	return extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))

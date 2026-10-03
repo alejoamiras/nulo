@@ -46,7 +46,6 @@ export type ReuseEntryBase = {
 	readonly initializesAccount: boolean
 	readonly nonce: { toString(): string }
 	readonly feePaymentMethod: AccountFeePaymentMethodOptions
-	/** Cache lifecycle. */
 	readonly builtAt: number
 }
 
@@ -58,7 +57,8 @@ export function primaryEndpointMoved(
 	return !primary || primary.id !== snap.primaryEndpointId || primary.rpcUrl !== snap.primaryEndpointUrl
 }
 
-/** The multiplier a fresh build finalizes with. Indexes the table unvalidated, as the build does. */
+/** The fee multiplier for a known or absent priority. The lookup stays unvalidated, so an unknown
+ *  priority keeps its existing failure. */
 export function reuseFeeMultiplier(priority: PriorityLevel | undefined): number {
 	return priority ? PRIORITY_MULTIPLIERS[priority] : DEFAULT_FEE_MULTIPLIER
 }
