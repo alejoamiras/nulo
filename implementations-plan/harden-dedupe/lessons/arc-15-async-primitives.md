@@ -83,3 +83,9 @@
    - fence placement, and the two genuinely equivalent dispose survivors;
    - the guard assignments, `sleep` timing, and the 15b LogsViewer cleanup.
 4. **Coupling noted for the stack:** arc 16 also edits the utils barrel and the wallet-core README. Keep both arcs' additions when combining them.
+
+### Code review round 2: CONVERGED (Codex, high confidence, no findings)
+
+- **Ordering, not time:** the new offscreen row measures promise ordering, not elapsed time. Replays on Bun 1.4.2 and Node 24.21 give 4 for the parent and the head, and 3 for the propagate mutant.
+- **Sensitivity:** it catches any hop change, while a harmless rename still passes.
+- **Isolation:** nothing lingers after a pass or a mutant run.
