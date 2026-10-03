@@ -31,29 +31,30 @@ import { type InteractionWaitOptions, type SendReturn, extractOffchainOutput } f
 import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
-import { collectOffchainEffects } from "@aztec-labs/stdlib/tx"
+import { collectOffchainEffects, type TxProvingResult } from "@aztec-labs/stdlib/tx"
 import { liveChainInfo } from "@nulo/aztec-runtime/utils"
 import { type JobError, type JobProgress, JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { markFailedUnlessCancelled } from "./mark-failed-unless-cancelled"
 import { formatFeeJuice } from "@/utils/fee-estimation"
 import { pickPrimaryMethod } from "@/utils/primary-method"
-import { primaryEndpointUrl } from "@/wallet/services/network/spec"
+import { findPrimaryEndpoint, primaryEndpointUrl } from "@/wallet/services/network/spec"
 import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
 import type { WrappedTask } from "@/wallet/services/task/service"
-import type { LocalTxOrigin, TransactionService } from "@/wallet/services/transaction/service"
+import type { AddTransactionInput, LocalTxOrigin, TransactionService } from "@/wallet/services/transaction/service"
 import type { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import type { Network } from "@/wallet/services/network/service"
 import type { FpcInfo } from "@/wallet/services/fpc/spec"
 import type { PublicStorageReader } from "@/wallet/utils/fee-juice-balance"
 import type { DiscoveryAwareEstimator } from "./discovery-aware-estimator"
 import { type ExecutionCoordinator, type ProveAndSendContext, fenceChecks } from "./execution-coordinator"
+import { fingerprintBaseFee } from "./estimate-reuse-shared"
 import type { ExecutionMutexRelease } from "./execution-mutex"
 import type { OperationEstimateReuse, OperationEstimateReuseEntry } from "./operation-estimate-reuse"
 import { fingerprintNoFromInputs, fingerprintOperation, type OperationFingerprintInput } from "./operation-fingerprint"
 import { PREVIEW_FOREIGN_MESSAGE, type PreviewLookup, type PreviewSnapshots, assertWithinPreview } from "./preview-snapshots"
 import { decodeAuthwitEffects } from "./decode-authwit-effects"
+import { throwIfAborted } from "./rpc-cancel"
 import { probeSponsorFunding } from "./sponsor-funding"
-import { fingerprintBaseFee } from "./transfer-estimate-reuse"
 import { applyEmbeddedFpcGasCap } from "./fee/embedded-fpc-cap"
 import { type FeeEstimate, finalizeGasLimits, suggestGasLimits } from "./fee/fee-strategy"
 import type { OperationPlanner } from "./operation-planner"
@@ -121,19 +122,17 @@ export interface DappSendExecutorLane {
 	commitJournal(journalId: string | undefined, progress: JobProgress): Promise<void>
 }
 
-type AddTransactionArgs = Parameters<DappSendExecutorDeps["addTransaction"]>
-
 /** What the post-send record needs from a built send, whichever arm built it. */
 interface SentTx {
-	origin: AddTransactionArgs[0]
+	origin: AddTransactionInput["origin"]
 	network: Network
 	account: { address: { toString(): string } }
-	txCalls: AddTransactionArgs[3]
+	txCalls: AddTransactionInput["calls"]
 	nonce: { toString(): string }
-	feePaymentMethod: AddTransactionArgs[5]
+	feePaymentMethod: AddTransactionInput["feePaymentMethod"]
 	txRequest: Parameters<typeof getEstimatedFee>[0]
 	fence: ExecutionFence
-	networkId: AddTransactionArgs[11]
+	networkId: AddTransactionInput["networkId"]
 	pendingPublicAuthwits: Parameters<DappSendExecutorDeps["recordPendingAuthwits"]>[1]
 }
 
@@ -291,10 +290,7 @@ export class DappSendExecutor {
 			throw new Error("Only send_transaction and aztec_sendTx operations support fee estimation")
 		}
 		// Stage-boundary cancellation — see TransferExecutor.estimateFee.
-		const checkCancelled = (): void => {
-			if (signal?.aborted) throw new JobCancelledSentinel("")
-		}
-		checkCancelled()
+		throwIfAborted(signal)
 		const fence = await this.deps.captureExecutionFence()
 
 		// Build actions array — clone to prevent mutation side effects
@@ -317,7 +313,7 @@ export class DappSendExecutor {
 		// Discover-then-estimate via the decorator (the single owner of that
 		// choreography for dApp sends; stage-boundary cancellation preserved
 		// inside it).
-		checkCancelled()
+		throwIfAborted(signal)
 		const { built, discovered } = await this.deps.estimateWithDiscovery.estimate(
 			operation,
 			actions,
@@ -328,11 +324,11 @@ export class DappSendExecutor {
 			signal,
 		)
 		const { txRequest } = built
-		checkCancelled()
+		throwIfAborted(signal)
 		const sponsorFunding = await probeSponsorFunding(built, this.deps.readPublicStorageOnce, (msg, data) =>
 			this.deps.logDebug(msg, data),
 		)
-		checkCancelled()
+		throwIfAborted(signal)
 
 		const identity = fingerprintInputFor(operation, feeSettings, detectedFee, preDiscoveryActions)
 		const discoveredHashes = discovered.map((d) => d.messageHash)
@@ -365,15 +361,12 @@ export class DappSendExecutor {
 		if (op.kind !== "aztec_sendTx" || op.executionMode !== "default_entrypoint") {
 			throw new Error("Only default_entrypoint aztec_sendTx operations support an authorization preview")
 		}
-		const checkCancelled = (): void => {
-			if (signal?.aborted) throw new JobCancelledSentinel("")
-		}
-		checkCancelled()
+		throwIfAborted(signal)
 		const fence = await this.deps.captureExecutionFence()
 		const prepared = await this.prepareNoFrom(op, fence)
-		checkCancelled()
+		throwIfAborted(signal)
 		const discovered = await this.discoverNoFromAuthwits(prepared)
-		checkCancelled()
+		throwIfAborted(signal)
 		const records = discovered.map((d) => d.record)
 		const previewId = this.writePreview(
 			preview,
@@ -466,7 +459,7 @@ export class DappSendExecutor {
 		try {
 			const fingerprint = fingerprintOperation(identity)
 			if (fingerprint === null) return undefined
-			const primary = built.network.endpoints.find((e) => e.id === built.network.primaryEndpointId)
+			const primary = findPrimaryEndpoint(built.network)
 			if (!primary) return undefined
 			const profile = await this.deps.getActiveProfile()
 			if (!profile) return undefined
@@ -524,20 +517,20 @@ export class DappSendExecutor {
 	private sentTxRecorder(sent: SentTx): (hash: string) => Promise<void> {
 		return async (hash) => {
 			const account = sent.account.address.toString()
-			await this.deps.addTransaction(
-				sent.origin,
-				sent.network.chainId,
+			await this.deps.addTransaction({
+				origin: sent.origin,
+				chainId: sent.network.chainId,
 				account,
-				sent.txCalls,
-				sent.nonce.toString(),
-				sent.feePaymentMethod,
+				calls: sent.txCalls,
+				nonce: sent.nonce.toString(),
+				feePaymentMethod: sent.feePaymentMethod,
 				hash,
-				primaryEndpointUrl(sent.network),
-				getEstimatedFee(sent.txRequest),
-				getGasDetails(sent.txRequest),
-				sent.fence,
-				sent.networkId,
-			)
+				submittedEndpointUrl: primaryEndpointUrl(sent.network),
+				estimatedFee: getEstimatedFee(sent.txRequest),
+				gasDetails: getGasDetails(sent.txRequest),
+				fence: sent.fence,
+				networkId: sent.networkId,
+			})
 			if (sent.pendingPublicAuthwits.length > 0) {
 				// Scoped to the SENDING tx's (profileId, chainId, account); the profile is the fence's.
 				await this.deps.recordPendingAuthwits(
@@ -563,7 +556,7 @@ export class DappSendExecutor {
 			throw new Error("send_transaction: feeSettings is required")
 		}
 
-		// B-02: take the shared execution slot + journal scaffold (runInSlot) like
+		// Take the shared execution slot + journal scaffold (runInSlot) like
 		// the other two dApp-send pipelines. Without it, two concurrent
 		// send_transaction ops (e.g. a dApp calling grantPublicAuthwit twice, or one
 		// racing an in-flight aztec_sendTx on the same account) run simulateTx/proveTx
@@ -673,13 +666,7 @@ export class DappSendExecutor {
 				origin,
 				hooks,
 				fence,
-				getCalls: () => {
-					// The shared picker, NOT the raw first call: a self-pay claim's fee payload leads the list
-					// (e.g. [claim_and_end_setup, claim_public]) and the raw pick titles it "Claim Fee Juice"
-					// while proving, flipping to the real method once the settled record is built.
-					const primaryMethod = Array.isArray(op.exec?.calls) ? pickPrimaryMethod(op.exec.calls) : undefined
-					return primaryMethod ? [{ method: primaryMethod }] : undefined
-				},
+				getCalls: () => primaryMethodCalls(op),
 			},
 			async ({ checkCancelled, markJournal, commitSubmitting, journalId }) => {
 				if (op.accountAddress !== op.opts?.from?.toString()) {
@@ -732,10 +719,7 @@ export class DappSendExecutor {
 					markJournal,
 					commitSubmitting,
 					submittedEndpointUrl: primaryEndpointUrl(network),
-					wantOffchainOutput: (provedTx) => {
-						const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
-						return extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
-					},
+					wantOffchainOutput: offchainOutputOf,
 					recordTransaction: this.sentTxRecorder({
 						origin,
 						network,
@@ -870,13 +854,7 @@ export class DappSendExecutor {
 				origin,
 				hooks,
 				fence,
-				getCalls: () => {
-					// The shared picker, NOT the raw first call: a self-pay claim's fee payload leads the list
-					// (e.g. [claim_and_end_setup, claim_public]) and the raw pick titles it "Claim Fee Juice"
-					// while proving, flipping to the real method once the settled record is built.
-					const primaryMethod = Array.isArray(op.exec?.calls) ? pickPrimaryMethod(op.exec.calls) : undefined
-					return primaryMethod ? [{ method: primaryMethod }] : undefined
-				},
+				getCalls: () => primaryMethodCalls(op),
 			},
 			async ({ checkCancelled, markJournal, commitSubmitting, journalId }) => {
 				await markJournal({ stage: "simulating" })
@@ -910,25 +888,22 @@ export class DappSendExecutor {
 					markJournal,
 					commitSubmitting,
 					submittedEndpointUrl,
-					wantOffchainOutput: (provedTx) => {
-						const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
-						return extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
-					},
+					wantOffchainOutput: offchainOutputOf,
 					recordTransaction: (hash) =>
-						this.deps.addTransaction(
+						this.deps.addTransaction({
 							origin,
-							network.chainId,
-							account.address.toString(),
-							txCalls,
-							Fr.ZERO.toString(),
-							AccountFeePaymentMethodOptions.EXTERNAL,
+							chainId: network.chainId,
+							account: account.address.toString(),
+							calls: txCalls,
+							nonce: Fr.ZERO.toString(),
+							feePaymentMethod: AccountFeePaymentMethodOptions.EXTERNAL,
 							hash,
 							submittedEndpointUrl,
-							getEstimatedFee(txRequest),
-							getGasDetails(txRequest),
+							estimatedFee: getEstimatedFee(txRequest),
+							gasDetails: getGasDetails(txRequest),
 							fence,
-							op.networkId,
-						),
+							networkId: op.networkId,
+						}),
 				})
 
 				if (op.opts.wait === "NO_WAIT") {
@@ -1021,6 +996,18 @@ export class DappSendExecutor {
 			d.txRequest.authWitnesses.push(await d.account.createAuthWit(messageHash))
 		}
 	}
+}
+
+/** The shared picker, not the raw first call: it skips a leading self-pay fee payload, so the proving
+ *  title and the settled record's agree. */
+function primaryMethodCalls(op: AztecSendTxOperation): { method: string }[] | undefined {
+	const primaryMethod = Array.isArray(op.exec?.calls) ? pickPrimaryMethod(op.exec.calls) : undefined
+	return primaryMethod ? [{ method: primaryMethod }] : undefined
+}
+
+function offchainOutputOf(provedTx: TxProvingResult) {
+	const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
+	return extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
 }
 
 /** Everything the NO_FROM path holds between its build and its discovery. */

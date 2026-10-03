@@ -11,12 +11,11 @@ import { describe, expect, test } from "vitest"
 import { TransferType } from "@/wallet/services/transaction/spec"
 import type { Network } from "@/wallet/services/network/service"
 import type { FeeSettings } from "./spec"
+import { ESTIMATE_REUSE_TTL_MS, fingerprintBaseFee } from "./estimate-reuse-shared"
 import {
-	ESTIMATE_REUSE_TTL_MS,
 	TransferEstimateReuse,
 	type TransferEstimateReuseDeps,
 	type TransferEstimateReuseEntry,
-	fingerprintBaseFee,
 	fingerprintFeeSettings,
 } from "./transfer-estimate-reuse"
 

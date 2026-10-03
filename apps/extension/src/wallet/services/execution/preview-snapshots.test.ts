@@ -6,7 +6,7 @@ import {
 	PreviewSnapshots,
 	assertWithinPreview,
 } from "./preview-snapshots"
-import { ESTIMATE_REUSE_TTL_MS } from "./transfer-estimate-reuse"
+import { ESTIMATE_REUSE_TTL_MS } from "./estimate-reuse-shared"
 
 const A = { interactionId: "i-a", index: 0, fingerprint: "fp" }
 

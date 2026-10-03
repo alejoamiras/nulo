@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { GasFees } from "@aztec-labs/stdlib/gas"
 import { SessionEndedError } from "@nulo/extension-messaging/errors"
 import type { Action } from "@nulo/wallet-bridge"
-import { ESTIMATE_REUSE_TTL_MS } from "./transfer-estimate-reuse"
+import { ESTIMATE_REUSE_TTL_MS } from "./estimate-reuse-shared"
 import { OperationEstimateReuse, type OperationEstimateReuseDeps, type OperationEstimateReuseEntry } from "./operation-estimate-reuse"
 import { fingerprintOperation, type OperationFingerprintInput } from "./operation-fingerprint"
 

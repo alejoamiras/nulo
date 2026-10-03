@@ -55,6 +55,25 @@ export const DROPPED_CONFIRMATIONS = 3
 export const DROPPED_RESURRECTION_WINDOW_MS = 30 * 60_000
 export const DROPPED_RECHECK_INTERVAL_MS = 15_000
 
+/** One activity row as an execution records it after the send. */
+export type AddTransactionInput = {
+	origin: LocalTxOrigin
+	chainId: number
+	account: string
+	calls: TxCall[]
+	nonce: string
+	feePaymentMethod: AccountFeePaymentMethodOptions
+	hash: string
+	submittedEndpointUrl: string | undefined
+	estimatedFee?: string
+	gasDetails?: TxGasDetails
+	fence?: ExecutionFence
+	/** Owning network row id. Together with the fence's profile this is the
+	 *  row's activity scope — without it, two profiles holding the same
+	 *  address on one chain are indistinguishable in history. */
+	networkId?: string
+}
+
 export class TransactionService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()("getTransactions", "getTransaction")
 	public static name = TRANSACTION_SERVICE_NAME
@@ -152,27 +171,25 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		return out
 	}
 
-	public async addTransaction(
-		origin: LocalTxOrigin,
-		chainId: number,
-		account: string,
-		calls: TxCall[],
-		nonce: string,
-		feePaymentMethod: AccountFeePaymentMethodOptions,
-		hash: string,
-		submittedEndpointUrl: string | undefined,
-		estimatedFee?: string,
-		gasDetails?: TxGasDetails,
-		fence?: ExecutionFence,
-		/** Owning network row id. Together with the fence's profile this is the
-		 *  row's activity scope — without it, two profiles holding the same
-		 *  address on one chain are indistinguishable in history. */
-		networkId?: string,
-	): Promise<Tx> {
-		// Under the tx lock (codex blocker): serialize the dup-check + write against
-		// restore's create-only check + the coordinator's purge (finding D).
+	public async addTransaction(input: AddTransactionInput): Promise<Tx> {
+		const {
+			origin,
+			chainId,
+			account,
+			calls,
+			nonce,
+			feePaymentMethod,
+			hash,
+			submittedEndpointUrl,
+			estimatedFee,
+			gasDetails,
+			fence,
+			networkId,
+		} = input
+		// Under the tx lock: serialize the dup-check + write against restore's
+		// create-only check + the coordinator's purge.
 		return await this.lock.withLock(async () => {
-			// D13: an execution captured {profileId, epoch} when it was authorized.
+			// An execution captured {profileId, epoch} when it was authorized.
 			// If a deletion of that profile has since begun (epoch advanced) OR the
 			// owning account row is already purged/re-owned, reject — a completing
 			// prove must not recreate a pending tx after its profile was deleted.
