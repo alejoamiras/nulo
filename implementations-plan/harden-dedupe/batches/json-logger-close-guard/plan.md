@@ -64,21 +64,24 @@ with `import { closeCurrentWindow } from "@/utils/close-current-window"` under e
 
 ### Phase 1: red
 
-Before writing, `ls` and `git status` each path. New `popup/windows/json/index.test.ts` and `popup/windows/logger/index.test.ts`, colocated. Each mounts the window with its profile client mocked (capturing the handler), its other clients mocked (json: `DappInteractionServiceClient` answering a wire-shaped payload, operations with `0x` + 64-hex fields; logger: a stub store), children stubbed, and `chrome.windows` stubbed with a `getCurrent` that calls its last argument, so both call shapes are served. Two rows per window:
+Before writing, `ls` and `git status` each path. New `popup/windows/json/index.test.ts` and `popup/windows/logger/index.test.ts`, colocated. Each mounts the window with its profile client mocked (capturing the handler), its other clients mocked (json: `DappInteractionServiceClient` answering a wire-shaped payload, operations with `0x` + 64-hex fields; logger: a stub store), children stubbed, and `chrome.windows` stubbed with a `getCurrent` that calls its last argument, so both call shapes are served. Three rows per window:
 
 1. **A window with an id.** A truthy profile calls nothing; then `undefined` calls `getCurrent` once inside the handler call, before any flush, and `remove` exactly once with that id (`[[7]]`).
 2. **A window without an id.** `undefined` calls `getCurrent` once and `remove` never.
+3. **The `lastError` path.** The callback receives no window: the handler throws exactly `TypeError("undefined is not an object (evaluating 'window.id')")`, the text the unit tests' engine (JSC, Bun) gives for today's expression, and `remove` is never called.
 
-Row 2 fails on both current files (`remove(undefined)` is called); row 1 passes. As in logsviewer-timer, the tests and the fix land as one `fix` commit, so no commit in the stack is red; the red run is recorded in Results and the lessons log.
+Row 2 fails on both current files (`remove(undefined)` is called); rows 1 and 3 pass. As in logsviewer-timer, the tests and the fix land as one `fix` commit, so no commit in the stack is red; the red run is recorded in Results and the lessons log.
 
-**Mutants** (each applied alone to a scratch copy of the Phase 2 file, the two test files run, the file restored by copy, never with git):
+**Mutants** (each applied alone to a scratch copy, the two test files run, the file restored by copy, never by a checkout):
 
 | mutant | caught by |
 |---|---|
-| the helper call replaced by the old unguarded body (guard removed) | row 2, both windows |
+| the helper's guard removed (today's unguarded body) | row 2, both windows |
 | `remove(window.id + 1)` in the helper | row 1, both windows |
-| the `if (!profile)` test dropped | row 1 (a truthy profile calls `getCurrent`) |
-| the close deferred (`queueMicrotask(closeCurrentWindow)`) | row 1 (not called inside the handler) |
+| `if (window?.id)` in the helper (swallows the `lastError` throw) | row 3, both windows |
+| the helper's callback parameter renamed (`w`) | row 3, both windows (the engine text names the binding) |
+| the `if (!profile)` test dropped, per window | row 1 (a truthy profile calls `getCurrent`) |
+| the close deferred (`queueMicrotask(closeCurrentWindow)`), per window | rows 1 to 3 (not called inside the handler) |
 
 ### Phase 2: the fix
 
@@ -99,7 +102,9 @@ None. No template, style or copy changes. The zero-diff harness runs batch `json
 | json (`#/windows/json`) | a wire-shaped operations payload from a stubbed `dapp-interaction` port, rendered in the viewer |
 | logger (`#/windows/logger`) | the fixed log set from a stubbed `log-viewer` port (logsviewer-timer's fixture) |
 
-The json surface also runs the call-shape probe: in the extension page, `getCurrent(cb)` and `getCurrent(undefined, cb)` must report the same window id and no `lastError`, on both builds and both browsers. The close itself is not captured: in the harness it would close the capture window.
+Readiness, on both builds: each surface starts on Home, unlocked (the harness's `goHome`, re-asserted by the surface), so the windows' route guard (`popup/route-guard.ts:47`) does not redirect and the logger's subscribe-time profile delivery does not close it. The json surface sets `?requestId=hd-json` before the hash with `history.replaceState`, as the opener does (`execute/index.vue:573-575`), because a reload would drop the port stub. Each surface asserts its fixture text in the viewer (`transfer_in_private`, `hd-fixture-line-5`), the json host's `json-content` testid, that the stub was asked, and that the hash is still the window's route before the shot. No testid is added.
+
+The json surface also runs the call-shape probe: in the extension page, `getCurrent(cb)` and `getCurrent(undefined, cb)` must report the same window id, each callback reading `lastError` itself and finding none, on both builds and both browsers. The close itself is not captured: in the harness it would close the capture window.
 
 ## Results
 
@@ -110,6 +115,13 @@ _Filled at the end of the build._
 One arc, `hd/19b-json-logger-close-guard`, stacked on `hd/19-dapp-windows`. Code review: the Codex loop above.
 
 ## Decisions (delegated)
+
+### Plan audit, Codex leg (GPT-6 Astra, xhigh, read-only): REVISE
+
+Both findings adopted:
+
+1. **The `lastError` path was claimed, not pinned.** An `if (window?.id)` mutant passed both original rows while swallowing today's `TypeError`. Adopted: row 3 pins the exact engine text and no removal, with the optional-chaining and parameter-rename mutants. Codex confirmed in Bun that both today's and the helper's expression report `evaluating 'window.id'`.
+2. **The screenshot surfaces lacked host-readiness checks.** Adopted: a seeded profile (Home, unlocked) is asserted, `requestId` is set before the hash, the final route and fixture content are asserted before the shot, and the probe reads `lastError` inside each callback. No logger testid is needed: the fixture text in the viewer and the route identify the host.
 
 ### Route 2: the json and logger window close guard
 
