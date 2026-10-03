@@ -11,7 +11,7 @@ import { requireActiveProfile } from "@/wallet/services/profile/require-active-p
 import { NetworkService } from "@/wallet/services/network/service"
 import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
-import { array_max, hasIntersectionByKeys, KeyedLock, Lock } from "@/wallet/utils"
+import { array_max, fromBase64Lenient, hasIntersectionByKeys, KeyedLock, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import {
@@ -439,7 +439,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 				zeroize(dek)
 			}
 		} else if (account.type === AccountType.Nulo_v1) {
-			const masterCopy = Buffer.from(master, "base64")
+			const masterCopy = fromBase64Lenient(master)
 			const masterFr = Fr.fromBuffer(masterCopy)
 			zeroize(masterCopy)
 			const seed = await deriveAccountSeed(masterFr, account.l1ChainId, account.type, account.index)

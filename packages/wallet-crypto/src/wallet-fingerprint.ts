@@ -23,6 +23,7 @@
  * against public chain state), and that against an UNKNOWN phrase the preimage space is the full
  * master entropy.
  */
+import { bytesToHex } from "@nulo/wallet-core/utils"
 import type { MasterSecretBytes } from "./secret-types"
 import { zeroize } from "./zeroize"
 
@@ -34,7 +35,7 @@ export async function computeWalletFingerprint(master: MasterSecretBytes): Promi
 	preimage.set(master, FINGERPRINT_LABEL.length)
 	try {
 		const digest = await globalThis.crypto.subtle.digest("SHA-256", preimage)
-		return Buffer.from(digest).toString("hex")
+		return bytesToHex(new Uint8Array(digest))
 	} finally {
 		// The preimage copy embeds the master.
 		zeroize(preimage)

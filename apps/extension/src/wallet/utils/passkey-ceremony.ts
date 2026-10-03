@@ -18,7 +18,7 @@ import {
 	PASSKEY_PRF_LABEL,
 } from "@nulo/wallet-crypto"
 import { PASSKEY_TIMEOUT, type PasskeyRequest, RP_ID } from "@/wallet/services/passkey/spec"
-import { fromBase64, toBase64 } from "@/wallet/utils"
+import { bytesToHex, fromBase64, toBase64 } from "@/wallet/utils"
 import { formatPasskeyUserName } from "./passkey-label"
 
 function encodeBase64(buf: BufferSource): string {
@@ -136,7 +136,7 @@ async function runGet(credentialId: string | undefined, signal?: AbortSignal): P
 	return {
 		id: asBase64CredentialId(encodeBase64(assertion.rawId)),
 		prf: asBase64SecretPrf(encodeBase64(ext.prf.results.first)),
-		userHandle: userHandleOption ? asHexUserHandle(Buffer.from(userHandleOption).toString("hex")) : undefined,
+		userHandle: userHandleOption ? asHexUserHandle(bytesToHex(new Uint8Array(userHandleOption))) : undefined,
 	}
 }
 

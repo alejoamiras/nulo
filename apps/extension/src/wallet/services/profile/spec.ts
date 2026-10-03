@@ -1,5 +1,6 @@
 // Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 import type { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { getRandomHex } from "@nulo/wallet-core/utils"
 import type {
 	Base64CredentialId,
 	Base64MasterSecret,
@@ -103,8 +104,7 @@ export type Profile = Omit<ProfileInfo, "recoveryMode"> & {
 
 /** Mint a fresh 128-bit Web-Crypto incarnation generation (32 hex chars). */
 export function mintPxeGeneration(): string {
-	const bytes = crypto.getRandomValues(new Uint8Array(16))
-	return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
+	return getRandomHex(32)
 }
 
 export type Session = {

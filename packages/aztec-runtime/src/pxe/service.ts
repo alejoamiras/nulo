@@ -34,7 +34,7 @@ const AccessScopesSchema = z.array(AztecAddress.schema)
 import type { ServiceSpec } from "@nulo/wallet-core/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/offscreen"
 import type { ILogger } from "@nulo/wallet-core/logger"
-import { EventHandler, ReadWriteGuard, errorMessageFromUnknown } from "@nulo/wallet-core/utils"
+import { EventHandler, ReadWriteGuard, array_equals, errorMessageFromUnknown, fromBase64 } from "@nulo/wallet-core/utils"
 import type { ChainRuntime, NetworkInfo, ProvePhaseEvent } from "./chain-runtime"
 import { ChainRuntimeRegistry, ProductionPxeFactory, PXE_STORE_KEY_MISSING, type PxeFactory } from "./chain-runtime"
 import { PXE_DATA_DIR_ROOT, chainDataDir, chainDataDirPrefix, chainRegistryKey, chainRegistryKeyPrefix } from "./chain-coordinates"
@@ -170,7 +170,7 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 	/** Per-profile 32-byte store encryption keys, provisioned by the SW after unlock (and
 	 *  re-provisioned on demand after an offscreen restart — in-memory only, never persisted).
 	 *  Dropped on profile delete. */
-	private readonly storeKeys = new Map<string, Uint8Array>()
+	private readonly storeKeys = new Map<string, Uint8Array<ArrayBuffer>>()
 	/**
 	 * Per-profile incarnation lifecycle (issue #281 D4), keyed by profileId:
 	 * absent = `unseen` → `live(gen)` on provision → `deleting(gen)` marked
@@ -825,7 +825,7 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 	 * restart is the expected path.
 	 */
 	public async provisionChainStoreKey(profileId: string, storeKeyBase64: string, generation: string): Promise<void> {
-		const key = Uint8Array.from(atob(storeKeyBase64), (c) => c.charCodeAt(0))
+		const key = fromBase64(storeKeyBase64)
 		const refuse = (why: string): never => {
 			key.fill(0)
 			throw new Error(`provisionChainStoreKey: ${why}`)
@@ -856,7 +856,7 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 		const installed = this.storeKeys.get(profileId)
 		if (current?.kind === "live" && installed) {
 			// The decoded copy is secret material either way: wiped when redundant, wiped when refused.
-			const same = installed.every((b, i) => b === key[i])
+			const same = array_equals(installed, key)
 			key.fill(0)
 			if (!same) {
 				throw new Error(

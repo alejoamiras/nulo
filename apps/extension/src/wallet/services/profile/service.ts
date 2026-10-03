@@ -16,10 +16,10 @@ import {
 	RestoreTornError,
 	SessionEndedError,
 } from "@nulo/extension-messaging/errors"
-import { Lock } from "@/wallet/utils"
+import { fromBase64Lenient, Lock } from "@/wallet/utils"
 import { ProfileRepository } from "./repository"
 import { EventHandler } from "@nulo/wallet-core/utils"
-import { array_equals, canonicalizeMnemonic, getEntropy, getMnemonic } from "@nulo/wallet-core/utils"
+import { array_equals, canonicalizeMnemonic, getEntropy, getMnemonic, toBase64 } from "@nulo/wallet-core/utils"
 import {
 	asBase64Ciphertext,
 	asImportedKeysDek,
@@ -1650,7 +1650,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				await this.assertEntropyMasterPair(unsealed.secret, unsealed.entropy)
 				// Backup `master-key` semantics: ALWAYS the derived master, never entropy —
 				// restore() seals this value verbatim as the working master.
-				return Buffer.from(unsealed.secret).toString("base64")
+				return toBase64(unsealed.secret)
 			} finally {
 				// zero secrets after base64-encode escapes (the base64
 				// string is the wire format; we can't zero strings).
@@ -1808,9 +1808,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				dek = generateImportedKeysDek()
 			}
 			return {
-				masterKey: Buffer.from(unsealed.secret).toString("base64"),
-				entropy: Buffer.from(unsealed.entropy).toString("base64"),
-				importedKeysDek: Buffer.from(dek).toString("base64"),
+				masterKey: toBase64(unsealed.secret),
+				entropy: toBase64(unsealed.entropy),
+				importedKeysDek: toBase64(dek),
 				dekReplaced,
 			}
 		} finally {
@@ -1982,7 +1982,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 *  PBKDF2 + AES-GCM path — with the shared purpose AAD). */
 	private async sealDekWithPasshash(passhash: Passhash, dek: ImportedKeysDek): Promise<string> {
 		const key = await EncryptionKey.fromPasshash(passhash)
-		return Buffer.from(await key.encrypt(dek, IMPORTED_DEK_AAD)).toString("base64")
+		return toBase64(await key.encrypt(dek, IMPORTED_DEK_AAD))
 	}
 
 	/** Unseal the DEK slot under the password credential. `null` — not a throw — on any
@@ -1991,7 +1991,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	private async unsealDekWithPasshash(passhash: Passhash, dekSealed: string): Promise<ImportedKeysDek | null> {
 		try {
 			const key = await EncryptionKey.fromPasshash(passhash)
-			const pt = await key.decrypt(Buffer.from(dekSealed, "base64") as Uint8Array<ArrayBuffer>, IMPORTED_DEK_AAD)
+			const pt = await key.decrypt(fromBase64Lenient(dekSealed), IMPORTED_DEK_AAD)
 			if (pt.length !== IMPORTED_KEYS_DEK_LEN) {
 				zeroize(pt)
 				return null
@@ -2208,7 +2208,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		password: string,
 		allowDuplicate: boolean,
 	): Promise<Restored<ProfileInfo>> {
-		const plainSecret = Buffer.from(secret.masterKey, "base64")
+		const plainSecret = fromBase64Lenient(secret.masterKey)
 		if (plainSecret.byteLength !== 32) {
 			zeroize(plainSecret)
 			throw new Error("Invalid master key length")
@@ -2219,7 +2219,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		// doctored blob can carry a self-consistent-looking but mismatched pair — restoring
 		// it would mint a profile whose displayed recovery words derive a DIFFERENT master
 		// than the one in use (audit H3).
-		const plainEntropy = Buffer.from(secret.entropy, "base64") as Uint8Array<ArrayBuffer>
+		const plainEntropy = fromBase64Lenient(secret.entropy)
 		if (plainEntropy.byteLength !== 32) {
 			zeroize(plainSecret)
 			zeroize(plainEntropy)
@@ -2239,7 +2239,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 		// The SOURCE profile's DEK — required by the epoch-4 shape; used ONLY to seed the
 		// rewrap context (a restored clone must never share the source's DEK).
-		const sourceDek = Buffer.from(secret.importedKeysDek ?? "", "base64") as Uint8Array<ArrayBuffer>
+		const sourceDek = fromBase64Lenient(secret.importedKeysDek ?? "")
 		if (sourceDek.byteLength !== 32) {
 			zeroize(plainSecret)
 			zeroize(plainEntropy)
