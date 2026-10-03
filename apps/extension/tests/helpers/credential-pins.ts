@@ -24,7 +24,11 @@ export async function expectMaskToggle(w: VueWrapper, c: MaskToggleCase): Promis
 	expect(btn.tagName).toBe("BUTTON")
 	expect(btn.getAttribute("type")).toBe("button")
 	expect(btn.getAttribute("tabindex")).toBe("-1")
-	expect(w.get(`[data-testid="${c.field}"]`).element.contains(btn)).toBe(true)
+	const fieldRoot = w.get(`[data-testid="${c.field}"]`).element
+	expect(fieldRoot.contains(btn)).toBe(true)
+	// The `#suffix` slot sits in the input's clickable row; `#bottom` is a direct child of the root.
+	expect(btn.parentElement).not.toBe(fieldRoot)
+	expect(btn.parentElement?.contains(nativeInput(w, c.field))).toBe(true)
 	expect(icon()?.className).toContain("color--secondary")
 	expect(icon()?.style.fontSize).toBe("18px")
 
