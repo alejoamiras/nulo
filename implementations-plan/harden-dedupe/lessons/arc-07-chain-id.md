@@ -36,3 +36,9 @@
   - From `apps/extension`, a plain `bun` import of `chain-ids.ts` resolves outside Vite and prints `2904119610`.
 - **Local gates at the Phase 2 head:** `lint`, `typecheck:all`, `test:all`, `test:ci-gating` and `audit:vue` all exit 0.
 - **`test:release` exits 1 on three environmental failures.** They are the `zip-reproducible` tests, and `zip` is not installed on this machine (`Executable not found in $PATH: "zip"`). The `scripts/publish/` subset passes (28 tests, 0 failures). CI's runner has `zip`.
+
+## Codex loop
+
+- **Code round 1** (GPT-6 Astra, xhigh): CONVERGED, one nit adopted: a formula-derived expectation in `network/service.test.ts` duplicated the literal beside it.
+- **Reservation lead: non-issue.** `background.ts:761` decodes the same `chainInfo` inside its `try`, before admission, so a malformed value never reaches `session-established.ts:71`; unclaimed reservations also expire (`verify-admission.ts:329`).
+- Delivered ahead of dapp-grant-planning (arc 6), which was still building; restacked onto `harden-dedupe` after visual-shells-a landed.
