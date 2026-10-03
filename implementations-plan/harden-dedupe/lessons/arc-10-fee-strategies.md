@@ -73,5 +73,9 @@ Codex confirmed its three plan blockers resolved, and re-verified 112/112 base-a
 Codex confirmed every round-1 finding resolved: V2 and V3 match the base's access expressions and timing, the second subscription is realistic, the native click reaches the handler, and the eager-P1 pin is sound.
 
 - **The P3 pin leaked a live retry timer.** `recommitAcross` restores real timers before it returns; the override click then resubscribes the card, and the failed read arms a real 5 s retry that only the card's own retry-capable subscription can stop. Releasing `holder` alone left it running into later tests' shared mocks.
-  - Fix: the test runs its post-recommit section under fake timers, asserts a timer is armed, unmounts the card and releases the holder, then asserts `vi.getTimerCount()` is 0. A `finally` unmounts and releases on any failure, including one inside the helper after the card is mounted.
+  - Fix: the test runs its post-recommit section under fake timers, asserts a timer is armed, unmounts the card and releases the holder, then asserts `vi.getTimerCount()` is 0. A `finally` unmounts and releases on a failure after the callback has run; it missed one before the callback (corrected in round 3).
   - Verified: P3's presence-line mutant still killed (1); the file passes 140/140 under three shuffled seeds; lint clean.
+
+### Round 3: one should-fix in test code (adopted)
+
+- **Cleanup missed a failure before the callback.** The test learned of the card only from `recommitAcross`'s callback, so the helper's own degraded assertion, which runs after the mount, could throw with nothing for the outer `finally` to unmount. Fix: the helper keeps its wrapper and unmounts it in a `catch` before rethrowing; the test takes the card from the helper's return, and its `finally` covers the later failures and releases the holder. Proved with a deleted scratch copy whose degraded assertion was forced to fail: one `unmount` call with the `catch`, none without. The file passes 140/140 under three shuffled seeds; lint and typecheck clean.

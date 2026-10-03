@@ -2462,12 +2462,13 @@ describe("FeeSettingsCard — the identity guards, field by field", () => {
 		// biome-ignore lint/suspicious/noExplicitAny: test-only global stub
 		const chromeAny = (globalThis as any).chrome
 		const origGet = chromeAny.storage.local.get
+		let w: ReturnType<typeof mount> | undefined
 		try {
 			mocks.getGasBalances.mockRejectedValueOnce(new Error("boom"))
 			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: HELD, privateFeeJuice: null })
 			mocks.getFpcs.mockResolvedValue([SPONSOR])
 			const live = liveIdentity()
-			const w = mount(FeeSettingsCard, { props: baseProps(live), global: { stubs: STUBS } })
+			w = mount(FeeSettingsCard, { props: baseProps(live), global: { stubs: STUBS } })
 			await vi.advanceTimersByTimeAsync(0)
 			expect(degraded(w)).toBe(true)
 			const gate = deferred<void>()
@@ -2484,6 +2485,9 @@ describe("FeeSettingsCard — the identity guards, field by field", () => {
 			gate.resolve()
 			await vi.advanceTimersByTimeAsync(0)
 			return w
+		} catch (error) {
+			w?.unmount()
+			throw error
 		} finally {
 			chromeAny.storage.local.get = origGet
 			vi.useRealTimers()
@@ -2506,7 +2510,6 @@ describe("FeeSettingsCard — the identity guards, field by field", () => {
 		let mounted: ReturnType<typeof mount> | undefined
 		try {
 			const w = await recommitAcross(async (_live, card) => {
-				mounted = card
 				before = settingsEmitted(card).length
 				// Another subscriber on the key (a second operation card, say) keeps the recovered entry
 				// alive after this card releases its lease.
@@ -2517,6 +2520,7 @@ describe("FeeSettingsCard — the identity guards, field by field", () => {
 				await card.setProps({ modelValue: { paymentMethod: { kind: "embedded" } } })
 				await vi.advanceTimersByTimeAsync(0)
 			})
+			mounted = w
 			expect(w.find('[data-testid="send-fee-embedded"]').exists()).toBe(true)
 			expect(settingsEmitted(w).slice(before)).toEqual([])
 			// The failed read below arms the card's retry; fake timers keep it from outliving the test.
