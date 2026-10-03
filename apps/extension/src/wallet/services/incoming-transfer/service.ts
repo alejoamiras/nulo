@@ -77,6 +77,9 @@ type PublicEventContext = {
 /** Who a receipt's trust promotion and prompt are for. */
 type TrustScope = { profileId: string; networkId: string; accountAddress: string; contract: string }
 
+/** One scope's clear: which scan episodes it drops, how it evicts fee-cache entries, and its wipe. */
+type ScopeClear = { dropsEpisode: (key: string) => boolean; evictFees: () => void; wipe: () => Promise<void> }
+
 type TrustFence = (isCurrent: () => boolean) => { live: () => boolean; kept: () => boolean }
 
 type OutboxRowKey = { profileId: string; networkId: string; accountAddress: string; tokenId: number }
@@ -700,57 +703,49 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 
 	public async clearProfile(profileId: string): Promise<void> {
 		await this.ensureInitialized()
-		await this.withServiceLock(async () => {
-			// Bump the epoch FIRST (before any eviction or await): an off-lock getReceiptFee that started
-			// before this clear must observe the change so its post-fetch cache write is skipped — otherwise
-			// it could repopulate the cache during the repo-delete await, after we've evicted.
-			this.bumpServiceEpoch()
-			// The fee cache is keyed by networkId (not profileId), so a profile's networkIds aren't
-			// recoverable here — clear it wholesale. It's tiny (only viewed public receipts) and a stale
-			// entry is harmless anyway (its record is gone, so getReceiptFee returns null before the cache).
-			this.dropEpisodes((key) => key.startsWith(`${profileId}|`))
-			this.feeCache.clear()
-			try {
-				await this.repo.clearProfile(profileId)
-				// Lock held across the wipe AND scheduler rebuild so a queued poll
-				// can't fire between the two and repopulate state we just cleared
-				// (codex R2 H1). hydrateSchedulers bumps serviceEpoch internally
-				// so any in-flight scan whose snapshot predates this wipe bails.
-				await this.hydrateSchedulers()
-			} finally {
-				// Re-clear AFTER hydration (in finally so it's absolute even if the wipe/rebuild threw): a
-				// getReceiptFee that captured the post-first-bump epoch could have written an entry in the
-				// window before hydrate's second bump. Its record is already gone (so the entry is
-				// unreachable anyway), but sweep it to keep the map honest.
-				this.feeCache.clear()
-			}
-		})
+		// The fee cache is keyed by networkId, so a profile's entries cannot be picked out: it is cleared
+		// wholesale. It holds only viewed public receipts, and an entry whose record is gone is unreachable.
+		await this.withServiceLock(() =>
+			this.clearScopeLocked(() => ({
+				dropsEpisode: (key) => key.startsWith(`${profileId}|`),
+				evictFees: () => this.feeCache.clear(),
+				wipe: () => this.repo.clearProfile(profileId),
+			})),
+		)
 	}
 
 	public async clearChain(profileId: string, networkId: string): Promise<void> {
 		await this.ensureInitialized()
-		await this.withServiceLock(async () => {
-			// Bump the epoch FIRST (before eviction or any await) so an in-flight off-lock getReceiptFee
-			// can't repopulate the cache after we evict — see clearProfile for the full rationale.
-			this.bumpServiceEpoch()
-			// Evict this network's fee-cache entries (keyed `${networkId}|…`) so a chain purge doesn't
-			// leave them dangling for the worker's lifetime.
-			const evict = () => {
-				for (const key of this.feeCache.keys()) if (key.startsWith(`${networkId}|`)) this.feeCache.delete(key)
-			}
-			const episodePrefix = scanEpisodeNetworkPrefix(profileId, networkId)
-			this.dropEpisodes((key) => key.startsWith(episodePrefix))
-			evict()
-			try {
-				await this.repo.clearChain(profileId, networkId)
-				await this.hydrateSchedulers()
-			} finally {
-				// Re-evict AFTER hydration (in finally so it's absolute even if the wipe/rebuild threw):
-				// closes the window where a getReceiptFee holding the post-first-bump epoch wrote an
-				// (already-unreachable) entry before hydrate's second bump. See clearProfile.
-				evict()
-			}
-		})
+		await this.withServiceLock(() =>
+			this.clearScopeLocked(() => {
+				const episodePrefix = scanEpisodeNetworkPrefix(profileId, networkId)
+				return {
+					dropsEpisode: (key) => key.startsWith(episodePrefix),
+					evictFees: () => {
+						for (const key of this.feeCache.keys()) if (key.startsWith(`${networkId}|`)) this.feeCache.delete(key)
+					},
+					wipe: () => this.repo.clearChain(profileId, networkId),
+				}
+			}),
+		)
+	}
+
+	/** Wipe one scope; the caller holds the lock. The epoch is bumped before anything else, so an
+	 *  off-lock fee read that began earlier skips its cache write, and the scope is built after the
+	 *  bump. The wipe and the scheduler rebuild share the lock, so no queued poll repopulates the scope
+	 *  between them. Fees are evicted again in `finally`: a fee read holding the first bump's epoch can
+	 *  write before the rebuild's own bump. */
+	private async clearScopeLocked(scopeFor: () => ScopeClear): Promise<void> {
+		this.bumpServiceEpoch()
+		const scope = scopeFor()
+		this.dropEpisodes(scope.dropsEpisode)
+		scope.evictFees()
+		try {
+			await scope.wipe()
+			await this.hydrateSchedulers()
+		} finally {
+			scope.evictFees()
+		}
 	}
 
 	// --- arrivals ---
