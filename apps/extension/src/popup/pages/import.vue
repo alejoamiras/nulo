@@ -34,6 +34,7 @@ import ImportFullBackupForm from "@/components/composite/import/ImportFullBackup
 import ImportMethodPicker from "@/components/composite/import/ImportMethodPicker.vue"
 import ImportSecretForm from "@/components/composite/import/ImportSecretForm.vue"
 import PasskeyCeremonyDialog from "@/components/passkey/PasskeyCeremonyDialog.vue"
+import ProfileNameField from "@/components/composite/ProfileNameField.vue"
 
 const appStore = useAppStore()
 const notificationStore = useNotificationStore()
@@ -181,23 +182,14 @@ onBeforeUnmount(() => {
 	>
 		<div v-if="nameFieldState === 'shown'" :class="$style.name_section">
 			<span :class="$style.section_label">Profile name</span>
-			<div :class="[shakeName && $style.shake]">
-				<Input
-					ref="nameInputRef"
-					v-model="profileName"
-					type="text"
-					placeholder="My Profile"
-					:maxLength="32"
-					:error="!!nameError"
-					:ariaInvalid="!!nameError"
-					sanitize
-					data-testid="import-name-input"
-					@input="handleNameInput"
-				/>
-			</div>
-			<Text v-if="nameError" size="12" color="red" height="150" role="alert">
-				{{ nameError }}
-			</Text>
+			<ProfileNameField
+				ref="nameInputRef"
+				v-model="profileName"
+				:error="nameError"
+				:shake="shakeName"
+				testid="import-name-input"
+				@input="handleNameInput"
+			/>
 		</div>
 
 		<ImportMethodPicker
@@ -347,18 +339,5 @@ onBeforeUnmount(() => {
 	text-transform: uppercase;
 	letter-spacing: 0.18em;
 	color: var(--nulo-secondary);
-}
-
-@keyframes shakeInput {
-	0% { transform: translateX(0); }
-	20% { transform: translateX(-4px); }
-	40% { transform: translateX(4px); }
-	60% { transform: translateX(-3px); }
-	80% { transform: translateX(2px); }
-	100% { transform: translateX(0); }
-}
-
-.shake {
-	animation: shakeInput 0.4s ease;
 }
 </style>
