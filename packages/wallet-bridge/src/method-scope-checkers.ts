@@ -25,7 +25,7 @@ type WireExecPayload = { calls?: unknown }
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
-export function matchesPattern(contract: string, fn: string, pattern: ScopePattern): boolean {
+function matchesPattern(contract: string, fn: string, pattern: ScopePattern): boolean {
 	return (
 		(pattern.contract === "*" || sameFieldAddress(String(pattern.contract), contract)) &&
 		(pattern.function === "*" || pattern.function === fn)
@@ -44,12 +44,11 @@ function matchesScope(contract: string, fn: string, scope: Scope): boolean {
 	return scope.some((p) => matchesPattern(contract, fn, p))
 }
 
-export function inAddressList(address: string, list: "*" | unknown[]): boolean {
+function inAddressList(address: string, list: "*" | unknown[]): boolean {
 	if (list === "*") return true
 	return list.some((item) => sameFieldAddress(String(item), address))
 }
 
-/** Grants of one capability type, narrowed to that variant by the one cast. */
 export function grantsOfType<K extends Capability["type"]>(grants: GrantedCapabilityRecord[], type: K): Extract<Capability, { type: K }>[] {
 	return grants.filter((g) => g.capability.type === type).map((g) => g.capability as Extract<Capability, { type: K }>)
 }

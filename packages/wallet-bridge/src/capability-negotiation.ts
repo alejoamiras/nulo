@@ -17,7 +17,7 @@ import type {
 } from "./capabilities"
 import type { CapabilityResult } from "./dapp-interaction-protocol"
 import { isFieldAddress, sameFieldAddress } from "./field-address"
-import { coversAnyContract, effectiveGrants, grantsOfType, inAddressList, matchesPattern } from "./method-scope-checkers"
+import { coversAnyContract, effectiveGrants, grantsOfType } from "./method-scope-checkers"
 import type { IDappSessionRef } from "./session-types"
 import { ValidationError } from "@nulo/extension-messaging/errors"
 
@@ -28,6 +28,7 @@ function contractsRequestCovered(existing: ContractsCapability[], requested: Con
 	const flagCovered = (flag: "canRegister" | "canGetMetadata"): boolean => {
 		if (!requested[flag]) return true
 		if (requested.contracts === "*") return existing.some((e) => e[flag] && e.contracts === "*")
+		// Kept inline, not the checker's matcher: a malformed stored element must throw the same text.
 		return requested.contracts.every((addr) =>
 			existing.some((e) => e[flag] && (e.contracts === "*" || e.contracts.some((x) => sameFieldAddress(String(x), String(addr))))),
 		)
@@ -42,7 +43,14 @@ function contractsRequestCovered(existing: ContractsCapability[], requested: Con
 function scopeCovers(existing: Scope, requested: Scope): boolean {
 	if (existing === "*") return true
 	if (requested === "*") return false
-	return requested.every((rp) => existing.some((ep) => matchesPattern(String(rp.contract), rp.function, ep)))
+	// Kept inline, not the checker's matcher: a malformed stored element must throw the same text.
+	return requested.every((rp) =>
+		existing.some(
+			(ep) =>
+				(ep.contract === "*" || sameFieldAddress(String(ep.contract), String(rp.contract))) &&
+				(ep.function === "*" || ep.function === rp.function),
+		),
+	)
 }
 
 function transactionRequestCovered(existing: TransactionCapability[], requested: TransactionCapability): boolean {
@@ -84,7 +92,8 @@ function privateEventsCovered(held: DataCapability[], requested: "*" | string[] 
 		held.some((h) => {
 			// An address-book-only grant legitimately has no list.
 			const list = h.privateEvents?.contracts
-			return list === "*" || (Array.isArray(list) && inAddressList(String(addr), list))
+			// Kept inline, not the checker's matcher: a malformed stored element must throw the same text.
+			return list === "*" || (Array.isArray(list) && list.some((x) => sameFieldAddress(String(x), String(addr))))
 		}),
 	)
 }
@@ -459,8 +468,9 @@ function ensureAccountsGrant(result: CapabilityResult, delta: Record<string, unk
 }
 
 /** Approved DELTA types REPLACE their stored grant; never-granted types append. The popup echoes
- *  held caps beside the approved delta, so a replaced type takes the LAST answer entry of that type
- *  that differs from the stored capability, else the delta's requested shape. */
+ *  held caps beside the approved delta, so a replaced type takes the last answer entry of that type
+ *  that differs from the stored capability, else the last answer entry of that type, and only when
+ *  the answer has none, the delta's requested shape. */
 function collectNewGrants(
 	popupResults: Record<string, unknown>[],
 	plan: CapabilityPlan,

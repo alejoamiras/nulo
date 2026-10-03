@@ -386,7 +386,7 @@ export function assertKnownMethod(methodName: string): asserts methodName is Met
 	}
 }
 
-// Pre-computed once at module load — these are what the facades import in Phase 2.
+// Pre-computed once at module load — these are what the facades import.
 export const METHOD_CAPABILITY_MAP: Record<string, CapabilityType> = deriveCapabilityMap(METHOD_REGISTRY)
 export const EXEMPT_METHODS: Set<string> = deriveExemptSet(METHOD_REGISTRY)
 export const METHOD_TO_KIND: Record<string, OperationKind> = deriveMethodToKind(METHOD_REGISTRY)
