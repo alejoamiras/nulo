@@ -4,7 +4,7 @@ The checklist for bumping the Aztec / Noir dependency line. **`@aztec-labs/*` an
 
 > **Convention:** any code that types against an Aztec package's shape (a PXE method signature, a wire type, an artifact field) MUST add an entry to **§ Types coupled to Aztec shapes** below, with `file:line`, so the next bump has a checklist. Round-2 phase R4 (P18b PXE descriptor) is the first to append here.
 
-Current line: **`@aztec-labs/*` and `@aztec-foundation/*` = 6.0.0-rc.1**, with `@aztec-foundation/aztec-standards`, `@alejoamiras/private-fee-juice` and `@alejoamiras/presto` on the same line (Noir wasm packages `noir-acvm_js` / `noir-noirc_abi` carry Bun patches — see below). The 5.2.0 → 6.0.0-rc.1 bump, a scope move with a network reset and a new address regime, is `implementations-plan/nulo-v6/`.
+Current line: **`@aztec-labs/*` and `@aztec-foundation/*` = 6.0.0-rc.1**, with `@aztec-foundation/aztec-standards`, `@alejoamiras/private-fee-juice` and `@alejoamiras/presto` on the same line (Noir wasm packages `noir-acvm_js` / `noir-noirc_abi` carry Bun patches — see below). The 5.2.0 → 6.0.0-rc.1 bump, a scope move with a network reset and a new address regime, is `implementations-plan/archive/nulo-v6/`.
 
 ## Before you bump
 1. Read the upstream `@aztec-labs/aztec.js` + `@aztec-labs/pxe` changelog for the target version — note any renamed/removed exports, PXE method signature changes, or artifact-format changes.

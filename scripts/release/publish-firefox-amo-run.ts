@@ -12,6 +12,7 @@ import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { existsSync, readFileSync, statSync } from "node:fs"
 import {
+	amoChars,
 	type ApiRequest,
 	apiError,
 	checkFirefoxManifest,
@@ -26,6 +27,7 @@ import {
 	OWN_ADDONS_MAX_PAGES,
 	ownAddonsRequest,
 	RECOVERY,
+	REJECTED,
 	reviewerNotes,
 	sourcePackageJsonPath,
 	sourceRequest,
@@ -142,7 +144,7 @@ async function runPublish(env: Record<string, string | undefined>, io: RunIO): P
 	if (!inputs.ok) return fail(io, inputs.reason)
 	const { version, storeVersion, zipPath, sourcePath, notes } = inputs.value
 	io.log(`zip ok: ${zipPath} — manifest version ${storeVersion} (version_name ${version}), gecko id ${GECKO_ID}, settled data declaration`)
-	io.log(`source ok: ${sourcePath}; reviewer notes: ${notes.length} chars`)
+	io.log(`source ok: ${sourcePath}; reviewer notes: ${amoChars(notes)} chars`)
 
 	if (dryRun === "true") {
 		io.log(`dry run: would upload, validate, create version ${storeVersion} on the listed channel and attach the source; no request was made`)
@@ -166,7 +168,7 @@ async function runPublish(env: Record<string, string | undefined>, io: RunIO): P
 	} catch (e) {
 		return fail(io, `create version: unexpected failure (${errorName(e)}); ${RECOVERY}`)
 	}
-	if (!created.ok) return fail(io, `${created.reason}; ${RECOVERY}`)
+	if (!created.ok) return fail(io, `${created.reason}; ${"rejected" in created && created.rejected ? REJECTED : RECOVERY}`)
 	io.log(`version ok: id ${created.value.id}, ${storeVersion} on ${created.value.channel}; file ${created.value.fileStatus}`)
 
 	let attached: Awaited<ReturnType<typeof attachSource>>
@@ -243,10 +245,10 @@ async function upload(io: RunIO, auth: Auth, zip: Uint8Array, filename: string):
 	return { ok: false, reason: `upload not validated after ${VALIDATION_DEADLINE_MS / 1000}s; no version was created` }
 }
 
-/** From the moment this request is sent, a failure may have left a version behind: the caller appends the recovery. */
+/** From the moment this request is sent, a failure may have left a version behind, unless AMO answered 400. */
 async function createVersion(io: RunIO, auth: Auth, uuid: string, notes: string, storeVersion: string) {
 	const res = await call(io, auth, versionRequest(GECKO_ID, uuid, notes), "create version", UPLOAD_TIMEOUT_MS)
-	if (!res.ok) return res
+	if (!res.ok) return { ...res, rejected: res.status === 400 }
 	return interpretVersion(res.json, storeVersion)
 }
 
@@ -256,7 +258,7 @@ async function attachSource(io: RunIO, auth: Auth, versionId: number | string, a
 	return interpretSource(res.json)
 }
 
-type CallResult = { ok: true; status: number; json: unknown } | { ok: false; reason: string }
+type CallResult = { ok: true; status: number; json: unknown } | { ok: false; reason: string; status?: number }
 
 /** One request under its timeout with a fresh, masked JWT. A 4xx/5xx is a failure carrying only the API's strings. */
 async function call(io: RunIO, auth: Auth, req: ApiRequest, what: string, timeoutMs: number): Promise<CallResult> {
@@ -270,7 +272,7 @@ async function call(io: RunIO, auth: Auth, req: ApiRequest, what: string, timeou
 		return { ok: false, reason: `${what}: request failed (${name === "TimeoutError" || name === "AbortError" ? `timed out after ${timeoutMs / 1000}s` : name})` }
 	}
 	if (res.json === null || typeof res.json !== "object") return { ok: false, reason: `${what}: HTTP ${res.status} with a non-JSON body` }
-	if (res.status >= 400) return { ok: false, reason: `${what}: HTTP ${res.status} — ${apiError(res.json)}` }
+	if (res.status >= 400) return { ok: false, status: res.status, reason: `${what}: HTTP ${res.status} — ${apiError(res.json)}` }
 	return { ok: true, status: res.status, json: res.json }
 }
 

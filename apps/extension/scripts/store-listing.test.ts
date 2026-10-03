@@ -91,12 +91,16 @@ describe("store listing", () => {
 		expect(declared).toEqual(built)
 	})
 
-	test("the reviewer-notes block exists, is non-empty and sits between the two markers", () => {
+	test("the reviewer-notes block exists, sits between the two markers and fits AMO's cap", () => {
 		const start = listing.indexOf("<!-- reviewer-notes:start -->")
 		const end = listing.indexOf("<!-- reviewer-notes:end -->")
 		expect(start).toBeGreaterThan(0)
 		expect(end).toBeGreaterThan(start)
-		expect(listing.slice(start + "<!-- reviewer-notes:start -->".length, end).trim().length).toBeGreaterThan(200)
+		const notes = listing.slice(start + "<!-- reviewer-notes:start -->".length, end).trim()
+		// AMO counts code points; `.length` would count an emoji as two.
+		const chars = [...notes].length
+		expect(chars).toBeGreaterThan(200)
+		expect(chars).toBeLessThanOrEqual(3000)
 	})
 })
 

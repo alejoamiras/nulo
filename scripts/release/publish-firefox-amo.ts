@@ -202,6 +202,13 @@ export function checkSourceArchive(entries: readonly string[], sizeBytes: number
 
 export const NOTES_START = "<!-- reviewer-notes:start -->"
 export const NOTES_END = "<!-- reviewer-notes:end -->"
+/** AMO's cap on `approval_notes`, counted by `amoChars`; it is enforced only when the version is created, after the upload. */
+export const NOTES_MAX = 3000
+
+/** A length as AMO's Python validator counts it: in code points, so an emoji is one, where `.length` counts two. */
+export function amoChars(text: string): number {
+	return [...text].length
+}
 
 /** The block `store/listing.md` keeps between its two markers, sent as `approval_notes`. */
 export function reviewerNotes(listing: string): Verdict<string> {
@@ -210,6 +217,8 @@ export function reviewerNotes(listing: string): Verdict<string> {
 	if (start < 0 || end < 0 || end < start) return { ok: false, reason: "listing.md has no reviewer-notes block between its markers" }
 	const notes = listing.slice(start + NOTES_START.length, end).trim()
 	if (!notes) return { ok: false, reason: "the reviewer-notes block is empty" }
+	const chars = amoChars(notes)
+	if (chars > NOTES_MAX) return { ok: false, reason: `the reviewer notes are ${chars} chars; AMO accepts at most ${NOTES_MAX}` }
 	return { ok: true, value: notes }
 }
 
@@ -218,4 +227,12 @@ export const RECOVERY = [
 	"do NOT re-run: the upload is consumed, AMO refuses a duplicate version number, and deleting a version never frees its number;",
 	"open the version in the Developer Hub (https://addons.mozilla.org/developers/) and attach the same git-archive source there,",
 	"or re-send only the source PATCH for that version id.",
+].join(" ")
+
+/** What to do when AMO answered the version request with a 400: it validated the request and created nothing. */
+export const REJECTED = [
+	"AMO rejected the request and created no version.",
+	"The job checks out the tag, so a cause in its files fails a re-run the same way:",
+	"submit the release's zip by hand in the Developer Hub (https://addons.mozilla.org/developers/) with the same git-archive source,",
+	"or ship the fix in the next release. Re-run only once a cause outside the tag is fixed.",
 ].join(" ")
