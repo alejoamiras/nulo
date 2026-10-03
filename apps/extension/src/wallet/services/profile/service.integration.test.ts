@@ -3804,7 +3804,8 @@ describe("byte codecs: export encoders and the lenient decodes of stored and res
 
 	test.each([
 		["master key", { masterKey: Buffer.alloc(31, 1).toString("base64") }, "Invalid master key length"],
-		["entropy", { entropy: Buffer.alloc(31, 1).toString("base64") }, "Invalid entropy length"],
+		// 28 bytes, not 31: `getMnemonic` itself refuses a length off a multiple of 4 with this same text.
+		["entropy", { entropy: Buffer.alloc(28, 1).toString("base64") }, "Invalid entropy length"],
 		["imported-keys DEK (absent)", { importedKeysDek: undefined }, "Invalid imported-keys dek length"],
 		["imported-keys DEK (short)", { importedKeysDek: Buffer.alloc(31, 1).toString("base64") }, "Invalid imported-keys dek length"],
 	])(
