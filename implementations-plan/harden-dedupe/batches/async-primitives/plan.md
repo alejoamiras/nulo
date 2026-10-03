@@ -9,280 +9,298 @@ eli5_mode: none (the program Artifact replaces per-batch ELI5 pages; see the pro
 branch: hd/15-async-primitives, stacked on harden-dedupe
 ---
 
-# async-primitives: one deadline race, one serial queue, one run fence, one record guard
+# async-primitives: one serial queue, one run fence, one record guard, one sleep
 
-Finding Q-16 and the record-guard half of Q-15 (part e), from `audit/quality/2026-09-30-dedup-high/`. The wallet hand-rolls the same four async idioms (deadline race, `sleep`, promise-chain queue, latest-wins counter) and two meanings of "is a record", in about forty places. This batch gives each idiom one definition and moves only the sites whose promise graph the helper reproduces exactly. A site whose awaits, ticks, timers or rejection policy differ stays inline and is listed. The one intended behaviour change is the program's pre-cleared LogsViewer timer clear, in its own commit with a red-then-green test.
+Finding Q-16 and the record-guard half of Q-15 (part e), from `audit/quality/2026-09-30-dedup-high/`. The wallet hand-rolls the same async idioms (deadline race, `sleep`, promise-chain queue, latest-wins counter) and two meanings of "is a record", in about forty places. This batch gives the queue, the fence, the guards and `sleep` one definition each, and moves only the sites whose promise graph and cleanup order stay exactly as they are. The deadline races all stay inline (see Deferred). The one intended behaviour change is the program's pre-cleared LogsViewer timer clear, made inline in its own commit with a red-then-green test.
 
 ## Outcome & Quality Bar
 
-- **For whom:** the next person who writes a timeout, a write queue or a stale-result check. Today each copy chooses its own timer cleanup, loser handling and rejection policy, and those choices already disagree.
+- **For whom:** the next person who writes a write queue, a stale-result check or a record guard. Today each copy picks its own rejection policy and its own meaning, and those choices already disagree.
 - **Excellent:**
-  - Every migrated site awaits the same promise graph as today. Permanent helper tests run each site's inline shape, copied verbatim, against the helper under a bounded microtask spinner, on the resolve, reject, synchronous-throw, timeout and throwing-reporter paths. A single added or removed tick fails them.
-  - Each site keeps its guard set (below), and Phase 1 tests turn red on every listed mutant.
-  - No error object, message, timer delay, clear point, rejection policy, write order or emit changes, on any engine.
-  - The published `@alejoamiras/nulo-wallet-crypto` bundle is byte-identical.
+  - Every migrated site awaits the same promise graph as today. Two permanent reference graphs, one per queue policy, fail on an added or removed promise hop under a bounded microtask spinner. During the arc, a seven-shape matrix (each site's inline shape copied verbatim) proves each migration and is logged before it collapses.
+  - Each site keeps its guard set (below), and Phase 1 tests turn red on every listed mutant that is not equivalent.
+  - No error object, message, timer delay, clear point, cleanup order, rejection policy, write order or emit changes, on any engine.
+  - The staged `@alejoamiras/nulo-wallet-crypto` package is byte-identical: the same file inventory, every file's sha256 equal.
 - **Good enough:** the sites whose shapes differ keep their own code (§ What stays inline). This is a dedup arc: aligning them is behaviour change.
 
 ## Architecture & Implementation
 
-Read on `harden-dedupe` at `1c0c67ad`. "Tick" means one microtask job, as counted by the spinner. Probe evidence is in Assumptions.
+Read on `harden-dedupe` at `1c0c67ad`. "Hop" means one microtask job, as counted by the spinner. The probe evidence is in Assumptions.
 
 ### The helpers (Phase 2, no consumer edits)
 
-All of them go in `packages/wallet-core/src/utils/`, exported from `index.ts`, except the fence, which stays in `apps/extension/src/composables/runFence.ts`. The fence is auto-imported and has no consumer outside the extension.
+The queue and the guards go in `packages/wallet-core/src/utils/`, exported from `index.ts`, each with a row in `packages/wallet-core/README.md`. The fence stays in `apps/extension/src/composables/runFence.ts`: it is auto-imported and has no consumer outside the extension.
 
-1. **`raceDeadline(work, ms, reason)`**, in `deadline.ts`. It builds `expiry = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(reason()), ms) })` and `race = Promise.race([work, expiry])`, attaches `race.then(clear, clear)`, and **returns `race` itself**: it is a plain function, never `async`. Awaiting it is therefore awaiting `Promise.race` inline. The clear reaction is registered before the caller's, so both jobs are enqueued by the same settlement, back to back, and the caller resumes at the same spinner count (probe 1). `reason` runs only inside the timer callback, as each site's expression does today. `work` is not cancelled.
-2. **`createSerialQueue(policy?)`**, in `serial.ts`. It returns `{ run(op), tail }`, and passes `op` straight to `then` as the sites do.
-   - No policy (*propagate*): `link = tail.then(op); tail = link.then(noop, noop); return link`. The caller sees `op`'s outcome, and the chain continues past a rejection.
-   - `{ onError }` (*report*): `link = tail.then(op).catch(onError); tail = link; return link`. The link never rejects unless `onError` throws, and in that case the next `op` is skipped and `onError` sees the rethrow, exactly as `scan-episodes` and `price` behave today.
-   - A policy object, not a flag, per the program's complexity rule.
-3. **`isRecord`** (non-null, non-array object) and **`isObjectLike`** (non-null object, arrays included), in `guards.ts`. Both are total: the only input that throws is a revoked `Proxy` reaching `Array.isArray`, and neither storage nor a port can carry one. Moving the expression therefore changes no native error text.
-4. **`sleep`** (`sleep.ts:1`): the runtime is unchanged; the return type narrows to `Promise<void>`, so `SystemClock` can return it as its port requires. `new Promise<void>((resolve) => setTimeout(resolve, ms))`.
-5. **`RunFence.invalidate()`**: `generation++`, for the sites that bump a counter without starting a run. `current()` is added only if the panel adopts Ask 1.
-
-### Q-16 (a): deadline races
-
-| site | today | after | timers, ticks, errors |
-|---|---|---|---|
-| `packages/extension-messaging/src/core/base-client.ts:284-301` `awaitReadyWithinDeadline` | the `remainingMs <= 0` precheck; `new Promise<never>` timer; `await Promise.race([ready, timeout])`; `finally` clear | the precheck stays; `await raceDeadline(ready, remainingMs, () => this.makeTimeoutError({ requestId, methodName, timeoutMs }))`; `try/finally` removed | same awaited promise; the clear moves from the caller's resume job to the job just before it; the same lazily built timeout error |
-| `packages/aztec-runtime/src/pxe/opfs-store.ts:124-135`, clear at `:168-170` | `store = await Promise.race([openPromise, expiry])` inside `try/catch/finally` | `store = await raceDeadline(openPromise, OPEN_TIMEOUT_MS, () => new ChainStoreOpenTimeoutError(…same text…))`; the `finally` (clear only) and `let timer` are removed; `catch` is unchanged | the timer is armed at the same point (after `inFlightOpens.set`); the quarantine `instanceof` sees the same class; cleared on resolve and on reject |
-| `apps/extension/src/components/JsonViewer/LogsViewer.vue:189-200` `fetchLogs` | an uncleared 500 ms timer that rejects with the string `"Logs fetch timeout"` | `await raceDeadline(fetch, 500, () => "Logs fetch timeout")`; `return await fetch` stays | **the pre-cleared fix:** the timer is now cleared on settle. Same ticks and same caught reason. Commit 3f, red-then-green |
+1. **`createSerialQueue(policy?)`**, in `serial.ts`. It returns `{ run(op), get tail() }` and passes `op` straight to `then`, as the sites do.
+   - No policy (*propagate*): `link = tail.then(op); tail = link.then(noop, noop); return link`. `run` returns `Promise<T>`: the caller sees `op`'s outcome, and the chain continues past a rejection.
+   - `{ onError }` (*report*): `link = tail.then(op).catch(onError); tail = link; return link`. `run` returns `Promise<T | void>`, and `run(op) === queue.tail` holds right after it. The link never rejects unless `onError` throws; then the tail rejects, the next `op` is skipped and `onError` sees the rethrow, exactly as `scan-episodes` and `price` behave today.
+   - `tail` is a live getter. A plain property would freeze at the initial promise and break `hydrate`'s contract that its write-back lands before it resolves (`scan-episodes.ts:89`, `:160`).
+   - Overloads give each policy its precise return type. It takes a policy object, not a flag, per the program's complexity rule. Its TSDoc says when to use it rather than `Lock`: the queue costs no hop of its own, while `withLock` is `async`.
+2. **`isRecord`** (non-null, non-array object) and **`isObjectLike`** (non-null object, arrays and boxed primitives included), in `guards.ts`, both typed `value is Record<string, unknown>`. Both are total: the only input that throws is a revoked `Proxy` reaching `Array.isArray`, and neither storage nor a port can carry one, so moving the expression changes no native error text.
+3. **`sleep`** (`sleep.ts:1`): the runtime is unchanged; the return type narrows to `Promise<void>` so `SystemClock` can return it as its port requires.
+4. **`RunFence.invalidate()`**: `generation++`, for the sites that bump a counter without starting a run.
 
 ### Q-16 (a): `sleep` copies (Phase 3a)
 
-Each one is `new Promise((r) => setTimeout(r, ms))`, and each becomes `sleep(ms)` from `@nulo/wallet-core/utils`. That is the same expression returned by a non-async arrow, so the awaited promise and the timer are identical. `sleep` reads the global `setTimeout` at call time, so vitest fake timers patch it exactly as they patch the inline copy.
+Each one is `new Promise((r) => setTimeout(r, ms))` and becomes `sleep(ms)` from `@nulo/wallet-core/utils`: the same expression returned by a non-async arrow, so the awaited promise and the timer are identical. `sleep` reads the global `setTimeout` at call time, so vitest fake timers patch it exactly as they patch the inline copy.
 
 - `apps/extension/src/popup/auth-guard.ts:66`
 - `apps/extension/src/stores/app.store.ts:648`
-- `apps/extension/src/wallet/services/execution/gas-balance-reader.ts:227` (the `?? GAS_BALANCE_FAILED_LEG_RETRY_DELAY_MS` operand is evaluated in place)
+- `apps/extension/src/wallet/services/execution/gas-balance-reader.ts:227` (the `??` operand is evaluated in place)
 - `apps/extension/src/core/adapters/system-clock.ts:13-15` (`return sleep(ms)`)
-- `apps/extension/src/composables/importPreflight.ts:31` `realSleep`, used at `:46` and `:61`, and imported by `importChainSync.ts:26` for its use at `:115`. `realSleep` is deleted, both files import `sleep`, and its auto-import lines leave `src/types/auto-imports.d.ts` and `.eslintrc-auto-import.json` (rebuilt under Vite; a stale line is deleted by hand, per lessons). No test names `realSleep`.
+- `apps/extension/src/composables/importPreflight.ts:31` `realSleep` (used at `:46`, `:61`; imported by `importChainSync.ts:26` for `:115`). It is deleted, both files import `sleep`, and its lines leave `src/types/auto-imports.d.ts` and `.eslintrc-auto-import.json`.
+
+### Q-16 (a): the LogsViewer timer (Phase 3f, route 2)
+
+`apps/extension/src/components/JsonViewer/LogsViewer.vue:189-200` arms a 500 ms timer that rejects with `"Logs fetch timeout"` and never clears it. The fix stays inline: the timer id is kept, and `await Promise.race([fetch, timeout])` is wrapped in a `try/finally` that clears it. The `finally` runs inside the race's resume job, so no hop is added, the caught reason is unchanged, and `return await fetch` stays. The new component test proves the clear red-then-green, and a separate row proves the timeout still falls back to `cnt / 4`.
 
 ### Q-16 (b): serial queues (Phase 3c)
 
-The probe ran all seven inline shapes and the helper over resolve, reject, synchronous throw and throwing-reporter scripts: the event logs match, on Bun and V8 (probe 2).
+Probe 2 and both audit legs ran all seven inline shapes against the helper on Bun and V8: the event logs match.
 
 | site | today | policy | guard set kept |
 |---|---|---|---|
 | `apps/extension/src/popup/components/modules/send/fee-send-selection.ts:75-82` | `link = chain.then(step, step); chain = link.catch(() => undefined)` | propagate | one module-scoped chain; read-modify-write never interleaves; a rejected write reaches its caller; later writes still run; `clearSendSelections` rides the same chain |
-| `apps/extension/src/utils/guarded-network-activation.ts:18,44-51` | `run = tail.then(() => runActivation(…)); tail = run.then(u, u)` | propagate | `enqueuedProfileId` still captured synchronously before enqueue; activations run to completion one at a time |
+| `apps/extension/src/utils/guarded-network-activation.ts:18,44-51` | `run = tail.then(() => runActivation(…)); tail = run.then(u, u)` | propagate | `enqueuedProfileId` is captured synchronously before enqueue; activations run to completion one at a time |
 | `apps/extension/src/wallet/services/token/seeder.ts:168,312-318` `withMarkerLock` | `run = markerLock.then(fn); markerLock = run.then(u, u)` | propagate | every marker read-modify-write is serialized; the epoch check stays inside `fn` |
 | `apps/extension/src/wallet/logger/store.ts:20,128-131` `enqueueStorageOp` | `next = storageOps.then(op, op).catch(() => {})` | report, `onError: () => {}` | total order of `set`/`remove`; the purge at `:160` still returns the swallowed link |
-| `apps/extension/src/wallet/utils/offscreen.ts:128-138` `trackedClose` | `link = closeTail.then(() => closeOffscreen()).catch(() => {})` | report, `onError: () => {}` | `pendingClose = link` and the identity-guarded `finally` that nulls it are unchanged; `:300` still awaits it |
-| `apps/extension/src/wallet/services/incoming-transfer/scan-episodes.ts:60,89,160,176` | `writeChain = writeChain.then(write).catch((e) => this.onPersistError(e))` | report, `onError: (e) => this.onPersistError(e)` | `hydrate` awaits and `settled()` returns `tail`, the same promise object; the snapshot is still taken at mutation time |
+| `apps/extension/src/wallet/utils/offscreen.ts:128-138` `trackedClose` | `link = closeTail.then(() => closeOffscreen()).catch(() => {})` | report, `onError: () => {}` | `pendingClose = link` and the identity-guarded `finally` are unchanged; `:300` still awaits it |
+| `apps/extension/src/wallet/services/incoming-transfer/scan-episodes.ts:60,89,160,176` | `writeChain = writeChain.then(write).catch((e) => this.onPersistError(e))` | report, `onError: (e) => this.onPersistError(e)` | `hydrate` awaits and `settled()` returns the live `tail`, the same promise object; the snapshot is still taken at mutation time |
 | `apps/extension/src/wallet/services/price/service.ts:104,231-248` `configTransition` | `.then(async () => {…}).catch((err) => this.log(LogLevel.Warn, "config-change handling failed", err))` | report, the same `log` call | the synchronous abort and generation bump stay outside the chain; the async body moves verbatim |
 
-The propagate tails differ only in value (`link.catch(() => undefined)` against `run.then(u, u)`); both cost one job and neither is read.
+**Value differences no step reads:**
+
+- The propagate tails differ only in value (`link.catch(() => undefined)` against `run.then(u, u)`); both cost one hop and neither is read.
+- Fee's next step today receives the previous link's value; after the change it receives `undefined`. Both fee steps take no argument.
+- Logger's `then(op, op)` becomes `then(op)`. Its tail never rejects, because `() => {}` cannot throw.
 
 ### Q-16 (c): latest-wins counters (Phase 3d)
 
-Every edit here is synchronous: a counter becomes a fence with no await added or moved. Each `disposed` flag stays separate, because `begin()` after a dispose would revive what a permanent flag refuses.
+The fence names one latest-wins idiom. Every edit is synchronous: no await is added or moved. Each `disposed` flag stays separate, because `begin()` after a dispose would revive what a permanent flag refuses.
 
 | site | today | after |
 |---|---|---|
-| `apps/extension/src/composables/useEntityCrud.ts:77-100` | `mySeq = ++seq`; `disposed \|\| mySeq !== seq` at `:92`, `:96`; `!disposed && mySeq === seq` at `:100` | `isCurrent = fence.begin()`; the same three checks, with `disposed` kept and `isCurrent()` in place of the comparison |
-| `apps/extension/src/composables/useIncomingTransfers.ts:76-79,104` | `readRows(s, ++refreshSeq, scopeKey(s), deleted)`; `isStale(seq, key)` | `readRows(s, fence.begin(), scopeKey(s), deleted)` (argument order kept); `isStale(isCurrent, key)` keeps `disposed \|\| … \|\| scopeKey(scope()) !== key` in today's order |
-| `apps/extension/src/composables/useLegalAcceptance.ts:16-52` | `seq++` in `onChanged` and `dispose`; `mine = ++seq` in `refresh` | `invalidate()`, `invalidate()`, `begin()` |
+| `apps/extension/src/composables/useEntityCrud.ts:77-100` | `mySeq = ++seq`; `disposed \|\| mySeq !== seq` at `:92`, `:96`; `!disposed && mySeq === seq` at `:100` | `isCurrent = fence.begin()`; the same three checks, with `disposed` kept; the comment at `:83` is rewritten for the fence |
+| `apps/extension/src/composables/useIncomingTransfers.ts:74-79,104` | `readRows(s, ++refreshSeq, scopeKey(s), deleted)`; `isStale(seq, key)` | `readRows(s, fence.begin(), scopeKey(s), deleted)` (argument order kept); `isStale(isCurrent, key)` keeps `disposed \|\| … \|\| scopeKey(scope()) !== key` in today's order; the `:74-75` comment is rewritten |
+| `apps/extension/src/composables/useLegalAcceptance.ts:16-52` | `seq++` in `onChanged` and `dispose`; `mine = ++seq` in `refresh` | `invalidate()`, `invalidate()`, and `const mine = fence.begin()`. The closure is named `mine` because `isCurrent` is already a `computed` at `:14` |
 | `apps/extension/src/composables/useSeedStatus.ts:56,89-90,133` | `current = ++generation`; `isLatest = () => !disposed && current === generation`; `generation += 1` on dispose | `begin()`; `!disposed && isCurrent()`; `invalidate()` |
-| `apps/extension/src/composables/useIncomingSyncHealth.ts:50-51,70,94,99,116,124,134` | two counters: `generation` (refresh, dispose) and `retryGeneration` (`enterScope` bump, `retry` begin) | two fences, the same mapping; `enterScope` still runs before the retry's `begin()` |
+| `apps/extension/src/composables/useIncomingSyncHealth.ts:50-51,70,94,99,116,124,134` | `generation` (refresh, dispose) and `retryGeneration` (`enterScope` bump, `retry` begin) | two fences with the same mapping; `enterScope` still runs before the retry's `begin()` |
 | `apps/extension/src/composables/usePrestoStatus.ts:16,20,30` | `mine = ++generation`; `disposed \|\| mine !== generation` | `begin()`; `disposed \|\| !isCurrent()` |
-| `apps/extension/src/composables/usePinnedTokens.ts:169,194,202` | `generation = ++refreshGeneration`; `disposed \|\| generation !== refreshGeneration \|\| …profileId !== …` | `begin()`; the same three-clause check in order |
+| `apps/extension/src/composables/usePinnedTokens.ts:169,194,202` | `generation = ++refreshGeneration`; `disposed \|\| generation !== refreshGeneration \|\| …profileId !== …` | `begin()`; the same three-clause check, in order |
 
 ### Q-15 (e): record guards (Phase 3e)
 
-The guard set per site is its meaning, and each keeps its own meaning:
+Each site keeps its meaning:
 
 - **Strict sites, which move to `isRecord`:**
-  - `packages/wallet-bridge/src/capability-negotiation.ts:134-136`. This is the strict copy recon found at `dispatcher.ts:313`; #766 moved it here.
+  - `packages/wallet-bridge/src/capability-negotiation.ts:134-136`, the strict copy recon found at `dispatcher.ts:313`, which #766 moved here. It is tested through `dispatcher.test.ts`.
   - `packages/wallet-bridge/src/method-scope-checkers.ts:385-387`.
   - `packages/wallet-bridge/src/method-descriptors.ts:118` (`isPlainRecord`).
   - `apps/extension/src/composables/usePinnedTokens.ts:24`.
   - `apps/extension/src/wallet/services/incoming-transfer/scan-episodes.ts:32`.
-  - `apps/extension/src/popup/components/modules/send/fee-send-selection.ts:14-15`. `asObject` stays as a wrapper: `isRecord(value) ? (value as Blob) : undefined`.
+  - `apps/extension/src/popup/components/modules/send/fee-send-selection.ts:14-15`. `asObject` stays as a wrapper.
 - **Permissive sites, which move to `isObjectLike`:**
   - `packages/wallet-bridge/src/dispatcher.ts:210` (`isObj` in `assertAuthRelevantArgShape`, dApp-facing).
-  - `apps/extension/src/popup/windows/capabilities/details-table.ts:88-90` and `permission-rows.ts:253-255`. Both are named `isRecord` today but accept arrays.
+  - `apps/extension/src/popup/windows/capabilities/details-table.ts:88-90` and `permission-rows.ts:253-255`. Both are named `isRecord` today, but they accept arrays.
 - **Kept local:**
-  - `dapp-session/spec.ts:69` `tolerantRecord` and `transaction/spec.ts:168` `tolerantObject`. Both are documented as deliberately tolerant, and they return a boolean into `z.custom`.
+  - `dapp-session/spec.ts:69` `tolerantRecord` and `transaction/spec.ts:168` `tolerantObject`. Both are documented as deliberately tolerant, and both return a boolean into `z.custom`.
   - `packages/legal/src/status.ts:66-70` `isPlainObject`. It is stricter (a prototype check), and `@nulo/legal` does not depend on wallet-core.
 
 ### What stays inline, and why
 
 | site | why |
 |---|---|
-| `stores/balances.store.ts:124-139` `withTimeout` (callers `:495`, `:506`, `:546`) | it rejects from inside the timer, so its timeout path resumes the caller one tick sooner than a race (probe 1). The race helper would add a tick before `commitEntry`; a second, near-identical helper would duplicate the very idiom this batch removes |
-| `popup/auth-guard.ts:83-90` `withinDeadline`; `components/Header.vue:34-44` `readForLock` | `.finally(clear)` costs extra ticks, and engine-dependent ones (+1 on Bun, +3 on V8; probe 1). Header also resolves a sentinel instead of rejecting. The `sleep` at `auth-guard.ts:66` still moves |
-| `composables/importPreflight.ts:41-47`, `importChainSync.ts:115` | they race a `sleep` that is never cleared; clearing it is not pre-cleared (drift) |
-| `wallet/utils/offscreen.ts:333` | it races two gate promises, and its timer lives elsewhere; not a deadline helper's shape |
+| `packages/extension-messaging/src/core/base-client.ts:284-301`, `packages/aztec-runtime/src/pxe/opfs-store.ts:124-170` | a shared race helper would move each site's clear into a separate reaction ahead of the caller. At OPFS that reorders cleanup from quarantine-or-release, then clear, then the outer catch, to clear first (see Deferred) |
+| `stores/balances.store.ts:124-139` `withTimeout` | it rejects from inside the timer, so its timeout path resumes one hop sooner than a race |
+| `popup/auth-guard.ts:83-90` `withinDeadline`, `components/Header.vue:34-44` `readForLock` | `.finally(clear)` costs extra, engine-dependent hops (+1 on Bun, +3 on V8); Header also resolves a sentinel. `auth-guard.ts:66`'s `sleep` still moves |
+| `composables/importPreflight.ts:41-47`, `importChainSync.ts:115` | they race a `sleep` that is never cleared; clearing it is not pre-cleared |
+| `wallet/utils/offscreen.ts:333` | it races two gate promises, and its timer lives elsewhere |
 | `composables/usePinnedTokens.ts:88-100` | a per-key queue map whose tail adds a `.then` hop for idle eviction |
-| `popup/pages/settings/security/export/account.vue:59-213`, `export/full.vue:72-416`, `settings/accounts/import.vue:44-168` (counters), and the download twins `account.vue:182-198` / `full.vue:370-392` | Ask 1 |
+| `popup/pages/settings/security/export/account.vue:59-213`, `export/full.vue:72-416`, `settings/accounts/import.vue:44-168`, and the download twins `account.vue:182-198` / `full.vue:370-392` | kept by the panel (Ask 1) |
 
 **Alternatives rejected:**
 
-- An `async` `raceDeadline` with `try/finally`, the audit's sketch: it costs +1 tick at every caller (probe 1).
-- `withTimeout`'s shape as the shared helper: it would move three sites' timeout path by a tick.
-- `useDownloadAction`: the twins differ in five places (filename, gzip, labels, `err?.message` against `err.message`, the console text).
+- `withTimeout`'s shape as a shared helper: it would move the timeout path at every other site.
+- `useDownloadAction`: the twins differ in five places.
 - Moving `createRunFence` into wallet-core: it has no consumer outside the extension.
+- `Lock`/`KeyedLock` for the queues: `withLock` is `async` and costs extra hops.
 
 ### The seam with byte-primitives (arc 16)
 
-- **This arc defines** `isRecord` and `isObjectLike` and migrates every Q-15 (e) site. It touches no Q-15 (a to d) file.
-- **No new helper is needed for (a), (c) or (d):** `toBase64`, `bytesToHex`, `getRandomHex` and `array_equals` already exist.
-- **The two lenient decoders** (a lenient base64 decoder for the `Buffer.from(x, "base64")` sites, and a hex decoder for `passkey-ceremony.ts:41`) are defined in byte-primitives, beside their consumers (Ask 2).
-- **byte-primitives migrates** every Q-15 (a to d) site, except the two `wallet-crypto` secret boxes, which are deferred. That includes `export/full.vue:348`.
-- **The only shared file** is `packages/wallet-core/src/utils/index.ts`: one export line each, so a restack conflict at most.
+- **This arc defines** `isRecord` and `isObjectLike` and migrates every Q-15 (e) site.
+- **byte-primitives defines** the lenient base64 decoder and the hex decoder, beside their consumers. It migrates every Q-15 (a to d) site except the two `wallet-crypto` secret boxes; that includes `export/full.vue:348`. Row 15 of the program table says so (Ask 2).
+- **No new helper is needed for (a), (c) or (d).**
+- **Shared files:** `packages/wallet-core/src/utils/index.ts` and its README, one line each.
 
 ### Complexity
 
-Every touched function gets shorter or stays the same length. None is in the complexity manifest, and the helpers are a few flat lines each.
+Every touched function gets shorter or stays the same length. None is in the complexity manifest.
 
 ### Coupling with neighbouring arcs
 
-- `wip/hd-09-network-endpoints` adds `rpc-url` to `utils/index.ts`: a one-line restack conflict.
-- No other built-ahead arc (3, 4, 8 to 10, 12 to 14) touches a file here.
-- estimate-reuse (arc 11) may edit `gas-balance-reader.ts`, and balance-snapshot (arc 21) edits `balances.store.ts`, which this arc leaves alone.
+- `wip/hd-09-network-endpoints` adds `rpc-url` to `utils/index.ts` and to the wallet-core README. Restack conflict: keep both sides.
+- No other built-ahead arc (3, 4, 8 to 10, 12 to 14) touches these files.
+- balance-snapshot (arc 21) edits `balances.store.ts`, which this arc leaves alone.
 
 ## Security & Adversarial Considerations
 
-- **dApp input (`dispatcher.ts:210`, `capability-negotiation.ts`, `method-scope-checkers.ts`, `method-descriptors.ts`).** A compromised page controls the arguments and the capability manifests. Swapping strict and permissive would change which malformed request is refused, and with what message. For `exec: []`, the permissive guard yields `Malformed … request: exec.calls must be an array`, and the strict one would yield `exec payload must be an object`. Phase 1 pins each distinguishing input; where no input distinguishes the two guards at a site, the plan says so and the mutant is equivalent.
-- **Storage reads (`usePinnedTokens`, `scan-episodes`, `fee-send-selection`).** Storage is writable by anything that reaches the profile directory, and a backup import writes it too. These sites keep the strict guard, so an array blob still reads as absent.
-- **Write queues guard against resurrection.** If a seeder tombstone, a cleared Send pick or a purged log could be overtaken by an older write, deleted data would come back. Serialization, continuation past a rejection, and each site's policy are pinned per site. Propagate swapped for report would tell `mutateSendSelections`' caller that a failed write succeeded. Report swapped for propagate would surface the logger's and the offscreen closer's failures to callers that never handle them.
+- **dApp input** (`dispatcher.ts:210`, `capability-negotiation.ts`, `method-scope-checkers.ts`, `method-descriptors.ts`). A compromised page controls the arguments and the capability manifests. Swapping strict and permissive changes which malformed request is refused, and with what message. Phase 1 pins exactly `Malformed sendTx request: exec.calls must be an array` for `exec: []`, which the strict guard would turn into `exec payload must be an object`. Where no input distinguishes the two guards, the mutant is recorded as equivalent.
+- **Storage reads** (`usePinnedTokens`, `scan-episodes`, `fee-send-selection`). Storage is writable by anything that reaches the profile directory, and a backup import writes it too. These sites keep the strict guard, so an array blob still reads as absent.
+- **Write queues guard against resurrection.** A tombstone, a cleared Send pick or a purged log overtaken by an older write would bring data back. Each site's serialization, continuation past a rejection and policy are pinned. Propagate swapped for report would tell `mutateSendSelections`' caller that a failed write succeeded. Report swapped for propagate would surface failures to callers that never handle them.
 - **Fences guard scope privacy.** A stale read landing late would show one profile's incoming transfers, pins or seed status under another. Every check stays at its line, after the same await, with `disposed` and the scope comparison intact.
-- **Deadlines guard availability.** A wedged transport or worker must still fail at the same deadline, with the same error: the base-client timeout code, and the `ChainStoreOpenTimeoutError` that drives the quarantine. The added `race.then(clear, clear)` also marks the race as handled, but every caller awaits it, so no rejection that is reported today goes unreported.
-- **Logging:** no new log line. The `onError` callbacks are today's calls, so `log-payload-ban.test.ts` sees the same text.
-- **npm surface:** `wallet-crypto/src/public.ts` is unchanged. Its bundle inlines `@nulo/wallet-core/utils` (`encryption-key.ts:2`), so the staged bundle is byte-compared, parent against head (gate).
-- **Secret pages:** untouched unless Ask 1 is adopted. If it is, no `return` inside a scrubbing `try` loses its `await`, and the scrub order in `onBeforeUnmount` is kept.
+- **Deadlines** are untouched, apart from LogsViewer's added clear.
+- **Logging:** no new log line. The `onError` callbacks are today's calls.
+- **npm surface:** `wallet-crypto/src/public.ts` is unchanged. Its bundle inlines `@nulo/wallet-core/utils` (`encryption-key.ts:2`), so the staged package is compared parent against head: the same inventory and every file's sha256.
+- **Secret pages:** untouched.
 
 ## Assumptions
 
 **Facts** (read 2026-10-03 on `harden-dedupe` at `1c0c67ad`):
 
-1. Every site and line above, as read today. `packages/wallet-core/src/utils/sleep.ts:1` exists. `runFence.ts` has only `begin()` (`:12-20`). No `guards.ts`, `deadline.ts` or `serial.ts` exists, and no workspace exports a name these helpers would take.
-2. **Probe 1** (scratch, Bun 1.4.2 and Node 24.21.0) measured the caller's resume tick under a bounded spinner:
-   - With work settling after 1 or 3 jobs, the inline `await Promise.race` and `await raceDeadline(...)` both resumed at 4 and 6, on both engines and on both resolve and reject.
-   - `.finally(clear)` resumed at 5 and 7 on Bun, and at 7 and 9 on V8.
-   - On the timeout path, race and helper both resumed 3 jobs after the timer fired; a direct reject from the timer, as `withTimeout` does, resumed after 2.
-3. **Probe 2** (same engines) ran the seven queue shapes and `createSerialQueue` over six ops: resolve, reject, synchronous throw, a reporter that rethrows, and the ops after it. The stamped event logs were identical.
-4. `ScanEpisodeStore`'s reporter is an arrow (`incoming-transfer/service.ts:258`), and `price`'s is `this.log(...)` in an arrow.
+1. Every site and line above, as read today. `runFence.ts` has only `begin()`. No `guards.ts` or `serial.ts` exists, and no workspace exports these names.
+2. **Probe 1** (scratch, Bun 1.4.2 and Node 24.21.0) timed the caller's resume:
+   - An inline `await Promise.race` and a race-returning helper both resume at the same hop.
+   - `.finally(clear)` costs +1 hop on Bun and +3 on V8.
+   - A direct reject from the timer resumes one hop before a race.
+   - The audit's extended probe found that the helper's clear runs before the caller's cleanup, which is why the deadline helper is deferred.
+3. **Probe 2** (same engines) ran the seven queue shapes against the helper over resolve, reject, synchronous throw, a rethrowing reporter and the ops after it: the event logs are identical. Both audit legs reproduced this; Opus's run interleaved two noise chains.
+4. `ScanEpisodeStore`'s reporter is an arrow (`incoming-transfer/service.ts:258`).
 5. `scripts/publish/approved-digests.json` binds the `0.1.0` wallet-crypto tarball by sha256.
-6. Every migrated composable and service already has a colocated test file. `LogsViewer.vue` has none, and no test names `realSleep`.
+6. Every migrated composable and service has a colocated test file, except `system-clock.ts` and `LogsViewer.vue`. No test names `realSleep`.
 
 **Inferences:**
 
-- SpiderMonkey was not probed. The helper relies only on `Promise.race`, `then` and `await` of a native promise, whose job counts the spec fixes; the V8/JSC split appears only on `.finally`, which the helper avoids. Phase 2 reruns probe 1 in a Firefox page (moderate-high confidence).
-- No in-tree code reads a stack frame of these errors. A moved `reason()` changes only stack text.
+- SpiderMonkey was not probed. The queue relies only on `then` and `catch`, whose job counts the spec fixes (moderate-high confidence).
 
-**Asks** (to the panel):
-
-1. **The secret pages' counters and the download twins: keep or migrate?** Recommendation: keep.
-   - Migrating means `fence.current()` plus `invalidate()`, script-only across three `.vue` files. It removes no line and no defect: `const gen = generation` becomes `const isCurrent = fence.current()`. It adds those pages to the screenshot gate in all their states.
-   - The twins differ in five places, and `full.vue`'s `err.message` throws on a `null` rejection.
-2. **The lenient decoders: defined in byte-primitives, not here?** Recommendation: yes.
-   - Their exactness proof is the core of that arc.
-   - Vitest runs on Bun's native `Buffer`, while the bundle ships the `buffer` polyfill (`vite-plugin-node-polyfills`). Which one is the oracle is a byte-primitives decision.
-   - A helper with no consumer here could only be tested against a guess.
-3. **Fingerprint permanence.** Recommendation:
-   - The helper-against-inline-shape tests stay permanently. They compare relative stamps, not counts, and they are what stops a later `async` rewrite of `raceDeadline`.
-   - The four site fingerprints of Phase 1 are temporary, as in arc 14: logged, then removed.
+**Asks:** all three were answered by the panel (Plan audit, below).
 
 ## Phases
 
 ### Phase 1: pin today's behaviour (test only, consumers unchanged)
 
-The tests extend each site's colocated test file, and every one passes on unchanged code. Each mutant is applied to a scratch copy of the file, never undone with `git checkout`; the run must turn red, and the result is logged in this arc's file under the program's `lessons/`.
+Every test passes on unchanged code. Each mutant is applied to a scratch copy of the file, the run must turn red, the original is copied back (never `git checkout`), and the result is logged in this arc's file under the program's `lessons/`.
 
-- **Deadlines:**
-  - `base-client`: a request with a pending `ready` rejects at the deadline with the timeout error's literal code and message; `ready` resolving first sends, and `vi.getTimerCount()` returns to its baseline; a `ready` rejection reaches the caller by identity; an expired budget rejects before any timer.
-    - Mutants: precheck removed; clear removed; the error built eagerly; the factory swapped.
-  - `opfs-store-open`: the existing quarantine tests, plus the timer count back at baseline after a normal open and after a rejected one.
-    - Mutant: clear removed.
-- **Sleeps:** the existing fake-timer tests must pin each delay (the 250/500/750 backoff, `50 * 2 ** attempt`, the failed-leg retry delay, the preflight backoff). A delay without a pin gets one.
-  - Mutants: the delay off by 1 ms; the `await` dropped.
-- **Queues (per site):**
-  - op 2 starts only after op 1 settles: an ordered call log, not flags;
+- **Sleeps:** each delay is pinned under fake timers: the 250/500/750 backoff, `50 * 2 ** attempt`, the failed-leg retry delay, the preflight backoff, and `SystemClock.sleep` (new `system-clock.test.ts`).
+  - Mutants: a delay off by 1 ms.
+- **Queues, per site:**
+  - op 2 starts only after op 1 settles: an ordered call log;
   - a rejecting op does not wedge the next;
-  - the caller sees the rejection (fee, guarded, seeder) or a resolution (logger, offscreen, scan, price);
-  - the reporter is called once, with the error (scan, price);
-  - `settled()` resolves after the last write;
-  - an older `trackedClose` link settling does not null a newer `pendingClose`.
-  - Mutants: `tail = link` in a propagate site; `.catch` dropped from a report site; `run` not chained (`tail` unassigned).
-- **Fences (per composable):**
-  - a superseded read resolving late writes nothing;
-  - a read resolving after `dispose` writes nothing;
-  - `useLegalAcceptance`: an `onAcceptanceChanged` during a read wins;
-  - `useIncomingSyncHealth`: a scope change mid-retry leaves `retrying` to the new scope;
+  - the caller sees the rejection (propagate) or a resolution (report);
+  - the reporter is called once, with the error;
+  - `settled()` resolves after the last write, and `hydrate`'s write-back lands before it resolves;
+  - an older `trackedClose` link does not null a newer `pendingClose`.
+  - Mutants: `tail = link` in a propagate site; `.catch` dropped in a report site; no chaining.
+- **Fences, per composable:** a superseded read resolving late writes nothing; a read after `dispose` writes nothing.
+  - `useLegalAcceptance`: an event during a read wins, and a read after `dispose` writes nothing (it has no `disposed` flag, so its dispose bump is a real guard).
+  - `useIncomingSyncHealth`: a scope change mid-retry leaves `retrying` to the new scope.
   - `useEntityCrud`: only the latest run clears `isLoading`.
-  - Mutants: each check deleted in turn; a counter bump removed from `dispose`, `onChanged` or `enterScope`.
-- **Guards (per site):** for each strict site, an array input that today's code refuses, where one is observable; for each permissive site, one that today's code accepts (the dispatcher's `exec: []` message, verbatim). A site where no input distinguishes the two guards is recorded as an equivalent mutant.
-  - Mutant: strict and permissive swapped at each site.
-- **Temporary site fingerprints** (Ask 3): a spinner stamps the caller's resumption around four sites:
-  - `awaitReadyWithinDeadline` to the transport send;
-  - `openChainStore`, from the open resolving to the return, and from the timeout to `entry.state = "abandoned"`;
-  - `ScanEpisodeStore.hydrate`'s write to its resume;
-  - `trackedClose` to `pendingClose` being nulled.
-
-  Each spinner has a cap, fails explicitly on exhaustion, and is stopped in `finally`. The counts are logged.
+  - Mutants: each check deleted; each bump removed. The dispose bumps at `useSeedStatus.ts:133` and `useIncomingSyncHealth.ts:134` are **equivalent mutants**: `disposed` guards the same reads. Both safeguards stay, and `invalidate()` gets its own test.
+- **Guards, per site:** an observable array refusal at strict sites and an observable acceptance at permissive sites (the exact `exec: []` message; `capability-negotiation` through `dispatcher.test.ts`). Any other site is recorded as equivalent.
+- **Temporary site fingerprints:** a capped spinner stamps four queue sites: `ScanEpisodeStore.hydrate`, `trackedClose` to `pendingClose` being nulled, the logger purge, and a guarded activation. It fails explicitly on exhaustion and stops in `finally`, and the counts are logged.
 
 ### Phase 2: the helpers (additions only)
 
-- The five helpers above, with the `index.ts` exports and the `runFence.ts` method.
-- New `deadline.test.ts`, `serial.test.ts` and `guards.test.ts`, plus `invalidate` cases in `runFence.test.ts`:
-  - `raceDeadline` against the verbatim inline shape: equal caller stamps on resolve, reject and timeout; the timer count back at baseline after settling; `reason` called once and only on timeout; the rejection object by identity; a late `work` rejection after the timeout raises no unhandled rejection.
-  - `createSerialQueue` against all seven inline shapes, copied verbatim from the table, over probe 2's script.
-  - `isRecord` and `isObjectLike` against plain, null-prototype and class objects, arrays, `null`, `undefined`, functions, and primitives.
-  - Mutants: `raceDeadline` made `async`; the clear moved to `.finally`; the clear dropped; the reason built eagerly; `then(op, op)` in report mode; a missing `noop` tail in propagate mode.
-- Probe 1 rerun in a Chrome and a Firefox page, with the results logged.
+- `serial.ts`, `guards.ts`, the `sleep` type, `runFence.invalidate()`, the `index.ts` exports and the README rows.
+- `serial.test.ts`:
+  - **Permanent:**
+    - one reference graph per policy against the helper, including awaiting `tail`;
+    - `run(op) === queue.tail` in report mode;
+    - `tail` identity stable between enqueues and live across them;
+    - a throwing `onError` skips the next op;
+    - spinners that fail on exhaustion and stop in `finally`.
+  - **Temporary:** the seven-shape matrix, logged and then collapsed in 3g.
+- `guards.test.ts` covers plain, null-prototype and class objects, boxed primitives (`Object(1)`, `new String("")`; accepted by both guards), arrays, `null`, `undefined`, functions and primitives.
+- Mutants: `then(op, op)` in report mode; a propagate tail without `noop`; `tail` as a plain property.
 
 ### Phase 3: migrate (Phase 1 and 2 test files frozen)
 
-One commit each, each green on the frozen tests:
-
-- **3a:** the `sleep` copies, with `realSleep` deleted and the auto-imports rebuilt.
-- **3b:** `raceDeadline` in `base-client` and `opfs-store`.
-- **3c:** the seven queues.
-- **3d:** the seven fences.
-- **3e:** the record guards.
-- **3f:** LogsViewer, the pre-cleared fix.
-  - Its new `LogsViewer.test.ts` mounts the component with the two service clients mocked (and `codemirror`'s `EditorView` stubbed if jsdom cannot host it), lets `getLogs` resolve, and asserts the 500 ms timer was cleared.
-  - It is proven red against the parent's `LogsViewer.vue`, a copy taken from the base SHA, and green after.
-  - The commit body and the PR body record it under the Behaviour rule's second route.
-- **3g (test only):** remove the temporary site fingerprints after logging their green counts.
+- **3a:** the `sleep` copies.
+- **3c:** the queues, trimming the narration the helper now owns (`guarded-network-activation.ts:45-46`, the `fee-send-selection.ts:77` doc), with each site's why kept.
+- **3d:** the fences, with the stale comments rewritten.
+- **3e:** the guards.
+- **3f:** LogsViewer, red-then-green against the parent's file copy. A Decisions entry, the commit body and the PR body record it.
+- **3g (test only):** remove the temporary fingerprints and collapse the seven-shape matrix, after logging their green results.
 
 **Validation gate (after each phase):**
 
 - **Commands:**
-  - `bun run --cwd packages/wallet-core test`, `bun run --cwd packages/extension-messaging test`, `bun run --cwd packages/aztec-runtime test src/pxe` and `bun run --cwd packages/wallet-bridge test`;
-  - the extension's touched test files three times in a row;
-  - `bun run lint`, `bun run typecheck:all`, `bun run test:all`, `bun run test:ci-gating`, `bun run audit:vue`;
-  - `bun run build`, then `git diff` on the two auto-import files, which may lose only the `realSleep` lines;
-  - `bun scripts/publish/stage.ts wallet-crypto --version 0.1.0 --out <scratch>` at the parent and at the head: identical sha256 for every staged file.
-- **Pass criteria:** all exit 0. Phase 3 leaves every Phase 1 and 2 test file byte-identical, apart from 3g's removals. Phase 3f adds one test file.
+  - each touched workspace's tests;
+  - `bun run lint`, `typecheck:all`, `test:all`, `test:ci-gating` and `audit:vue`;
+  - `bun run build`, then `git diff` on the auto-import files, which may lose only `realSleep`;
+  - `bun scripts/publish/stage.ts wallet-crypto --version 0.1.0 --out <scratch>` at the parent and at the head, with the same toolchain: identical relative file inventories and an identical sha256 for every file, the manifest and declarations included.
 - **Screenshots:** § UI impact.
-- **Layers:** unit, composition and component tests, plus the e2e lanes in CI per the program gates.
 
 ## Post-implementation
 
-1. **Codex audit** (GPT-6 Astra, xhigh) of the arc diff, with the adversarial, assumption-attack and implementation-critique asks, and the tick-shape question asked explicitly per site. Include the no-over-engineering rule verbatim ("Report bugs and small, targeted improvements only. Do not propose speculative abstractions, extra configuration surface, new layers, or rewrites — the smallest change that fixes each real problem. If code works and is clear, leave it alone.") and the comment-quality rule verbatim ("Audit the comments for value per character. Flag any comment that narrates what the code visibly does, restates its line, references implementation plans / phases / reviews, or spends a paragraph where a sentence works — and flag places where a non-obvious invariant or constraint deserves a comment it doesn't have. Comments are permanent context every future reader, human or LLM, pays to re-read: they must be few, dense, and exact."). An Opus panelist reviews in parallel (MID).
-2. **Fix loop:** triage each finding, fix, commit, log the round in this arc's lessons file, and resume the same session. Stop when a round has no material finding; at 5 rounds, park the arc.
-3. **Delivery:** push, open a ready PR against `harden-dedupe` at the bottom of the gh stack, then add both e2e labels. The PR body records the LogsViewer fix. Once the program gates are green on suites that actually ran, squash-merge into `harden-dedupe`.
-4. **Close-out** is the program's job: this plan closes with the program plan.
+1. **Codex audit** (GPT-6 Astra, xhigh) of the arc diff, with the adversarial, assumption-attack and implementation-critique asks, the hop and cleanup-order question per site, and the no-over-engineering and comment-quality rules verbatim (the error-registry plan's wording). An Opus panelist reviews in parallel.
+2. **Fix loop:** at most 5 rounds, each logged in this arc's lessons file.
+3. **Delivery:** push, open a ready PR against `harden-dedupe` at the bottom of the gh stack, add both e2e labels, and squash-merge once the gates are green on suites that actually ran.
+4. **Close-out:** with the program plan.
 
 ## Delivery
 
-One arc, `hd/15-async-primitives`, stacked on `harden-dedupe` once the arcs below it land. Code review: off.
+One arc, `hd/15-async-primitives`, stacked on `harden-dedupe`. Code review: off.
 
 ## UI impact
 
-**Not logic-only: one `.vue` file changes.** `LogsViewer.vue`'s script changes (`fetchLogs`); its template and styles do not. The zero-diff screenshot gate covers the logger window (`popup/windows/logger/`), reached through Settings → Advanced → Logs with Developer Mode on. It is captured on Chrome and Firefox, in dark and light theme, in three states: logs loaded (timestamps masked), after Clear logs (empty), and after toggling Debug Mode (refetch). Nothing else a user sees changes. If Ask 1 is adopted, the three secret pages join the gate in every stage: export account (picker, agreed, password, ready, protected, wrong password); full backup (idle, progress, finished, encrypting, encrypted); accounts import (each preview state).
+**Not logic-only: one `.vue` file changes.** `LogsViewer.vue`'s script changes; its template and styles do not.
 
-## Drift left for the alignment arc
+The zero-diff gate covers the logger window (`popup/windows/logger/`), with a fixed log set seeded into `nulo:logs` so the parent and the head render identical lines:
 
-Nothing below is user-visible on a realistic path, so it all goes to follow-ups, not to the alignment arc:
+- three states: loaded, after Clear logs, and after toggling Debug Mode;
+- Chrome and Firefox, dark and light;
+- a `--stability` run as well;
+- new surface files only.
 
-- `importPreflight.ts:41-47` and `importChainSync.ts:115` leave their race's `sleep` timer running, for up to 5 s and up to the registration budget respectively.
-- `balances.store.ts:124` `withTimeout` lives in a Pinia store and settles a timeout one tick before a race would.
-- `auth-guard.ts:83-90` and `Header.vue:34-44` clear through `.finally`, at engine-dependent tick cost.
-- The download twins: `full.vue:385` reads `err.message`, so a `null` rejection throws inside the catch and skips the toast. That rejection is unrealistic, so it gets one ledger line.
-- Test-infrastructure `sleep` copies are left alone: `apps/extension/src/e2e/migration-fixture.ts:41` and `wallet/services/wallet-sdk/test-ports.ts:17`.
+Nothing else a user sees changes.
+
+## Drift kept as today (routed to follow-ups)
+
+Nothing here is user-visible, so these items go to follow-ups, not the alignment arc:
+
+- `importPreflight.ts:41-47` and `importChainSync.ts:115` leave their race's timer running.
+- `balances.store.ts:124` `withTimeout` lives in a store and settles a timeout one hop before a race.
+- `auth-guard.ts:83-90` and `Header.vue:34-44` clear through `.finally`.
+- `full.vue:385` reads `err.message`, where `account.vue:192` reads `err?.message`. The `null` rejection that would hit it is unrealistic, so it gets one ledger line.
+- Test-infrastructure `sleep` copies: `apps/extension/src/e2e/migration-fixture.ts:41` and `wallet/services/wallet-sdk/test-ports.ts:17`.
+
+## Deferred
+
+- **`raceDeadline`, the shared deadline race.**
+  - Codex: the helper's `race.then(clear, clear)` reaction reorders cleanup on both engines. At OPFS the order goes from quarantine-or-release, clear, outer catch to clear, quarantine-or-release, outer catch, and at base-client the clear moves into its own reaction. Under the program's cleanup-order rule, that is a blocker.
+  - Opus: no macrotask can run between the two reactions, so clearing earlier cannot be observed.
+  - Call: Codex. Its only other consumer would be LogsViewer, so the helper does not pay for itself. All three sites stay inline, and LogsViewer gets its clear inline. A follow-up when the program closes.
 
 ## Decisions (delegated)
+
+### Plan audit: Codex (GPT-6 Astra, xhigh), REVISE, high confidence
+
+1. **Blocker: `raceDeadline` reorders cleanup** (extended probe, Bun and V8). **Adopted:** dropped, see Deferred.
+2. **The queue's `tail` must be a live getter**, with `run(op) === tail` asserted in report mode. **Adopted:** a plain property breaks `hydrate`.
+3. **Precise return types per policy.** **Adopted:** overloads.
+4. **Equivalent mutants** for the two dispose bumps guarded by `disposed`. **Adopted:** classified as equivalent; `invalidate()` tested on its own.
+5. **Exact `exec: []` message pin.** **Adopted:** today's tests match only broader text.
+6. **npm gate compares inventories and every file**, not only the bundle. **Adopted.**
+7. **Nit: Ask 1 wording.** **Adopted.**
+8. **Nit: test homes** (`capability-negotiation` via `dispatcher.test.ts`, a new `system-clock.test.ts`). **Adopted.**
+9. **Asks:** 1 keep; 2 decoders to byte-primitives; 3 as Opus.
+
+### Plan audit: Opus panelist, REVISE, no blocker
+
+1. **The `raceDeadline` reorder is unobservable** (no macrotask runs between reactions). **Rejected** in favour of the conservative rule; recorded under Deferred.
+2. **Two interleaved noise chains** reproduce the seven queue traces on both engines. **Adopted** as evidence (Fact 3).
+3. **Name clash:** `useLegalAcceptance.ts:14` already declares `isCurrent`. **Adopted:** the closure is `mine`.
+4. **A Decisions entry for route 2** (program plan, the Behaviour rule). **Adopted**, below.
+5. **Deterministic logger screenshots** via seeded `nulo:logs`. **Adopted.**
+6. **Guards:** boxed-primitive rows; `isObjectLike` typed `value is Record<string, unknown>`. **Adopted.**
+7. **Comments:** rewrite the stale ones at `useEntityCrud.ts:83` and `useIncomingTransfers.ts:74-75`; trim the narration the queue now owns; TSDoc for both policies and the throwing `onError`; say "promise hop", not "tick"; one line on `Lock`; README rows. **Adopted.**
+8. **Ask 1:** keep. The fence migration is justified as one named latest-wins idiom in synchronous edits, not by line count. **Adopted.**
+9. **Ask 2:** the decoders go to byte-primitives; amend program row 15. **Adopted.**
+10. **Ask 3:** two permanent reference graphs plus the behavioural pins; the seven-shape matrix is migration evidence, logged and collapsed. **Adopted.**
+
+### Route 2: the LogsViewer timer clear
+
+- **Invisible:** no pixel, copy, wire or persisted byte changes. The zero-diff shots prove the pixels.
+- **Strictly safer:** it only adds a cleanup.
+- **Red-then-green:** `LogsViewer.test.ts`, run against the parent's file copy.
+- Pre-cleared by the program plan's Behaviour rule.

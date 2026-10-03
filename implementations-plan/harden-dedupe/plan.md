@@ -123,7 +123,7 @@ The order runs from mechanical and low-risk up to the riskiest, and each helper 
 | 12 | row-lifecycle | Q-03 (a, b, c without the config loop, d); B-12; Q-27 (b, m, n) | MID | persisted rows, deletion fences, imported-key wipe | no |
 | 13 | profile-rows | Q-17 (a, b, c) | MID | MAC inputs and credential rows | no |
 | 14 | incoming-arms | Q-18; Q-27 (l) | MID | concurrency: each epoch re-check point | no |
-| 15 | async-primitives | Q-16; Q-15 helper definitions and its (e) guard migrations | MID | wallet-core, extension-messaging, aztec-runtime; secret-export pages | logic only |
+| 15 | async-primitives | Q-16; Q-15 (e): the record guards and their migrations (its panel moved the lenient base64 and hex decoder definitions to byte-primitives) | MID | wallet-core, extension-messaging, aztec-runtime; secret-export pages | logic only (LogsViewer script; zero-diff shots) |
 | 16 | byte-primitives | Q-15 (a to d), except the two `wallet-crypto` secret boxes | MID | frozen blob paths; per-site decode strictness kept | logic only |
 | 17 | pxe-idb | Q-21 (blocked-delete policy and keyval lookup as named parameters); Q-27 (k) | MID | deletion of persisted shared databases | no |
 | 18 | restore-wiring | Q-25 | MID | the data-recovery contract behind the `never` casts | no |
