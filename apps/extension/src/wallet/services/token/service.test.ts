@@ -489,6 +489,26 @@ describe("TokenService.addToken — creation fences", () => {
 		expect(emitted).toHaveLength(0)
 	})
 
+	test("a deletion landing DURING the row write refuses before the post-write network check", async () => {
+		const { tokenService, api, deletionState, networkLive } = await makeHarness()
+		const networks = (tokenService as unknown as { networks: { isNetworkLive: (id: string) => Promise<boolean> } }).networks
+		const checks: string[] = []
+		networks.isNetworkLive = async () => {
+			checks.push("live")
+			return networkLive.value
+		}
+		const writes = recordWrites(api.storage.local, "nulo:core:tokens@", () => {
+			checks.push("written")
+			deletionState.beginDeletion("p1")
+		})
+
+		await expect(tokenService.addToken("p1", NETWORK.id, "0xacc", ti("0xbeef"), { origin: "popup" })).rejects.toThrow(
+			/^profile p1 deleted$/,
+		)
+		writes.restore()
+		expect(checks.slice(checks.indexOf("written"))).toEqual(["written"])
+	})
+
 	test("a deletion landing DURING the last network check is compensated away before any emit", async () => {
 		const { tokenService, api, deletionState, networkLive } = await makeHarness()
 		const emitted: unknown[] = []
