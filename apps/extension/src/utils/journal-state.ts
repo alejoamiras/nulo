@@ -316,12 +316,7 @@ export interface JournalTerminalCardCtx {
 	tokenById: (id: number) => TokenForCardProps | undefined
 }
 
-/**
- * Props shape a terminal `TransactionTerminalCard` consumes. Mirrors the
- * inline shapes that `RecentActivityView` and `TransactionsList` each used
- * to build independently — the duplication risked drift between the home
- * widget and the dedicated activity page.
- */
+/** Props shape a terminal `TransactionTerminalCard` consumes, on Home and in History alike. */
 export interface JournalTerminalCardProps {
 	title: string
 	activityIcon: string
@@ -349,8 +344,7 @@ export interface JournalTerminalCardProps {
  *    renders in TokensView via `TokenImportRow`, not in the activity feed).
  *
  * The non-activity-kind guard is intentional: it lets an accidental caller
- * get a clean `null` rather than a malformed card. Codex flagged the
- * pre-guard signature as a footgun.
+ * get a clean `null` rather than a malformed card.
  *
  * Pure function. `tokenById` is passed via ctx because the token cache
  * lives in popup-store land; this file stays free of Pinia / Vue refs.
@@ -360,50 +354,54 @@ export function buildJournalTerminalCardProps(op: OperationRecord, ctx: JournalT
 	const display = journalTerminalDisplay(op)
 	if (!display) return null
 
-	const fields = op.kind === "transfer" ? transferCardFields(op, ctx) : dappCardFields(op)
-	return { ...fields, ...display }
-}
-
-type JournalCardFields = Pick<
-	JournalTerminalCardProps,
-	"title" | "activityIcon" | "originLabel" | "transferTypeLabel" | "amount" | "amountSymbol"
->
-
-function transferCardFields(op: OperationRecord, ctx: JournalTerminalCardCtx): JournalCardFields {
-	const token = op.tokenId !== undefined ? ctx.tokenById(op.tokenId) : undefined
-
-	// Pre-v7 records lacking `amountRaw` would have `balanceFormatted(undefined, …)`
-	// silently render "0", surfacing as a fake "0 USDC" ghost on the card.
-	// Only emit amount when both pieces are present.
-	let amount: string | null = null
-	let amountSymbol: string | null = null
-	if (op.amountRaw && token) {
-		amount = balanceFormatted(op.amountRaw, token.decimals || 0, 8, { compact: true }).value
-		amountSymbol = token.symbol ?? null
-	}
-
 	return {
-		title: token?.symbol || "Transfer",
-		activityIcon: "arrow-narrow-up-right",
-		originLabel: null,
-		// Gate on `=== undefined` because TransferType.Private === 0; a truthy
-		// check would silently drop the Private → Private chip.
-		transferTypeLabel: op.transferType !== undefined ? formatTransferType(op.transferType) : null,
-		amount,
-		amountSymbol,
+		title: journalCardTitle(op, ctx.tokenById),
+		activityIcon: journalCardIcon(op),
+		originLabel: journalCardOriginLabel(op),
+		transferTypeLabel: journalCardTransferTypeLabel(op),
+		...terminalAmount(op, ctx.tokenById),
+		...display,
 	}
 }
 
-function dappCardFields(op: OperationRecord): JournalCardFields {
-	return {
-		title: op.title ? humanizeMethodName(op.title) : "Transaction",
-		activityIcon: "zap",
-		// `op.subtitle` is the dApp-controlled origin/name persisted at session-
-		// discover time. Bracket schemeful values so a malicious dApp can't make
-		// its label visually read as a clickable link on the main feed.
-		originLabel: sanitizeJournalSubtitle(op.subtitle),
-		transferTypeLabel: null,
-		amount: null,
-		amountSymbol: null,
+/*
+ * The fields the awaiting and terminal cards share, so a journal op reads the same across its
+ * lifecycle. Each checks the kind before reading anything else: a dApp card reads no token.
+ */
+
+export function journalCardTitle(op: OperationRecord, tokenById: JournalTerminalCardCtx["tokenById"]): string {
+	if (op.kind === "transfer") {
+		const token = op.tokenId !== undefined ? tokenById(op.tokenId) : undefined
+		return token?.symbol || "Transfer"
 	}
+	return op.title ? humanizeMethodName(op.title) : "Transaction"
+}
+
+export function journalCardIcon(op: OperationRecord): string {
+	return op.kind === "transfer" ? "arrow-narrow-up-right" : "zap"
+}
+
+/** `op.subtitle` is the dApp-controlled origin persisted at session-discover time; bracketed when
+ *  schemeful so it never reads as a link. */
+export function journalCardOriginLabel(op: OperationRecord): string | null {
+	if (op.kind === "transfer") return null
+	return sanitizeJournalSubtitle(op.subtitle)
+}
+
+export function journalCardTransferTypeLabel(op: OperationRecord): string | null {
+	if (op.kind !== "transfer") return null
+	// `TransferType.Private` is 0, so a truthy check would drop the Private → Private chip.
+	if (op.transferType === undefined) return null
+	return formatTransferType(op.transferType)
+}
+
+function terminalAmount(
+	op: OperationRecord,
+	tokenById: JournalTerminalCardCtx["tokenById"],
+): Pick<JournalTerminalCardProps, "amount" | "amountSymbol"> {
+	if (op.kind !== "transfer") return { amount: null, amountSymbol: null }
+	const token = op.tokenId !== undefined ? tokenById(op.tokenId) : undefined
+	// An empty or missing `amountRaw` would format as "0", a fake "0 USDC" on the card.
+	if (!op.amountRaw || !token) return { amount: null, amountSymbol: null }
+	return { amount: balanceFormatted(op.amountRaw, token.decimals || 0, 8, { compact: true }).value, amountSymbol: token.symbol ?? null }
 }

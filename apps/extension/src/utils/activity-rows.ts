@@ -8,10 +8,8 @@
  *     receives, filtered by trust state at the service layer)
  *
  * Lives in `utils/` (L0) so both popup-pages (L6) and feed modules (L4)
- * can import. Extracted from the inline merges that previously lived in
- * both `popup/pages/activity.vue` and `popup/components/modules/general/
- * RecentActivityView.vue` — duplication risked drift between the two
- * surfaces (codex + opus audit M3).
+ * can import. Home's preview (`recent-activity-rows.ts`) takes its tx and
+ * incoming scope from here and keeps its own extra guards.
  */
 
 import type { IncomingTransferRecord } from "@/wallet/services/incoming-transfer/spec"
@@ -58,7 +56,7 @@ export function buildActivityRows({
 }: BuildActivityRowsParams): ActivityRow[] {
 	const scope = { accountAddress, chainId, networkId, profileId }
 	const rows: ActivityRow[] = [
-		...txRows(transactions, scope),
+		...scopedTxRows(transactions, scope),
 		...journalRows(terminalJournalOps, scope),
 		...incomingRows(incomingTransfers, scope),
 	]
@@ -76,7 +74,7 @@ export function isForeignProfile(scopeProfileId: string | undefined, rowProfileI
 
 /** Scope tx to the active account+chain when a scope is supplied (a late/
  *  out-of-scope tx from the store's flat list must not render under B). */
-function txRows(transactions: BuildActivityRowsParams["transactions"], scope: RowScope): ActivityRow[] {
+export function scopedTxRows(transactions: BuildActivityRowsParams["transactions"], scope: RowScope): ActivityRow[] {
 	const rows: ActivityRow[] = []
 	for (const tx of transactions) {
 		if (scope.accountAddress !== undefined && tx.account !== scope.accountAddress) continue
@@ -104,18 +102,35 @@ function journalRows(terminalJournalOps: BuildActivityRowsParams["terminalJourna
 function incomingRows(incomingTransfers: BuildActivityRowsParams["incomingTransfers"], scope: RowScope): ActivityRow[] {
 	const rows: ActivityRow[] = []
 	for (const inc of incomingTransfers) {
-		if (scope.accountAddress !== undefined && inc.accountAddress !== scope.accountAddress) continue
-		if (scope.networkId !== undefined && inc.networkId !== scope.networkId) continue
-		// Path 2: prefer the chain-derived block timestamp (UTC seconds) over
-		// the wall-clock `discoveredAt`. Block timestamp survives token
-		// remove + re-add (records get re-indexed from PXE with identical
-		// `blockTimestamp`s) AND survives a new-device restore from the
-		// same mnemonic. Wall-clock falls back only for legacy records OR
-		// when PXE failed to resolve the block at scan-time. Multiply seconds
-		// by 1000 so the magnitude is comparable to the millisecond values
-		// used for tx / journal sortKeys.
-		const sortKey = inc.blockTimestamp !== undefined ? inc.blockTimestamp * 1000 : inc.discoveredAt
-		rows.push({ type: "incoming", key: `incoming:${inc.id}`, sortKey, inc })
+		if (!incomingInScope(inc, scope)) continue
+		rows.push(incomingRow(inc))
 	}
 	return rows
+}
+
+/** The account and network checks both feeds apply to an incoming record; an unknown scope field
+ *  checks nothing. */
+export function incomingInScope(inc: IncomingTransferRecord, scope: RowScope): boolean {
+	if (scope.accountAddress !== undefined && inc.accountAddress !== scope.accountAddress) return false
+	if (scope.networkId !== undefined && inc.networkId !== scope.networkId) return false
+	return true
+}
+
+export function incomingRow(inc: IncomingTransferRecord): ActivityRowIncoming {
+	// The block time (UTC seconds) survives a token remove + re-add and a restore, which the
+	// wall-clock `discoveredAt` does not; scaled to the milliseconds of the tx and journal keys.
+	const sortKey = inc.blockTimestamp !== undefined ? inc.blockTimestamp * 1000 : inc.discoveredAt
+	return { type: "incoming", key: `incoming:${inc.id}`, sortKey, inc }
+}
+
+/** The detail page a row opens. */
+export function activityRowRoute(row: ActivityRow): string {
+	switch (row.type) {
+		case "tx":
+			return `/popup/tx/${row.tx.hash}`
+		case "incoming":
+			return `/popup/received/${row.inc.id}`
+		case "journal":
+			return `/popup/journal/${row.op.id}`
+	}
 }

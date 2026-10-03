@@ -10,6 +10,7 @@ import TransactionTerminalCard from "@/components/composite/activity/Transaction
 import TransactionIncomingCard from "@/components/composite/activity/TransactionIncomingCard.vue"
 import { PriceServiceClient } from "@/wallet/services/price/client"
 import { usePrices } from "@/composables/usePrices"
+import { activityRowRoute } from "@/utils/activity-rows"
 import { buildJournalTerminalCardProps } from "@/utils/journal-state"
 import { buildIncomingCardProps } from "@/utils/received-display"
 
@@ -60,17 +61,17 @@ function terminalCardProps(op) {
 			</Flex>
 
 			<template v-for="row in group.rows" :key="row.key">
-				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" :tokens="tokens" :to="`/popup/tx/${row.tx.hash}`" />
+				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" :tokens="tokens" :to="activityRowRoute(row)" />
 				<TransactionIncomingCard
 					v-else-if="row.type === 'incoming'"
 					v-bind="incomingCardProps(row.inc)"
-					:to="`/popup/received/${row.inc.id}`"
+					:to="activityRowRoute(row)"
 					:arriving="isArriving?.(row.inc) ?? false"
 				/>
 				<TransactionTerminalCard
 					v-else-if="row.type === 'journal' && terminalCardProps(row.op)"
 					v-bind="terminalCardProps(row.op)"
-					:to="`/popup/journal/${row.op.id}`"
+					:to="activityRowRoute(row)"
 				/>
 			</template>
 		</Flex>
