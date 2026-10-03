@@ -170,10 +170,10 @@ Phase 0 starts once visual-shells-a frees the harness. It makes the two harness 
 
 - asserts its counts before the shot and again after settling;
 - makes every changed element visible in some capture, by scrolling to it or by taking a second shot;
-- refuses the price feed with `interceptRpc` and asserts no fiat line, so live prices cannot flip a shot;
+- leaves the price feed live: no surface intercepts it, and the fiat lines (USDC at today's price) are in the shots. A price move turns a shot into a diff, never into a false match;
 - uses a fixed timestamp for every seed, except the proving row (below);
 - asserts its stub's served-call count;
-- carries a computed-style `probe` at rest, hovered, focused and pressed for every element whose class moved, leaving out keyframe names. Links and cards also get a real hover capture.
+- carries a computed-style `probe` of every element whose class moved, leaving out keyframe names. Of the 18 probed surfaces, 8 walk rest, hover, pressed and focus (the tx and received detail pages); the other 10 are rest-only. A watched selector that matches nothing fails the probe. Links, cards and the hero links also get a real hover capture.
 
 **Seeding.**
 
@@ -201,15 +201,16 @@ Phase 0 starts once visual-shells-a frees the harness. It makes the two harness 
 | migration-blocked | Home | write `nulo:schema:blocked = { terminal: true }`; on leave, remove it | `migration-blocked` = 1 |
 | passkey-dialog | `#/popup/profile/new`: passkey method, name typed, create pressed | `navigator.credentials.create` stubbed to never settle; `busy` covers the dialog spinner | dialog = 1 |
 | global-loader (spike, ≤ 30 min): **failed, dropped** | new page | preload via `evaluateOnNewDocument` that fails the profile port's open synchronously | passed on Chrome; on Firefox the preload never ran in the moz-extension document, by driver or page-initiated navigation |
-| send-fee | `#/popup/send` | none: the live testnet read. A refused RPC (as in `send-fee-privacy.test.ts`) degraded the card in some captures and not in others within 5 min, so it could not be held | the card settles on sponsored with the method and priority rows and no notice, pinned as an exact fingerprint that must still hold after the shot; every `detail_row` in the card is probed |
-| received-detail | `#/popup/received/<id>` | note-receipt seed; it never fetches a fee (Fact 12) | `received-detail-page`, `received-from-card` and `tx-explorer-link` = 1 each; `received-fee-loading` = 0, and the fee row shows its no-fee state; probe the from card (static) and the To card |
+| send-fee | `#/popup/send`, the fee card scrolled to the middle | none: the live testnet read. A refused RPC (as in `send-fee-privacy.test.ts`) degraded the card in some captures and not in others within 5 min, so it could not be held | the card settles on sponsored with no notice, pinned as an exact fingerprint that must still hold after the shot; its two `detail_row` rows, the cost readout and the priority row, are fully on screen and probed |
+| received-detail | `#/popup/received/<id>` | note-receipt seed; it never fetches a fee and renders no fee row (Fact 12) | `received-detail-page`, `received-from-card` and `tx-explorer-link` = 1 each; `received-fee-loading` = 0; probe the from card (static) and the To card |
+| received-public | `#/popup/received/<pub id>` | public-event seed from another account; its fee lookup asks the live node for an unknown tx and settles on the dash | `received-fee-loading` = 0, then `detail_value_aux` = 2 (the fee dash and the block hash), probed |
 | tx-detail | `#/popup/tx/<hash>` | transfer seed with a dApp origin and a `block` (number and hash), so the block-hash aux line renders | `tx-hash-link` = 1; the aux line visible |
 | tx-mint | `#/popup/tx/<hash>` | a call to `mint_to_private` with its two arguments and a registered token with known decimals (`utils/tx-amount.ts:39`) | `tx-hash-link` = 1; the "Mint amount" caption visible |
 | journal-detail, journal-dev | `#/popup/journal/<id>`; then the same page with Developer Mode on (Settings → Advanced), turned off on leave | failed-row seed | `journal-detail-state` = 1, `journal-detail-transfer-type` = 1; then `journal-detail-error-message` = 1 |
 
 **Validation gate:**
 
-- `bun ~/.cache/hd-shots/run.ts --batch visual-shells-b --base <parent> --stability` reports ALL IDENTICAL on both browsers.
+- The local screenshot harness (outside the repo), run as `--batch visual-shells-b --base <parent> --stability`, reports ALL IDENTICAL on both browsers.
 - A forced-diff check (`--head dist:<throwaway>` built with one hairline and one scrim alpha nudged and `card_static` dropped) reports a diff on exactly the surfaces that show them.
 - Any surface that cannot be staged is recorded here, and its site moves to Deferred before Phase 1.
 

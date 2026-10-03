@@ -2,15 +2,15 @@
 
 ## Build
 
-- **Phase 1, the token sweep (c519b8d9).**
+- **Phase 1, the token sweep (ea521676; c519b8d9 before the restack).**
   - 12 hairline literals now read `--hairline-soft` or `--hairline-strong`.
   - Five overlays read their scrim token.
   - The capabilities table drops its dark override, which restated the shared value. Its light override stays.
-- **Phase 2, the detail-page shell (4d4d40b8).**
+- **Phase 2, the detail-page shell (27d44552; 4d4d40b8 before the restack).**
   - The tx, received and journal pages compose nine new shared rules from `popup/pages/detail-page.module.css`, plus its existing `details_box`, and share one timestamp format.
   - Received's static from card now outranks the shared card rule on specificity. Source order cannot decide it, because a composed module loads with whichever detail chunk arrives first.
   - Journal drops three `origin_*` rules that no element used.
-- **Local gates, green on each phase:** lint, `typecheck:all`, `test:all`. On the head, `audit:vue` and `test:ci-gating` are green too.
+- **Local gates, green on each phase:** lint, `typecheck:all`, `test:all`. On the head, `audit:vue` and `test:ci-gating` are green too, and all five again on ca9e5740 after round 1 and the restack.
 
 ## Harness
 
@@ -20,13 +20,14 @@ The harness is shared with arc 3, and every edit to it was additive.
 - **`busy`** is a per-surface list of selectors that the settle step ignores. A listed element must be visible before the wait and still there after it, and no animation may be running once the freeze is applied.
   - The passkey dialog uses it.
 - After the harness edits, arc 3's notes, contacts and token-detail surfaces were rerun against their own base and head: 24 of 24 identical.
-- **Surfaces: 32 per theme**, each captured on Chrome and Firefox in dark and light.
+- **Surfaces: 36 per theme** after Codex round 1 (32 before it), each captured on Chrome and Firefox in dark and light.
   - Covered: the activity feed and cards, the bottom nav, glossary, the receive popup, migration-blocked, the legal sheet, the capabilities window (top, rows, details, cancelled) and the passkey dialog.
   - Detail pages run in two visit orders:
     - received-first (A): received, tx, mint, journal, journal with Developer Mode, then received and tx again;
-    - tx-first (B): tx, received, tx.
+    - tx-first (B): tx, received, tx, then a public receipt (the only kind that renders received's aux values).
   - The fee card on Send closes the list.
-  - 17 surfaces carry a computed-style probe that walks rest, hover, active and focus.
+  - 18 surfaces carry a computed-style probe. 8 walk rest, hover, pressed and focus (the tx and received detail pages); 10 are rest-only. A watched selector that matches nothing fails the probe.
+  - Every surface recounts what it asserted once the shot is taken.
 - **The tx hash link's colour is asserted on every tx visit**, against probe spans of the two text tokens:
   - secondary on a first visit, whether received or tx came first;
   - primary once received has loaded, in both orders.
@@ -46,12 +47,22 @@ The harness is shared with arc 3, and every edit to it was additive.
 - **A refused Testnet RPC could not hold the fee card degraded.**
   - In some captures it never degraded inside 5 minutes; in others it degraded inside 2.
   - The background's gas reader keeps a 5-minute cache, the popup store keeps a ready slice, and the store's own retry flights outlive a page reload.
-  - The surface now takes the live testnet state, as Home already does. That state is sponsored, with the method and priority rows and no notice. It is pinned as an exact fingerprint that must still hold after the shot, and every `detail_row` in the card is probed. A failed live read fails the capture; it never produces a false identical.
+  - The surface now takes the live testnet state, as Home already does. That state is sponsored with no notice; its two detail rows are the cost readout and the priority row. It is pinned as an exact fingerprint that must still hold after the shot, and every `detail_row` in the card is probed. A failed live read fails the capture; it never produces a false identical.
 - **The suite's `setDeveloperMode` leaves Settings as soon as the toggle flips.**
   - Once, that dropped the config client mid-write, and a sticky "Failed to update setting" snack then blocked the next surface's settle.
   - The batch toggles through its own helper instead. It stays on the page until the write lands and fails on a snack.
 - **Two counts were read once instead of polled.** The token feed rendered after the read on Firefox, so both counts now poll.
 - **Arc 3's evidence was overwritten.** One rerun of arc 3's surfaces rewrote `shots/visual-shells-a/` while arc 3 was in review. After that, `visual-shells-a` runs were left to the coordinator.
+
+## Codex loop
+
+- **Code round 1 (GPT-6 Astra, xhigh):** NOT CONVERGED. No cascade bug; the token swaps, the DetailsTable light twin, the GlobalLoader literal, the dates, the testids and the counts were all confirmed. Five coverage and docs findings, all adopted.
+  1. **Received's aux rule was never rendered.** A note receipt has no fee row and no block-hash aux, and the probe accepted zero matches. A public receipt from another account is now seeded. Its fee lookup asks the live node for a tx it never saw and settles on the dash. The surface asserts the shimmer is gone and exactly two aux values, then probes them, so received's aux rule stays shared.
+  2. **The hero SVG's moved rules were untested.** Both probes now watch the SVG as well as the anchor, received gained its pressed-hero step, and tx and received each get a hero-hover screenshot. The probe now refuses a watched selector that matches nothing, as arc 3's does. The journal probe watched the dev box on the page without Developer Mode too, where it matches nothing, so the two journal states now have separate watch lists.
+  3. **Send's detail rows were partly below the fold.** The fee card is scrolled to the middle before the shot. Both rows must be unclipped and on top at two corners, before and after the shot.
+  4. **The docs overstated the harness.** There is no price interception, so the fiat lines are live and in the shots. The probe split is 8 interactive and 10 rest-only. The sponsored detail rows are the cost readout and the priority row. The plan no longer names a machine-local path. Every surface without a post-shot recount gained one.
+  5. **The time-format constant carried a caller inventory.** Deleted.
+- **Restack:** onto 7450928c after arcs 3, 5 and 7 landed. Arc 3 added composed modules in other files, so the evidence below is against that base.
 
 ## Screenshots
 
@@ -65,6 +76,9 @@ The harness is shared with arc 3, and every edit to it was additive.
 - **Phase 1, 0abf63a3 against c519b8d9:** 196 of 196 identical on both browsers. The two builds' CSS hashes differ, so the run compared changed CSS.
 - **Phase 2, c519b8d9 against 4d4d40b8:** 196 of 196 identical, with every hash-link colour assertion in both orders holding on both browsers.
 - **Final stability, 4d4d40b8 against itself:** 196 of 196 identical on both browsers.
+- **After round 1 and the restack (head ca9e5740):** each run is 216 results, that is 72 shots plus 36 probes per browser.
+  - 7450928c against ca9e5740: 216 of 216 identical on Chrome and Firefox.
+  - ca9e5740 against itself: 216 of 216 identical.
 
 ## Deferred
 
