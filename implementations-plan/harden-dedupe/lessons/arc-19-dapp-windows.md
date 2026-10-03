@@ -101,3 +101,12 @@ The program's local harness compared base `0a9e48f9` with head `77969642`. It ra
   - the expected record passes whether it is joined onto the last line or on its own;
   - the old line check passed four of the five failing cases.
 - **No source change in round 2:** the head code is still `9e532274`.
+- **Round 3: converged, no findings.**
+
+## Restack
+
+- **Rebased onto arc 11 (`1745400b`) with no conflicts.** The new code head is `49ca84bf`; the lockfile and manifests were unchanged. Results:
+  - gates green;
+  - the rebuilt auto-import files match the committed ones;
+  - `dapp-windows`: 44 of 44 identical in each of three passes (base vs head, `--stability` on base, `--stability` on head);
+  - `dapp-windows-queue`: 4 of 4 identical in each of the same three passes, with all 24 strict queue-full checks passing (`ext-7` and `ext-14`, 12 each).
