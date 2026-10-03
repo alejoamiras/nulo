@@ -22,7 +22,8 @@ Paths are under `apps/extension/src/`. Lines read 2026-10-03 at `6fd533a0`.
 - **History**, `incomingRows` (`activity-rows.ts:102-109`), is unchanged. Its reads become account, network, profile, then the sort key and `id`, which is Home's order without the token.
 - **Comments.**
   - `incomingInScope`'s TSDoc names the profile check.
-  - Home's helper comment (`recent-activity-rows.ts:49`) drops "the profile last", since only the token check is left at that site.
+  - `incomingRows`' comment, which repeated that contract, goes.
+  - Home's helper comment (`recent-activity-rows.ts:49`) states the one invariant its order protects: the token check runs first, so another token's receipt never has its scope fields read.
 - **Rejected:** adding the line inside History's loop instead. That keeps the same check sequence written out twice, which is the duplication arc 22 removed.
 
 ## Reachability
@@ -52,8 +53,8 @@ So no reachable state shows different rows, and no pixel moves. The same rows al
 None. No template, style or copy changes. The zero-diff gate re-captures the activity-feed surfaces that render incoming and empty rows:
 
 - History: `activity-page`, `activity-page-end`, `activity-empty`;
-- Home: `home-feed`, `home-feed-end`, `home-feed-dapp`, `home-empty`;
-- the token page: `token-feed`, `token-feed-empty`.
+- Home: `home-feed`, `home-feed-end`, `home-feed-dapp`, `home-feed-dapp-end`, `home-empty`;
+- the token page: `token-feed`, `token-feed-end`, `token-feed-empty`.
 
 Base `6fd533a0` against this arc's code head, on Chrome and Firefox in dark and light, then a `--stability` run.
 
@@ -113,7 +114,11 @@ Make the change above, leaving both test files untouched. Commit `fix(activity):
 
 ## Results
 
-_Filled at close._
+- **Red then green.** On `6fd533a0`, 3 of the 22 tests in `activity-rows.test.ts` fail: the inverted pin, the empty-id rows and the read-order rows. After the fix (`456b747f`), all 38 tests in the two row files pass, plus `activity.test.ts`. `recent-activity-rows.test.ts` is byte-identical.
+- **Mutants:** all 9 killed. The killing tests are in `lessons/arc-22b-history-guard.md`.
+- **Gates:** all five program gates pass at `456b747f` and again at the code head `82dcb85d`. The only change between those two commits is to comments.
+- **Shots, base `6fd533a0` against the code head `82dcb85d`:** 68 of 68 identical on Chrome and Firefox, dark and light. That is 44 shots across the 11 surfaces plus 24 computed-style probes. The `--stability` run (base against itself) was also 68 of 68 identical. An earlier run against `456b747f` was also 68 of 68 identical.
+- **Codex code review:** CONVERGED in round 1, with two nits; one was adopted and one declined with its reason. Round 2 confirmed CONVERGED with no findings.
 
 ## Delivery
 
@@ -148,3 +153,14 @@ No reachability blocker: Codex found no realistic path where History's list hold
 
 1. **Should-fix: the block-time read-order assertion** (`activity-rows.test.ts:301`) also gains `profileId`. Left as it was, Phase 2 would stay red. **Adopted:** listed in Phase 1.
 2. **Should-fix: three mutants survived the proposed rows.** They were `scope.profileId && …` (no profile read under an unknown scope), `scope.profileId || undefined` and `inc.profileId || undefined`. The last two would relax `isForeignProfile`'s empty-id semantics. **Adopted:** an unknown-scope read trace and two empty-id rows in History's test, and mutants 7 to 9. Home's test file stays untouched.
+
+### Code review, Codex round 1: CONVERGED
+
+No material finding: Codex reproduced the three base failures and the nine kills, and saw Home's Vue dependency traces unchanged.
+
+- **Nit, adopted:** `incomingRows`' comment repeated the contract and was deleted. Home's helper comment now states its ordering invariant (`82dcb85d`).
+- **Nit, declined:** shortening the scope comments in `RecentActivityView.vue` (about line 108) and `activity.vue` (about line 104). They predate this arc and are no less accurate after it, and a route-2 arc does not edit `.vue` files for no behaviour.
+
+### Code review, Codex round 2: CONVERGED
+
+No findings.
