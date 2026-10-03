@@ -39,6 +39,13 @@ const LIVE_DOCS = [
 	/^\.github\/README\.md$/,
 ]
 const HISTORY_DOCS = new Set(["CHANGELOG.md", "AUDIT.md"])
+/** A superseded legal text, kept verbatim: its links still say what they said beside it in `legal/`. */
+const ARCHIVED_LEGAL = /^legal\/archive\/(?:terms|privacy)-[\d.]+\.md$/
+
+/** The path a doc's relative links resolve from. */
+function linkBase(path: string): string {
+	return ARCHIVED_LEGAL.test(path) ? `legal/${posix.basename(path)}` : path
+}
 /**
  * Frozen research, audit and reference trees are out of the path-token scan, like the release history;
  * so are the soak baselines, which record the path each was written to, and this gate's fixtures. Plan
@@ -208,7 +215,7 @@ function planTreeTargets(from: string, href: string, topLevel: ReadonlySet<strin
 type LinkScope = { kind: "full" | "plans" | null; topLevel: ReadonlySet<string> }
 
 function judgeLink(ctx: Ctx, doc: Doc, link: Link, scope: LinkScope): Finding | null {
-	const target = resolveHref(doc.path, link.href)
+	const target = resolveHref(linkBase(doc.path), link.href)
 	if (target.kind !== "repo") return null
 	const base = { file: doc.path, line: link.line }
 	if (target.path !== null && isCanonical(target.path)) {

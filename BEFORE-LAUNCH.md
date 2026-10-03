@@ -86,6 +86,14 @@ archive the old text, bump the version line, add the history row **with its effe
 the manifest entry, and mark it `material: true` with hand-written `changes` if people must
 re-accept. `git diff <last release tag> -- legal/` answers whether any of this applies.
 
+**Due at the next promote:** privacy 1.1 (§ 5.10, the site the "Get Fee Juice" and "Get private
+gas" links open) is archived and versioned, its effective date left as `«FILL»` for that day:
+
+- [ ] `legal/privacy.md` — the version line and the 1.1 history row
+- [ ] `packages/legal/src/manifest.ts` — `effective` for `privacy` 1.1 (currently `null`)
+- [ ] After the deploy, `nulo.sh/privacy` shows no DRAFT banner, and AMO's Privacy policy field
+  carries the 1.1 text (`apps/extension/store/listing.md`)
+
 ## Not legal text, same deadline
 
 - Firefox `data_collection_permissions` (`financialAndPaymentInfo`) and the Firefox 153 minimum
