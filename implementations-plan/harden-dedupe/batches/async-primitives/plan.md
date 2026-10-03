@@ -302,5 +302,5 @@ Nothing here is user-visible, so these items go to follow-ups, not the alignment
 
 - **Invisible:** no pixel, copy, wire or persisted byte changes. The zero-diff shots prove the pixels.
 - **Strictly safer:** it only adds a cleanup.
-- **Red-then-green:** `LogsViewer.test.ts`, run against the parent's file copy.
+- **Red-then-green:** `LogsViewer.test.ts` fails against the parent's file (the 500 ms timer is never cleared) and passes after the fix; its fallback row passes on both. Removing the clear is a killed mutant.
 - Pre-cleared by the program plan's Behaviour rule.

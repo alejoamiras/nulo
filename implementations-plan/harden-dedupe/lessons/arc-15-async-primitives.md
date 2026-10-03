@@ -43,3 +43,26 @@
   - logger, two purges with the first removal failing: `start@0 remove-1@1 remove-2@5 purge-1-resolved@6 purge-2-resolved@10`
   - guarded, a throwing activation then a persisting one: `start@0 a-guard-throws@1 a-rejected@5 persist-n3@6 b-activated@10`
   - offscreen, a loading-race close on the tail before the retry create: `start@0 create-1@2 close@4 create-2@8 ready@13`
+
+### Phase 2: the helpers
+
+- `createSerialQueue`, `isRecord`/`isObjectLike`, `sleep`'s `Promise<void>` type and `RunFence.invalidate()` landed with no consumer edit. The permanent reference graphs (one per policy, a rethrowing reporter and an awaited `tail` included) match the hand-written chains hop for hop.
+- Helper mutants, all killed: report `then(op, op)`; propagate tail left rejecting; either `tail` frozen as a plain property; report unchained; one extra hop on propagate; strict guard made permissive; `invalidate()` a no-op.
+- Biome reads a test helper named `after` as a duplicate hook (`noDuplicateTestHooks`); it is `settleAfter`.
+- The report overload returns `Promise<T | void>`, because a failed op resolves to whatever `onError` returned. That union needs one reasoned `noConfusingVoidType` suppression on the interface; it is not a complexity suppression.
+
+### Phase 3: the migrations
+
+- `realSleep` left `auto-imports.d.ts`'s `vue` block on the build, but its global `const` line stayed until removed by hand; a rebuild keeps it out.
+- `ScanEpisodeStore.settled()` now returns `Promise<unknown>`, the live `tail`. Every caller only awaits it.
+- The temporary site fingerprints and the seven-shape matrix passed unchanged against the migrated code, two runs each on Bun, then left in 3g.
+- **Mutation re-run on the migrated code**, 53 mutants at the sites (policy swaps, an unchained stand-in queue, fence checks and bumps, guard swaps by import alias, each `sleep` off by 1 ms, the LogsViewer clear and the quarter fallback): all killed except three equivalents and one gap.
+  - Equivalent: offscreen report to propagate (`closeOffscreen` never rejects), and the seed and health dispose `invalidate()`s.
+  - Gap: the logger's report-to-propagate swap survived, because no test made a storage op fail while watching its caller. The new `clear()` row passes against the parent's chain and the migrated queue, and kills the swap.
+- **LogsViewer, red then green:** `LogsViewer.test.ts` failed against the unchanged file (the 500 ms timer is never cleared) and passed after the fix; the fallback row passed both times.
+
+### Gates
+
+- `lint`, `typecheck:all`, `check:plans`, `test:all` (extension 8,948 tests; wallet-core 273; wallet-bridge 599), `test:ci-gating` (255 pass) and `audit:vue`: all green. The build leaves the auto-import files unchanged beyond `realSleep`.
+- npm: `stage.ts wallet-crypto --version 0.1.0` at the parent and at the head gives the same 10 files with identical sha256s.
+- Shots: 12 of 12 identical (three logger states × Chrome and Firefox × dark and light), and 12 of 12 identical in the `--stability` run (the base against itself). Both runs waited out the harness lock held by sibling arcs.
