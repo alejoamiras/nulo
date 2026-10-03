@@ -8,7 +8,7 @@ import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { TxHash } from "@aztec-labs/stdlib/tx"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import { AztecNodeFactoryAdapter, SILENT_RPC_LOG } from "./aztec-node-factory-adapter"
+import { AztecNodeFactoryAdapter, isAllowedRpcUrl, SILENT_RPC_LOG } from "./aztec-node-factory-adapter"
 
 const URL = "https://rpc.example/key-in-path"
 const CONTRACT = AztecAddress.fromNumberUnsafe(5)
@@ -145,5 +145,54 @@ describe("AztecNodeFactoryAdapter.createSingleAttemptNode", () => {
 
 	test("refuses a URL outside the allowlist, as createNode does", () => {
 		expect(() => new AztecNodeFactoryAdapter().createSingleAttemptNode("http://example.com", 1_000)).toThrow(/refused/)
+	})
+})
+
+// The adapter is the only gate for persisted URLs (a pending tx's endpoint, from a backup too), so
+// its acceptance set and its refusal text are pinned input by input. It accepts userinfo and reads
+// the raw string, where the extension's schema refuses userinfo and validates a trimmed copy.
+const OK = { ok: true } as const
+const scheme = (s: string) => ({ ok: false, reason: `scheme "${s}:" not in allowlist (only https: and http://loopback are permitted)` })
+const loopbackOnly = (host: string) => ({ ok: false, reason: `http: only permitted for loopback hosts (got host="${host}")` })
+const ALLOWLIST: [string, unknown][] = [
+	["https://rpc.example.com", OK],
+	["HTTPS://RPC.EXAMPLE.COM/Path?Q=1", OK],
+	["https://a@b.example", OK],
+	["https://user:pass@b.example", OK],
+	["https://user@evil.com@safe.com", OK],
+	["http://user@localhost:8080", OK],
+	["https://@b.example", OK],
+	["http://localhost:8080", OK],
+	["HTTP://localhost:8080", OK],
+	["http://LOCALHOST:8080", OK],
+	["http://127.0.0.1:8080", OK],
+	["http://127.1:8080", OK],
+	["http://[::1]:8080", OK],
+	["http://[0:0:0:0:0:0:0:1]:8080", OK],
+	["https://[2001:db8::1]:8443", OK],
+	["https://exämple.com", OK],
+	[" https://rpc.example.com", OK],
+	["https://rpc.example.com/path ", OK],
+	["https://rpc.example.com/?q=x ", OK],
+	["https:rpc.example.com", OK],
+	["http://localhost\\@evil.com", OK],
+	["http://localhost.:8080", loopbackOnly("localhost.")],
+	["http://sub.localhost:8080", loopbackOnly("sub.localhost")],
+	["http://127.0.0.2:8080", loopbackOnly("127.0.0.2")],
+	["http://0.0.0.0:8080", loopbackOnly("0.0.0.0")],
+	["http://[::ffff:127.0.0.1]:8080", loopbackOnly("[::ffff:7f00:1]")],
+	["https://rpc.example.com:65536", { ok: false, reason: "not a valid URL: https://rpc.example.com:65536" }],
+	["", { ok: false, reason: "not a valid URL: " }],
+	["https://rpc.example.com ", { ok: false, reason: "not a valid URL: https://rpc.example.com " }],
+	[" https://rpc.example.com", { ok: false, reason: "not a valid URL:  https://rpc.example.com" }],
+	["ws://localhost:8080", scheme("ws")],
+	["javascript:alert(1)", scheme("javascript")],
+	["file:///etc/passwd", scheme("file")],
+	["localhost:8080", scheme("localhost")],
+]
+
+describe("isAllowedRpcUrl", () => {
+	test.each(ALLOWLIST)("%j → %j", (url, expected) => {
+		expect(isAllowedRpcUrl(url)).toEqual(expected)
 	})
 })

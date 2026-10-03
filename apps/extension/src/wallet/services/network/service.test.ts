@@ -27,7 +27,7 @@ import { FakeNodeFactory } from "@/core/testing/fake-node-factory"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import type { ProfileService } from "@/wallet/services/profile/service"
-import { NetworkService } from "./service"
+import { LOCAL_NETWORK_RPC_URL, NetworkService } from "./service"
 import { ERR_UNATTENDED_LIVE_CHECK, NodeStatus } from "./spec"
 import type { Network, NetworkEndpoint } from "./spec"
 
@@ -1469,5 +1469,200 @@ describe("NetworkService — resolveVerifiedL1ChainId unattended", () => {
 		await browserApi.storage.local.set({ "nulo:core:networks@n1": JSON.stringify(row("local", LOCAL_L1_CHAIN_ID)) })
 		await expect(service.resolveVerifiedL1ChainId("p1", 123, { unattended: true })).resolves.toBe(LOCAL_L1_CHAIN_ID)
 		expect(getNodeInfo).not.toHaveBeenCalled()
+	})
+})
+
+const NON_SEED_LOCAL_URL = "http://localhost:18080"
+
+function storeRow(local: FakeStorageArea, over: Partial<Network> & { id: string }): Network {
+	const row: Network = {
+		profileId: "p1",
+		chainId: 0,
+		l1ChainId: 0,
+		name: over.id,
+		primaryEndpointId: "e1",
+		endpoints: [{ id: "e1", rpcUrl: NON_SEED_LOCAL_URL }],
+		kind: "custom",
+		...over,
+	}
+	local.store.set(`nulo:core:networks@${row.id}`, JSON.stringify(row))
+	return row
+}
+
+/** Both status methods on one network: which transport each used, and what each answered. */
+async function bothStatuses(service: NetworkService, factory: FakeNodeFactory, networkId: string) {
+	const probe = vi.spyOn(factory, "probeChainId")
+	const createdBefore = factory.created.length
+	const get = await service.getNodeStatus(networkId)
+	const getUsedProbe = probe.mock.calls.length > 0
+	const getCreated = factory.created.length - createdBefore
+	const probed = await service.probeNodeStatus(networkId, 5_000)
+	return { get, probed, getUsedProbe, getCreated, probeCalls: probe.mock.calls }
+}
+
+describe("NetworkService node status: getNodeStatus and probeNodeStatus", () => {
+	test("a matching endpoint is Active on both; getNodeStatus builds a node, probeNodeStatus probes once with its budget", async () => {
+		const { service, factory } = setupServiceWithStorage({ "https://rpc.example.com": nodeInfoForChain(7) })
+		const network = await service.addNetwork("Seven", "https://rpc.example.com")
+		const r = await bothStatuses(service, factory, network.id)
+		expect(r).toMatchObject({ get: NodeStatus.Active, probed: NodeStatus.Active, getUsedProbe: false, getCreated: 1 })
+		expect(r.probeCalls).toEqual([["https://rpc.example.com", 5_000]])
+	})
+
+	test("an endpoint answering for another chain is InvalidChain on both", async () => {
+		const { service, factory } = setupServiceWithStorage({ "https://rpc.example.com": nodeInfoForChain(7) })
+		const network = await service.addNetwork("Seven", "https://rpc.example.com")
+		factory.setOverrides("https://rpc.example.com", {
+			getNodeInfo: vi.fn().mockResolvedValue(nodeInfoForChain(9)) as unknown as AztecNode["getNodeInfo"],
+		})
+		const r = await bothStatuses(service, factory, network.id)
+		expect([r.get, r.probed]).toEqual([NodeStatus.InvalidChain, NodeStatus.InvalidChain])
+	})
+
+	test("an unreachable endpoint is Inactive on both", async () => {
+		const { service, factory } = setupServiceWithStorage({ "https://rpc.example.com": nodeInfoForChain(7) })
+		const network = await service.addNetwork("Seven", "https://rpc.example.com")
+		factory.setOverrides("https://rpc.example.com", {
+			getNodeInfo: vi.fn().mockRejectedValue(new Error("ECONNREFUSED")) as unknown as AztecNode["getNodeInfo"],
+		})
+		const r = await bothStatuses(service, factory, network.id)
+		expect([r.get, r.probed]).toEqual([NodeStatus.Inactive, NodeStatus.Inactive])
+	})
+
+	test("(BUG PIN) a local-kind network on a non-seed URL: getNodeStatus ignores the kind and reads InvalidChain", async () => {
+		// getNodeStatus passes no kind hint, so only the seeded-URL carve-out applies there;
+		// probeNodeStatus applies the kind too. Aligning them changes a visible status and what a
+		// backup captures (account-state's node-status gate), which is an owner call.
+		const { service, factory, local } = setupServiceWithStorage({ [NON_SEED_LOCAL_URL]: nodeInfoForChain(42) })
+		storeRow(local, { id: "loc", kind: "local" })
+		const r = await bothStatuses(service, factory, "loc")
+		expect([r.get, r.probed]).toEqual([NodeStatus.InvalidChain, NodeStatus.Active])
+	})
+
+	test("a local-kind network whose node is down is Inactive on both: the carve-out never runs before the probe", async () => {
+		const { service, factory, local } = setupServiceWithStorage({ [NON_SEED_LOCAL_URL]: new Error("ECONNREFUSED") })
+		storeRow(local, { id: "loc", kind: "local" })
+		const r = await bothStatuses(service, factory, "loc")
+		expect([r.get, r.probed]).toEqual([NodeStatus.Inactive, NodeStatus.Inactive])
+	})
+
+	test("a custom network on the seeded local URL takes the URL carve-out on both", async () => {
+		const { service, factory, local } = setupServiceWithStorage({ [LOCAL_NETWORK_RPC_URL]: nodeInfoForChain(42) })
+		storeRow(local, { id: "seedurl", endpoints: [{ id: "e1", rpcUrl: LOCAL_NETWORK_RPC_URL }] })
+		const r = await bothStatuses(service, factory, "seedurl")
+		expect([r.get, r.probed]).toEqual([NodeStatus.Active, NodeStatus.Active])
+	})
+
+	test("a dangling primaryEndpointId is Inactive on both, with no node built and no probe", async () => {
+		const { service, factory, local } = setupServiceWithStorage({ [NON_SEED_LOCAL_URL]: nodeInfoForChain(0) })
+		storeRow(local, { id: "dang", primaryEndpointId: "gone" })
+		const r = await bothStatuses(service, factory, "dang")
+		expect(r).toMatchObject({ get: NodeStatus.Inactive, probed: NodeStatus.Inactive, getCreated: 0 })
+		expect(r.probeCalls).toEqual([])
+		expect(factory.created).toHaveLength(0)
+	})
+})
+
+describe("NetworkService endpoint identity guard (add and update)", () => {
+	const COMPOSITE = "ENDPOINT_CHAIN_MISMATCH: This RPC reports chainId 99, but this network is chain 50."
+	const L1 = "ENDPOINT_CHAIN_MISMATCH: This RPC reports L1 chain 2, but this network is L1 chain 0."
+	const BOTH = "ENDPOINT_CHAIN_MISMATCH: This RPC reports chainId 0, but this network is chain 50."
+	const ROWS: [string, NodeInfo, string][] = [
+		["a different composite", nodeInfoForChain(99), COMPOSITE],
+		["the same composite from another L1", { l1ChainId: 2, rollupVersion: 48 }, L1],
+		["both different: the composite is checked first", { l1ChainId: 3, rollupVersion: 3 }, BOTH],
+	]
+
+	test.each(ROWS)("addEndpoint refuses %s", async (_name, info, message) => {
+		const { service } = setupServiceWithStorage({ "https://rpc.test/1": nodeInfoForChain(50), "https://rpc.other": info })
+		const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+		await expect(service.addEndpoint(network.id, "X", "https://rpc.other")).rejects.toThrow(new Error(message))
+	})
+
+	test.each(ROWS)("updateEndpoint refuses %s", async (_name, info, message) => {
+		const { service } = setupServiceWithStorage({ "https://rpc.test/1": nodeInfoForChain(50), "https://rpc.other": info })
+		const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+		await expect(service.updateEndpoint(network.id, network.primaryEndpointId, "X", "https://rpc.other")).rejects.toThrow(
+			new Error(message),
+		)
+	})
+})
+
+describe("NetworkService endpoint labels", () => {
+	const LABELS: [string | undefined, string | undefined][] = [
+		["  x  ", "x"],
+		["   ", undefined],
+		[undefined, undefined],
+	]
+
+	test.each(LABELS)("addEndpoint and updateEndpoint store %j as %j", async (label, stored) => {
+		const { service } = setupServiceWithStorage({
+			"https://rpc.test/1": nodeInfoForChain(50),
+			"https://rpc.test/2": nodeInfoForChain(50),
+			"https://rpc.test/3": nodeInfoForChain(50),
+		})
+		const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+		const added = await service.addEndpoint(network.id, label, "https://rpc.test/2")
+		expect(added.label).toBe(stored)
+		const updated = await service.updateEndpoint(network.id, added.id, label, "https://rpc.test/3")
+		expect(updated.label).toBe(stored)
+	})
+})
+
+describe("NetworkService missing-primary policies", () => {
+	test("getNetworkInfo projects the primary endpoint", async () => {
+		const { service } = setupServiceWithStorage({ "https://rpc.example.com": nodeInfoForChain(7) })
+		const network = await service.addNetwork("Seven", "https://rpc.example.com")
+		await expect(service.getNetworkInfo(network.id)).resolves.toEqual({
+			profileId: "p1",
+			chainId: 7,
+			rpcUrl: "https://rpc.example.com",
+		})
+	})
+
+	test("getNetworkInfo rejects a dangling primaryEndpointId", async () => {
+		const { service, local } = setupServiceWithStorage({})
+		storeRow(local, { id: "dang", primaryEndpointId: "gone" })
+		await expect(service.getNetworkInfo("dang")).rejects.toThrow(new Error("Network dang has no primary endpoint"))
+	})
+
+	test("getNode rejects a dangling primaryEndpointId, building no node", async () => {
+		const { service, factory, local } = setupServiceWithStorage({})
+		storeRow(local, { id: "dang", chainId: 77, primaryEndpointId: "gone" })
+		await expect(service.getNode(77)).rejects.toThrow(new Error("Network dang has no primary endpoint"))
+		expect(factory.created).toHaveLength(0)
+	})
+
+	test("setActiveNetwork on a dangling primaryEndpointId still activates and emits, caching no node", async () => {
+		const { service, factory, local } = setupServiceWithStorage({})
+		storeRow(local, { id: "dang", chainId: 77, primaryEndpointId: "gone" })
+		const events: string[] = []
+		service.onActiveNetworkChanged.add((n) => {
+			events.push(n.id)
+			return Promise.resolve()
+		})
+		await expect(service.setActiveNetwork("dang")).resolves.toMatchObject({ id: "dang" })
+		expect(events).toEqual(["dang"])
+		expect(factory.created).toHaveLength(0)
+		expect((await service.getActiveNetwork())?.id).toBe("dang")
+	})
+
+	test("resolveVerifiedL1ChainId on a custom network with a dangling primary probes the first endpoint", async () => {
+		const { service, factory, local } = setupServiceWithStorage({
+			"https://first.example": { l1ChainId: 5, rollupVersion: 1 },
+			"https://second.example": { l1ChainId: 9, rollupVersion: 1 },
+		})
+		storeRow(local, {
+			id: "c",
+			chainId: 123,
+			l1ChainId: 5,
+			primaryEndpointId: "gone",
+			endpoints: [
+				{ id: "e1", rpcUrl: "https://first.example" },
+				{ id: "e2", rpcUrl: "https://second.example" },
+			],
+		})
+		await expect(service.resolveVerifiedL1ChainId("p1", 123)).resolves.toBe(5)
+		expect(factory.created.map((c) => c.rpcUrl)).toEqual(["https://first.example"])
 	})
 })
