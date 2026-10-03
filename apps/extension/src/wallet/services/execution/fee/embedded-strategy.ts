@@ -14,7 +14,7 @@
 import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import { applyEmbeddedFpcGasCap } from "./embedded-fpc-cap"
 import type { FeeEstimate, FeeStrategy, FeeStrategyContext, FeeStrategyDeps } from "./fee-strategy"
-import { finalizeGasLimits, startEstimateTask, suggestGasLimits } from "./fee-strategy"
+import { finalizeGasLimits, startEstimateTask, suggestGasLimits, validatedSimOpts } from "./fee-strategy"
 
 export class EmbeddedStrategy implements FeeStrategy {
 	public readonly kind = "embedded" as const
@@ -36,13 +36,9 @@ export class EmbeddedStrategy implements FeeStrategy {
 			const { txRequest, node, pxe, account } = built
 			suggestGasLimits(txRequest, ctx.op.fee)
 			await applyEmbeddedFpcGasCap(txRequest, ctx.op.fee, node)
-			const simulatedTx = await this.deps.simulateTxTask(
-				pxe,
-				txRequest,
-				{ simulatePublic: true, skipFeeEnforcement: true, scopes: [account.address] },
-				task,
-			)
-			// Use 1x multiplier so max_gas_cost stays within the dApp's embedded amount.
+			const simulatedTx = await this.deps.simulateTxTask(pxe, txRequest, validatedSimOpts(account.address), task)
+			// The `1` is inert: an embedded payment commits the cap set above, which keeps
+			// max_gas_cost within the dApp's embedded amount.
 			await finalizeGasLimits(node, txRequest, simulatedTx, ctx.gasPadding, undefined, ctx.op.fee, 1, built.txsLimits)
 			task.complete()
 			return { ...built, feePaymentMethod: embeddedMethod }

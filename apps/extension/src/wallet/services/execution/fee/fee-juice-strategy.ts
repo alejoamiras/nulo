@@ -6,7 +6,7 @@
  *
  * Under a probe (dApp estimate fold), the sim runs STUBBED and doubles as
  * authwit discovery: no effects ⇒ done in ONE sim (stub gas == validated gas,
- * the measured B1 invariant); discovered effects ⇒ VALIDATED rebuild + re-sim
+ * as measured); discovered effects ⇒ VALIDATED rebuild + re-sim
  * so the freshly signed witnesses are verified before the estimate leaves.
  */
 
@@ -14,7 +14,7 @@ import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import type { Action } from "../spec"
 import type { FeeEstimate, FeeStrategy, FeeStrategyContext, FeeStrategyDeps } from "./fee-strategy"
-import { finalizeGasLimits, isInitWrapped, probedFirstSimOpts, startEstimateTask, suggestGasLimits } from "./fee-strategy"
+import { finalizeGasLimits, isInitWrapped, probedFirstSimOpts, startEstimateTask, suggestGasLimits, validatedSimOpts } from "./fee-strategy"
 
 export class FeeJuiceStrategy implements FeeStrategy {
 	public readonly kind = "fj" as const
@@ -37,7 +37,7 @@ export class FeeJuiceStrategy implements FeeStrategy {
 				discovered = await ctx.probe.extractEffects(simulatedTx, { node: built.node, network: built.network })
 				// Discovered effects OR an init-wrapped build force a validated
 				// rebuild+re-sim: effects so the witnesses are VERIFIED; init-wrap
-				// because the stub's constructor gas is untrustworthy (B1 exclusion).
+				// because the stub's constructor gas is untrustworthy.
 				if (discovered.length || isInitWrapped(built)) {
 					if (discovered.length) ctx.op.actions.push(...discovered)
 					if (ctx.signal?.aborted) throw new JobCancelledSentinel("")
@@ -48,12 +48,7 @@ export class FeeJuiceStrategy implements FeeStrategy {
 						task,
 					)
 					suggestGasLimits(built.txRequest, ctx.op.fee)
-					simulatedTx = await this.deps.simulateTxTask(
-						built.pxe,
-						built.txRequest,
-						{ simulatePublic: true, skipFeeEnforcement: true, scopes: [built.account.address] },
-						task,
-					)
+					simulatedTx = await this.deps.simulateTxTask(built.pxe, built.txRequest, validatedSimOpts(built.account.address), task)
 				}
 			}
 			await finalizeGasLimits(

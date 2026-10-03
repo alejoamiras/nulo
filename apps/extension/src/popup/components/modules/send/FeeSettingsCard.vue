@@ -24,7 +24,10 @@ import {
 	defaultSponsor,
 	FEE_JUICE_BRIDGE_URL,
 	feeDisplay,
+	feeScopeKey,
 	formatGasBalance,
+	isLiveFeeScope,
+	liveFeeScope,
 	resolveSavedSelection,
 	settingsForMethod,
 } from "./fee-helpers"
@@ -178,12 +181,7 @@ const sendPicks = reactive({})
 /** Structured scope of the committed snapshot — the recovery watch's target. */
 const committedScope = ref(null)
 
-const scopeIsLiveIdentity = (scope) =>
-	Boolean(scope) &&
-	props.profile?.id === scope.profileId &&
-	props.network?.id === scope.networkId &&
-	props.network?.chainId === scope.chainId &&
-	props.account?.address === scope.accountAddress
+const scopeIsLiveIdentity = (scope) => Boolean(scope) && isLiveFeeScope(props, scope)
 
 /**
  * Send's selection is DERIVED, never assigned: a pure function of the live origin, the live
@@ -540,13 +538,7 @@ const embeddedHidden = () => isCustomMethod.value && !useOwnMethod.value
  *  (profile/network/chain/account) moved off the snapshot this run targeted,
  *  or the card flipped embedded-visible (its watcher released the lease and
  *  a fresh runInit owns the new state). */
-const identityDrifted = (scope) =>
-	!isMounted ||
-	props.profile?.id !== scope.profileId ||
-	props.network?.id !== scope.networkId ||
-	props.network?.chainId !== scope.chainId ||
-	props.account?.address !== scope.accountAddress ||
-	embeddedHidden()
+const identityDrifted = (scope) => !isMounted || !isLiveFeeScope(props, scope) || embeddedHidden()
 
 /** The store fetches the legs with per-leg isolation, timeout, and raw-promise
  *  reuse; ensure settles when both requested legs settle, ready OR degraded.
@@ -605,15 +597,11 @@ const runInit = async () => {
 		// prop change during the awaits fires a fresh init; this run's commit is
 		// discarded by the drift guard below rather than applied to the new
 		// identity.
-		const reqProfileId = props.profile?.id
-		const reqNetworkId = props.network.id
-		const reqChainId = props.network.chainId
-		const reqAccount = props.account.address
 		// chainId is part of the STORE key, so it must be part of this card's
 		// identity too — else a chainId change under a stable networkId keeps
 		// the old key's lease while ensure populates the new one.
-		const reqKey = `${reqProfileId}|${reqNetworkId}|${reqChainId}|${reqAccount}`
-		const scope = { profileId: reqProfileId, networkId: reqNetworkId, chainId: reqChainId, accountAddress: reqAccount }
+		const scope = liveFeeScope(props)
+		const reqKey = feeScopeKey(scope)
 
 		// Close the derivation gate only when no snapshot is committed for THIS
 		// identity: first loads and identity switches must not derive against
@@ -626,7 +614,7 @@ const runInit = async () => {
 		// dropdown trigger displays the user's last-used method while the
 		// fetch is in flight. The `isInitComplete` gate ensures this
 		// pre-fill doesn't drive settings derivation against stale state.
-		const saved = await readSavedSelections(reqAccount)
+		const saved = await readSavedSelections(scope.accountAddress)
 		// A newer run owns the card now: a superseded run resuming from its
 		// storage read must not re-apply the pre-fill (it would clobber the
 		// newer run's reconcile or the user's mid-flight pick).
@@ -708,7 +696,7 @@ const recommit = async () => {
 	// must not let this late commit re-open the gate with the OLD identity's
 	// data (the switch closed it; only the new identity's init may commit).
 	if (!isMounted || committedScope.value !== scope || !recommitStillValid(scope)) return
-	commitFromEntry(scope, `${scope.profileId}|${scope.networkId}|${scope.chainId}|${scope.accountAddress}`, saved, baseline)
+	commitFromEntry(scope, feeScopeKey(scope), saved, baseline)
 }
 
 const forgetVerdicts = () => {
@@ -720,12 +708,7 @@ const forgetVerdicts = () => {
 
 const recommitStillValid = (scope) => {
 	if (!props.network || !props.account || (isCustomMethod.value && !useOwnMethod.value)) return false
-	return (
-		props.profile?.id === scope.profileId &&
-		props.network?.id === scope.networkId &&
-		props.network?.chainId === scope.chainId &&
-		props.account?.address === scope.accountAddress
-	)
+	return isLiveFeeScope(props, scope)
 }
 
 /**
@@ -764,7 +747,7 @@ watch(
 		// identity's snapshot must not keep serving settings for the new one
 		// in the meantime. (Fresh identity → fresh backoff is the store's
 		// 0→1 retry-capable transition inside subscribeTo's resubscribe.)
-		const liveKey = `${props.profile?.id}|${props.network?.id}|${props.network?.chainId}|${props.account?.address}`
+		const liveKey = feeScopeKey(liveFeeScope(props))
 		if (liveKey !== committedKey) {
 			isInitComplete.value = false
 			forgetVerdicts()
