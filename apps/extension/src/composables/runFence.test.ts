@@ -80,6 +80,19 @@ describe("createRunFence", () => {
 		expect(observed).toBe(false)
 	})
 
+	test("invalidate() retires every earlier run without starting one; a later begin() is current", () => {
+		const fence = createRunFence()
+		const first = fence.begin()
+		fence.invalidate()
+		expect(first()).toBe(false)
+		fence.invalidate()
+		expect(first()).toBe(false)
+		const next = fence.begin()
+		expect(next()).toBe(true)
+		fence.invalidate()
+		expect(next()).toBe(false)
+	})
+
 	test("high-volume begins stay consistent (no counter wrap concerns at realistic scale)", () => {
 		const fence = createRunFence()
 		let last = fence.begin()
