@@ -1,5 +1,6 @@
 import { onScopeDispose, ref, type Ref } from "vue"
 import type { EventHandler } from "@nulo/wallet-core/utils"
+import { createRunFence } from "@/composables/runFence"
 
 export type EntityCrudMode = "incremental" | "resync"
 
@@ -74,13 +75,13 @@ export function useEntityCrud<T>(options: UseEntityCrudOptions<T>): UseEntityCru
 	const isLoading = ref(true)
 	const error = ref<unknown>(null)
 
-	let seq = 0
+	const fence = createRunFence()
 	let disposed = false
 
 	const refresh = async (opts?: { clear?: boolean }) => {
-		const mySeq = ++seq
+		const isCurrent = fence.begin()
 		if (opts?.clear) {
-			// Synchronous with the seq bump: the foreign-scope rows are gone
+			// Synchronous with `begin()`: the foreign-scope rows are gone
 			// before ANY await, and a failed fetch below leaves the list empty
 			// rather than resurrecting them.
 			entities.value = []
@@ -89,15 +90,15 @@ export function useEntityCrud<T>(options: UseEntityCrudOptions<T>): UseEntityCru
 		isLoading.value = true
 		try {
 			const result = await fetch()
-			if (disposed || mySeq !== seq) return
+			if (disposed || !isCurrent()) return
 			entities.value = result
 			error.value = null
 		} catch (err) {
-			if (disposed || mySeq !== seq) return
+			if (disposed || !isCurrent()) return
 			error.value = err
 			onError?.(err)
 		} finally {
-			if (!disposed && mySeq === seq) isLoading.value = false
+			if (!disposed && isCurrent()) isLoading.value = false
 		}
 	}
 

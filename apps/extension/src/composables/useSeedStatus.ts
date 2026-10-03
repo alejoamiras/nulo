@@ -1,4 +1,5 @@
 import type { EventHandler } from "@nulo/wallet-core/utils"
+import { createRunFence } from "@/composables/runFence"
 import { type ComputedRef, type Ref, computed, ref } from "vue"
 import type { SeedScope, SeedStatusEntry, SeedStatusSnapshot } from "@/wallet/services/token/spec"
 
@@ -53,7 +54,7 @@ export function useSeedStatus(deps: UseSeedStatusDeps): UseSeedStatus {
 	const ready = computed(() => state.value === "loaded")
 
 	let disposed = false
-	let generation = 0
+	const fence = createRunFence()
 	let shownScope: string | undefined
 	let retryTimer: ReturnType<typeof setTimeout> | undefined
 	// The first connect is the one the first request opened; only later ones are reconnects.
@@ -86,8 +87,8 @@ export function useSeedStatus(deps: UseSeedStatusDeps): UseSeedStatus {
 	}
 
 	const load = async (isTimedRetry: boolean) => {
-		const current = ++generation
-		const isLatest = () => !disposed && current === generation
+		const isCurrent = fence.begin()
+		const isLatest = () => !disposed && isCurrent()
 		clearRetry()
 		const scope = deps.getScope()
 		enterScope(scope)
@@ -130,7 +131,7 @@ export function useSeedStatus(deps: UseSeedStatusDeps): UseSeedStatus {
 
 	const dispose = () => {
 		disposed = true
-		generation += 1
+		fence.invalidate()
 		clearRetry()
 		deps.client.onSeedStatusChanged.remove(onChanged)
 		deps.client.onConnected.remove(onConnected)

@@ -1,4 +1,5 @@
 import { computed, ref } from "vue"
+import { createRunFence } from "@/composables/runFence"
 import type { LegalAcceptanceServiceClient, LegalStatus } from "@/wallet/services/legal/client"
 
 export type LegalViewStatus = LegalStatus | "loading"
@@ -13,10 +14,10 @@ export function useLegalAcceptance(service: LegalAcceptanceServiceClient) {
 	const error = ref<unknown>()
 	const isCurrent = computed(() => status.value === "current")
 	/** Orders everything that can set `status`: a read that returns after a newer event or read is dropped. */
-	let seq = 0
+	const fence = createRunFence()
 
 	const onChanged = (next: LegalStatus) => {
-		seq++
+		fence.invalidate()
 		status.value = next
 	}
 	const onConnected = () => void refresh()
@@ -25,12 +26,12 @@ export function useLegalAcceptance(service: LegalAcceptanceServiceClient) {
 	service.onConnected.add(onConnected)
 
 	async function refresh(): Promise<void> {
-		const mine = ++seq
+		const mine = fence.begin()
 		try {
 			const next = await service.getStatus()
-			if (mine === seq) status.value = next
+			if (mine()) status.value = next
 		} catch (err) {
-			if (mine !== seq) return
+			if (!mine()) return
 			error.value = err
 			status.value = "missing"
 		}
@@ -49,7 +50,7 @@ export function useLegalAcceptance(service: LegalAcceptanceServiceClient) {
 	}
 
 	function dispose(): void {
-		seq++
+		fence.invalidate()
 		service.onAcceptanceChanged.remove(onChanged)
 		service.onConnected.remove(onConnected)
 	}

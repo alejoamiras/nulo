@@ -1,4 +1,5 @@
 import type { EventHandler } from "@nulo/wallet-core/utils"
+import { createRunFence } from "@/composables/runFence"
 import { type Ref, ref } from "vue"
 import type { IncomingSyncHealth, IncomingSyncHealthChanged } from "@/wallet/services/incoming-transfer/spec"
 
@@ -47,8 +48,8 @@ export function useIncomingSyncHealth(deps: UseIncomingSyncHealthDeps): UseIncom
 	const retrying = ref(false)
 
 	let disposed = false
-	let generation = 0
-	let retryGeneration = 0
+	const refreshFence = createRunFence()
+	const retryFence = createRunFence()
 	let shownScope = ""
 	let shownAt = 0
 	let hideTimer: ReturnType<typeof setTimeout> | undefined
@@ -67,7 +68,7 @@ export function useIncomingSyncHealth(deps: UseIncomingSyncHealthDeps): UseIncom
 		shownScope = key
 		cancelHide()
 		stalled.value = false
-		retryGeneration += 1
+		retryFence.invalidate()
 		retrying.value = false
 	}
 
@@ -91,12 +92,12 @@ export function useIncomingSyncHealth(deps: UseIncomingSyncHealthDeps): UseIncom
 	}
 
 	const refresh = async () => {
-		const current = ++generation
+		const isCurrent = refreshFence.begin()
 		const scope = deps.getScope()
 		enterScope(scopeKeyOf(scope))
 		if (!scope) return
 		const health = await deps.client.getIncomingSyncHealth(scope.networkId).catch(() => undefined)
-		if (disposed || current !== generation || !health) return
+		if (disposed || !isCurrent() || !health) return
 		apply(health.stalled)
 	}
 
@@ -113,7 +114,7 @@ export function useIncomingSyncHealth(deps: UseIncomingSyncHealthDeps): UseIncom
 		const scope = deps.getScope()
 		if (!scope || retrying.value) return
 		enterScope(scopeKeyOf(scope))
-		const current = ++retryGeneration
+		const isCurrent = retryFence.begin()
 		retrying.value = true
 		try {
 			await deps.client.retryIncomingScan(scope.networkId)
@@ -121,7 +122,7 @@ export function useIncomingSyncHealth(deps: UseIncomingSyncHealthDeps): UseIncom
 			// Unreachable worker: the refetch below shows whatever is true now.
 		}
 		// A retry that outlived its scope owns neither the flag nor the next fetch.
-		if (disposed || current !== retryGeneration) return
+		if (disposed || !isCurrent()) return
 		retrying.value = false
 		await refresh()
 	}
@@ -131,7 +132,7 @@ export function useIncomingSyncHealth(deps: UseIncomingSyncHealthDeps): UseIncom
 
 	const dispose = () => {
 		disposed = true
-		generation += 1
+		refreshFence.invalidate()
 		cancelHide()
 		deps.client.onIncomingSyncHealthChanged.remove(onChanged)
 		deps.client.onConnected.remove(onConnected)

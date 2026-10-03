@@ -5,6 +5,7 @@
  */
 import type { PrestoStatus } from "@alejoamiras/presto-core"
 import { onMounted, ref } from "vue"
+import { createRunFence } from "@/composables/runFence"
 import { getPrestoClient, type PrestoStatusClient } from "@/presto/client"
 import { type PrestoUiState, uiStateFromStatus } from "@/utils/presto-ui-state"
 
@@ -13,11 +14,11 @@ export function usePrestoStatus(options?: { client?: PrestoStatusClient; autoDet
 	/** The raw status for `<presto-banner>`'s `status` property; null until a probe answered. */
 	const bannerStatus = ref<PrestoStatus | null>(null)
 	const client = options?.client ?? getPrestoClient()
-	let generation = 0
+	const fence = createRunFence()
 	let disposed = false
 
 	async function detect(opts?: { forceRefresh?: boolean }): Promise<void> {
-		const mine = ++generation
+		const isCurrent = fence.begin()
 		state.value = { kind: "detecting" }
 		let status: PrestoStatus
 		try {
@@ -27,7 +28,7 @@ export function usePrestoStatus(options?: { client?: PrestoStatusClient; autoDet
 			// in the probe itself, which the page shows as Presto's error state.
 			status = { available: false, reason: "error", protocol: "https" }
 		}
-		if (disposed || mine !== generation) return
+		if (disposed || !isCurrent()) return
 		bannerStatus.value = status
 		state.value = uiStateFromStatus(status)
 	}

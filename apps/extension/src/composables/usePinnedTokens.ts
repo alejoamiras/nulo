@@ -1,4 +1,5 @@
 import type { EventHandler } from "@nulo/wallet-core/utils"
+import { createRunFence } from "@/composables/runFence"
 import { type ComputedRef, computed, ref } from "vue"
 import { pinnedTokensKey } from "@/utils/profile-ui-keys"
 import { storageLocalGet, storageLocalSet } from "@/utils/storage"
@@ -166,7 +167,7 @@ export interface UsePinnedTokensDeps {
 export function usePinnedTokens(deps: UsePinnedTokensDeps) {
 	const map = ref<PinMap>({})
 	const loadedProfile = ref<string | undefined>()
-	let refreshGeneration = 0
+	const fence = createRunFence()
 	let disposed = false
 
 	const scopeStillIs = (scope: PinScope | undefined): scope is PinScope => {
@@ -191,7 +192,7 @@ export function usePinnedTokens(deps: UsePinnedTokensDeps) {
 
 	/** Only the latest refresh may land; an older read resolving late, or one after dispose, is dropped. */
 	const refresh = async () => {
-		const generation = ++refreshGeneration
+		const isCurrent = fence.begin()
 		const scope = deps.getScope()
 		if (!scope) {
 			map.value = {}
@@ -199,7 +200,7 @@ export function usePinnedTokens(deps: UsePinnedTokensDeps) {
 			return
 		}
 		const next = await readPinMap(scope.profileId)
-		if (disposed || generation !== refreshGeneration || deps.getScope()?.profileId !== scope.profileId) return
+		if (disposed || !isCurrent() || deps.getScope()?.profileId !== scope.profileId) return
 		map.value = next
 		loadedProfile.value = scope.profileId
 	}
