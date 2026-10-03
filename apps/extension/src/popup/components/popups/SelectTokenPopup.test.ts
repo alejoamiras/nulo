@@ -346,6 +346,7 @@ describe("SelectTokenPopup — the scope predicate", () => {
 			H.balanceUpdated.emit(row(9, "X", { account: OTHER_ACCOUNT }))
 		})
 		;(H.store.current.network as { chainId: number }).chainId = CHAIN + 7
+		H.store.current.network = { id: "net-main", chainId: CHAIN + 7 }
 		expect(runs).toBe(1)
 		stop(foreign)
 

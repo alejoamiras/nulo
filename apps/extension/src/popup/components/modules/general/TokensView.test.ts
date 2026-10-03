@@ -956,6 +956,7 @@ describe("TokensView — the balance snapshot's fences", () => {
 			H.balanceUpdated.emit({ ...namedRow(77, "X"), account: OTHER })
 		})
 		;(H.store.current.network as { chainId: number }).chainId = 9
+		H.store.current.network = { id: "net-1", chainId: 9 }
 		expect(runs).toBe(1)
 		stop(foreign)
 

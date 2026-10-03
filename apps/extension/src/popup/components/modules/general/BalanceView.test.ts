@@ -1087,6 +1087,7 @@ describe("BalanceView — the balance snapshot's fences", () => {
 			updatedHandler?.({ ...SEED[0], id: "x", account: OTHER })
 		})
 		;(appStore.network as unknown as { chainId: number }).chainId = 9
+		appStore.network = { id: "n1", chainId: 9 } as never
 		expect(runs).toBe(1)
 		stop(foreign)
 

@@ -175,6 +175,7 @@ describe("isActiveScopeRow", () => {
 				check(state, foreign)
 			})
 			;(state.network as { chainId: number }).chainId++
+			state.network = { chainId: 7 }
 			expect(runs).toBe(1)
 			stop(onForeign)
 
