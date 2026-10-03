@@ -74,10 +74,8 @@ type PublicEventContext = {
 	epochAtStart: number
 }
 
-/** Who a receipt's trust promotion and prompt are for. */
 type TrustScope = { profileId: string; networkId: string; accountAddress: string; contract: string }
 
-/** One scope's clear: which scan episodes it drops, how it evicts fee-cache entries, and its wipe. */
 type ScopeClear = { dropsEpisode: (key: string) => boolean; evictFees: () => void; wipe: () => Promise<void> }
 
 type TrustFence = (isCurrent: () => boolean) => { live: () => boolean; kept: () => boolean }
@@ -1029,7 +1027,6 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		})
 	}
 
-	/** Tear down the note scheduler for `key`. */
 	private stopNoteScheduler(key: string): void {
 		const interval = this.schedulers.get(key)
 		if (interval) clearInterval(interval)
