@@ -98,7 +98,6 @@ function journalRows(terminalJournalOps: BuildActivityRowsParams["terminalJourna
 	return rows
 }
 
-/** Scope incoming to the active account, network and profile when supplied. */
 function incomingRows(incomingTransfers: BuildActivityRowsParams["incomingTransfers"], scope: RowScope): ActivityRow[] {
 	const rows: ActivityRow[] = []
 	for (const inc of incomingTransfers) {

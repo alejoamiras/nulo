@@ -46,7 +46,7 @@ export function buildRecentActivityRows(p: {
 	return rows
 }
 
-/** History's incoming scope, after the preview's own token check. */
+/** The token check runs first, so another token's receipt never has its scope fields read. */
 function tokenScopedIncomingRows(incoming: IncomingTransferRecord[], scope: RecentRowScope, token: RecentTokenScope): RecentActivityRow[] {
 	const rows: RecentActivityRow[] = []
 	for (const inc of incoming) {
