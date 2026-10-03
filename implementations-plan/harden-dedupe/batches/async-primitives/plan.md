@@ -245,9 +245,9 @@ One arc, `hd/15-async-primitives`, stacked on `harden-dedupe`. Code review: off.
 
 **Not logic-only: one `.vue` file changes.** `LogsViewer.vue`'s script changes; its template and styles do not.
 
-The zero-diff gate covers the logger window (`popup/windows/logger/`), with a fixed log set seeded into `nulo:logs` so the parent and the head render identical lines:
+The zero-diff gate covers the logger window (`popup/windows/logger/`), with a fixed log set so the parent and the head render identical lines. The build stubs the viewer's two ports (`log-viewer.getLogs`, `config.getValue`) rather than seeding `nulo:logs`: the window has no testids to click, so each state is reached by its data.
 
-- three states: loaded, after Clear logs, and after toggling Debug Mode;
+- three states: loaded, with Debug Mode on, and empty (what Clear logs leaves);
 - Chrome and Firefox, dark and light;
 - a `--stability` run as well;
 - new surface files only.
