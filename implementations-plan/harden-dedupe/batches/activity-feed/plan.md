@@ -66,8 +66,8 @@ The awaiting card's getters (`RecentActivityView.vue:337-392`) re-derive what th
 **Terminal builder.**
 
 - `buildJournalTerminalCardProps` keeps its signature, its feed-kind and display gates, and today's key order: title, icon, origin, type, amount and symbol, then the display.
-- Its fields come from the helpers. The amount pair comes from a module-private `terminalAmount(op, tokenById)`: kind first, then `amountRaw` truthy and token found, then today's inline `balanceFormatted` call and `symbol ?? null`.
-- `transferCardFields` and `dappCardFields` go.
+- `transferCardFields` and `dappCardFields` stay, in today's evaluation order. The transfer branch makes one token lookup and formats the amount before it reads the title and the transfer type, and the dApp branch never reads `ctx.tokenById`.
+- The branches share kind-free private leaves with the awaiting card's helpers: `transferTitle(token)`, `dappTitle(op)` and `transferTypeLabel(op)`. Each leaf reads exactly what the inline expression it replaces read. (The first build routed the terminal card through the per-field helpers. That reordered its reads and doubled its lookup, so code review round 1 sent it back.)
 
 **Reads and error precedence.** Characterized before claiming equivalence, and pinned in Phase 1.
 
@@ -253,6 +253,11 @@ Commit `test: pin the activity feed's row scope and journal card fields` on its 
 | 22 | the icons are swapped |
 | 23 | a route is swapped |
 | 24 | History's list drops a row's route |
+| 25 | the terminal card reads title and type before formatting, with a second lookup (the first build's order) |
+| 26 | Home's `sanitizeJournalSubtitle` is dropped |
+| 27 | the terminal card reads its title before formatting, with one lookup |
+
+Mutants 13, 14 and 21 were retargeted when the terminal branches came back. 13 is now Home's title helper looking the token up before the kind; 14 is the dApp branch reading `ctx.tokenById`; 21 is the terminal sanitize. Mutants 25 to 27 and the new `journal-terminal-order.test.ts` came out of code review round 1.
 
 A survivor gets a test or a probe showing an identical outcome, never an "equivalent" label.
 
@@ -333,3 +338,12 @@ Two blockers, both adopted, plus five more findings, all adopted:
    `TokenImportRow` states were asked for if the TokensView edit stayed. Only its CSS path edit stays, which import rows do not use, so they are not shot.
 5. **Comments. Adopted:** the "Codex flagged" attribution at `journal-state.ts:352` goes, and the "oldest-first" template comment at `RecentActivityView.vue:813` is corrected to newest-first. The `TransferType.Private`, sanitization and timestamp-unit notes stay.
 6. **The History incoming profile guard.** Codex said yes, by the invisible, strictly safer route. The program plan puts such a fix in its own arc, so it moves to arc 22b, and this arc keeps pinning History's current behaviour.
+
+### Code review, Codex round 1: NOT CONVERGED
+
+1. **Blocker: the terminal card's evaluation was not equivalent** (`journal-state.ts:358`). Base resolved the token once, formatted the amount, then read the title and the transfer type. Head read the title and type first, resolved the token twice, and read `ctx.tokenById` on dApp cards. A Vue probe with a schema-valid `amountRaw: "bad"` showed head also tracking `token.symbol` and `op.transferType` before the format threw. **Adopted:**
+   - the branches are restored in base order, over shared kind-free leaves;
+   - a new `journal-terminal-order.test.ts`, green on base and red on the first build, pins the read sequences, the throwing path and the dApp card's untouched lookup;
+   - mutants 25 to 27 were added and the full set re-run.
+2. **Should-fix: the forced run had different price state.** Fiat labels appeared in the forced Firefox capture but not in base, which widened the amount column and squeezed the chips. **Adopted:** the surfaces pin the price port to one quote on every fresh document and assert the fiat labels before and after each capture; stability, base vs head and forced were re-run.
+3. **Nit:** the lessons file credited mutant 8 to one test only. **Adopted:** both killing tests are named.
