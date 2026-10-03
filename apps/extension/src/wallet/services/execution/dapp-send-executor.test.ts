@@ -1428,6 +1428,22 @@ describe("DappSendExecutor — discovered authwits, the preview snapshot and the
 			expect(drifted.account.createAuthWit).not.toHaveBeenCalled()
 		})
 
+		test("an estimateId paired with another previewId is refused before the snapshot is consumed", async () => {
+			collectOffchainEffectsMock.mockReturnValue([effect("n")])
+			const { executor, deps, account, proveAndSend } = makeHarness()
+			const preview = await executor.previewOperationAuthwits(noFromOp(), CTX)
+			await expect(
+				executor.executeAztecSendTx(noFromOp(), ORIGIN, undefined, undefined, FENCE, {
+					...CTX,
+					estimateId: "est-A",
+					previewId: preview.previewId,
+				}),
+			).rejects.toThrow(PREVIEW_FOREIGN_MESSAGE)
+			expect(account.createAuthWit).not.toHaveBeenCalled()
+			expect(proveAndSend).not.toHaveBeenCalled()
+			expect(snapshots(deps).take(preview.previewId, identity).kind).toBe("found")
+		})
+
 		test("an unseen hash aborts BEFORE any witness is created; the silent NO_FROM path still signs", async () => {
 			collectOffchainEffectsMock.mockReturnValue([effect("n")])
 			const guarded = makeHarness()
