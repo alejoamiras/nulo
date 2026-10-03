@@ -80,6 +80,7 @@ The harness is shared with arc 3, and every edit to it was additive.
 - **After round 1 and the restack (head ca9e5740):** each run is 216 results, that is 72 shots plus 36 probes per browser.
   - 7450928c against ca9e5740: 216 of 216 identical on Chrome and Firefox.
   - ca9e5740 against itself: 216 of 216 identical.
+- **Restacked onto 1c0c67ad (error-registry and dapp-grant-planning landed), head 93f3b535:** all five gates pass; 1c0c67ad against 93f3b535 is 216 of 216 identical on Chrome and Firefox, and 93f3b535 against itself is 216 of 216.
 
 ## Deferred
 
