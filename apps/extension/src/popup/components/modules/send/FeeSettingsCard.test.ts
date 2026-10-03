@@ -13,6 +13,7 @@
 import { describe, expect, test, vi, beforeEach, afterEach } from "vitest"
 import { config, flushPromises, mount } from "@vue/test-utils"
 import { createPinia } from "pinia"
+import { reactive } from "vue"
 
 const mocks = vi.hoisted(() => ({
 	getGasBalances: vi.fn(),
@@ -2388,5 +2389,199 @@ describe("FeeSettingsCard — Send: the payer model", () => {
 		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
 		await flushPromises()
 		expect(payer(w)).toEqual({ type: "fj", fpcId: undefined, isProtocol: false })
+	})
+})
+
+/**
+ * Each identity guard, one field at a time. An in-place change to a prop object's field never
+ * fires the identity watcher (it tracks the objects, not their fields), so only the guard that
+ * compares the field can discard the stale work; a replaced object carrying the same values must
+ * not count as a switch.
+ */
+describe("FeeSettingsCard — the identity guards, field by field", () => {
+	const HELD = "1000000000000000000"
+	const SPONSOR = { id: "s1", type: 1, name: "Sponsor", isProtocol: true }
+	const PRIVATE_FPC = { id: "p1", type: 2, name: "Private FPC", isProtocol: true }
+	type Identity = {
+		profile: { id: string; name: string }
+		network: { id: string; chainId: number }
+		account: { id: string; address: string }
+	}
+	const liveIdentity = (): Identity => ({
+		profile: reactive({ ...profile }),
+		network: reactive({ ...network }),
+		account: reactive({ ...account }),
+	})
+	const IN_PLACE: Array<{ field: string; mutate: (i: Identity) => void }> = [
+		{ field: "profile id", mutate: (i) => (i.profile.id = "p2") },
+		{ field: "network id", mutate: (i) => (i.network.id = "n2") },
+		{ field: "chain id", mutate: (i) => (i.network.chainId = 222) },
+		{ field: "account address", mutate: (i) => (i.account.address = "0xother") },
+	]
+	const SWITCHES: Array<{ field: string; over: Record<string, unknown> }> = [
+		{ field: "profile id", over: { profile: { id: "p2", name: "Profile 2" } } },
+		{ field: "network id", over: { network: { id: "n2", chainId: network.chainId } } },
+		{ field: "chain id", over: { network: { id: network.id, chainId: 222 } } },
+		{ field: "account address", over: { account: { id: "a2", address: "0xother" } } },
+	]
+	const SAME_VALUES: Array<{ prop: string; over: () => Record<string, unknown> }> = [
+		{ prop: "profile", over: () => ({ profile: { ...profile } }) },
+		{ prop: "network", over: () => ({ network: { ...network } }) },
+		{ prop: "account", over: () => ({ account: { ...account } }) },
+	]
+	const settingsEmitted = (w: ReturnType<typeof mount>) => (w.emitted<unknown[]>("update:modelValue") ?? []).map((e) => e[0])
+	const degraded = (w: ReturnType<typeof mount>) => w.find('[data-testid="fee-init-degraded"]').exists()
+
+	/** The card's init held on its gas read; `mutate` runs while it is held. */
+	const initAcross = async (mutate: (i: Identity) => void) => {
+		mocks.getFpcs.mockResolvedValue([SPONSOR])
+		const gas = deferred<{ publicFeeJuice: string; privateFeeJuice: string | null }>()
+		mocks.getGasBalances.mockReturnValueOnce(gas.promise)
+		const live = liveIdentity()
+		const w = mount(FeeSettingsCard, { props: baseProps(live), global: { stubs: STUBS } })
+		await flushPromises()
+		mutate(live)
+		gas.resolve({ publicFeeJuice: HELD, privateFeeJuice: null })
+		await flushPromises()
+		return w
+	}
+
+	test("control: an init with no identity change commits the sponsor", async () => {
+		const w = await initAcross(() => {})
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+	})
+
+	test.each(IN_PLACE)("an in-place $field change during init discards the run", async ({ mutate }) => {
+		const w = await initAcross(mutate)
+		expect(settingsEmitted(w)).toEqual([])
+	})
+
+	/** A degraded init, then a recovery recommit held on its storage read; `mutate` runs while it is held. */
+	const recommitAcross = async (mutate: (i: Identity) => void) => {
+		vi.useFakeTimers()
+		// biome-ignore lint/suspicious/noExplicitAny: test-only global stub
+		const chromeAny = (globalThis as any).chrome
+		const origGet = chromeAny.storage.local.get
+		try {
+			mocks.getGasBalances.mockRejectedValueOnce(new Error("boom"))
+			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: HELD, privateFeeJuice: null })
+			mocks.getFpcs.mockResolvedValue([SPONSOR])
+			const live = liveIdentity()
+			const w = mount(FeeSettingsCard, { props: baseProps(live), global: { stubs: STUBS } })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(degraded(w)).toBe(true)
+			const gate = deferred<void>()
+			let armed = true
+			chromeAny.storage.local.get = async (keys: unknown) => {
+				if (armed) {
+					armed = false
+					await gate.promise
+				}
+				return origGet(keys)
+			}
+			await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0] + 50)
+			mutate(live)
+			gate.resolve()
+			await vi.advanceTimersByTimeAsync(0)
+			return w
+		} finally {
+			chromeAny.storage.local.get = origGet
+			vi.useRealTimers()
+		}
+	}
+
+	test("control: a recovery recommit with no identity change clears the degraded notice", async () => {
+		const w = await recommitAcross(() => {})
+		expect(degraded(w)).toBe(false)
+	})
+
+	test.each(IN_PLACE)("an in-place $field change during a recovery recommit discards the late commit", async ({ mutate }) => {
+		const w = await recommitAcross(mutate)
+		expect(degraded(w)).toBe(true)
+	})
+
+	/** Send's settled selection, then `mutate`. */
+	const sendAcross = async (mutate: (i: Identity) => void) => {
+		mocks.getFpcs.mockResolvedValue([PRIVATE_FPC])
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: HELD, privateFeeJuice: HELD })
+		const live = liveIdentity()
+		const w = mount(FeeSettingsCard, {
+			props: baseProps({ ...live, originPrivacy: "private", destinationPrivacy: "private" }),
+			global: { stubs: STUBS },
+		})
+		await flushPromises()
+		mutate(live)
+		await flushPromises()
+		return w
+	}
+
+	test("control: Send keeps its settled selection when nothing changes", async () => {
+		const w = await sendAcross(() => {})
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "p1" } })
+	})
+
+	test.each(IN_PLACE)("Send: an in-place $field change unsettles the selection on the same tick", async ({ mutate }) => {
+		const w = await sendAcross(mutate)
+		expect(lastEmittedSettings(w)).toBeUndefined()
+	})
+
+	const NULO_AT = `0x${"0a".repeat(32)}`
+	const NULO = { ...SPONSOR, address: NULO_AT }
+	const sponsorRow = (w: ReturnType<typeof mount>) => w.get('[data-testid="pick-fpc"][data-fpc-id="s1"]')
+
+	/** Nulo's sponsor picked for a public send, then reported short. */
+	const shortSponsor = async () => {
+		mocks.getFpcs.mockResolvedValue([PRIVATE_FPC, NULO])
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: HELD, privateFeeJuice: "0" })
+		storageBacking["nulo:ui:sendFeePaymentMethods"] = { [account.address]: { public: { type: "fpc", fpc: { id: "s1" } } } }
+		const w = mount(FeeSettingsCard, {
+			props: baseProps({ originPrivacy: "public", destinationPrivacy: "private" }),
+			global: { stubs: STUBS },
+		})
+		await flushPromises()
+		await w.setProps({
+			feeEstimate: {
+				maxFee: "1000",
+				maxFeeFormatted: "0.000000000000001",
+				sponsorFunding: { fpcId: "s1", address: NULO_AT, funded: false },
+			},
+		})
+		await flushPromises()
+		expect(sponsorRow(w).attributes("data-disabled")).toBe("true")
+		return w
+	}
+
+	test.each(SWITCHES)("a $field switch forgets the sponsor verdict", async ({ over }) => {
+		const w = await shortSponsor()
+		await w.setProps(over)
+		await flushPromises()
+		expect(sponsorRow(w).attributes("data-disabled")).toBe("false")
+	})
+
+	test.each(SAME_VALUES)("a replaced $prop object with the same values keeps the verdict", async ({ over }) => {
+		const w = await shortSponsor()
+		await w.setProps(over())
+		await flushPromises()
+		expect(sponsorRow(w).attributes("data-disabled")).toBe("true")
+	})
+
+	test.each(SAME_VALUES)(
+		"after a recovery recommit, a replaced $prop object with the same values keeps the gate open",
+		async ({ over }) => {
+			const w = await recommitAcross(() => {})
+			expect(degraded(w)).toBe(false)
+			const before = settingsEmitted(w).length
+			await w.setProps(over())
+			await flushPromises()
+			expect(settingsEmitted(w).slice(before)).not.toContain(undefined)
+		},
+	)
+
+	test.each(SAME_VALUES)("after a first init, a replaced $prop object with the same values keeps the gate open", async ({ over }) => {
+		const w = await initAcross(() => {})
+		const before = settingsEmitted(w).length
+		await w.setProps(over())
+		await flushPromises()
+		expect(settingsEmitted(w).slice(before)).not.toContain(undefined)
 	})
 })
