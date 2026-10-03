@@ -5,7 +5,7 @@ import type { ILogger } from "@/wallet/logger"
 import { ConfigService } from "@/wallet/services/config/service"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { ValueStorage } from "@/wallet/storage"
-import { AlarmDispatcher, EventHandler } from "@nulo/wallet-core/utils"
+import { AlarmDispatcher, EventHandler, createSerialQueue } from "@nulo/wallet-core/utils"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import { allCoingeckoIds, getSanityBand } from "./price-map"
 import {
@@ -101,7 +101,9 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 	 *  disable↔enable can't interleave `cache.delete()` with a fresh `cache.set()`
 	 *  (the last flip's work would otherwise race the prior flip's). The generation
 	 *  bump stays synchronous at flip time; only the storage/emit tail is chained. */
-	private configTransition: Promise<void> = Promise.resolve()
+	private readonly configTransitions = createSerialQueue({
+		onError: (err) => this.log(LogLevel.Warn, "config-change handling failed", err),
+	})
 
 	public constructor(logger: ILogger, browserApi?: BrowserApi, opts?: { fetchFn?: FetchLike; now?: () => number }) {
 		super(PRICE_SERVICE_NAME, logger)
@@ -228,24 +230,22 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 		}
 		// Chain the cache-committing tail so transitions run strictly one-at-a-time:
 		// a disable's cache.delete can never interleave with an enable's cache.set.
-		this.configTransition = this.configTransition
-			.then(async () => {
-				// A newer flip already superseded this one — the newest intent is the
-				// truth, so skip this transition's storage/emit work wholesale.
-				if (this.generation !== myGen) return
-				if (!enable) {
-					await this.dispatcher.clear()
-					await this.cache.delete()
-					this.emit("onQuotesUpdated", {})
-				} else {
-					const profile = await this.profileService.getActiveProfile()
-					if (profile) {
-						await this.ensureAlarm()
-						await this.refresh(myGen).catch(() => {})
-					}
+		void this.configTransitions.run(async () => {
+			// A newer flip already superseded this one — the newest intent is the
+			// truth, so skip this transition's storage/emit work wholesale.
+			if (this.generation !== myGen) return
+			if (!enable) {
+				await this.dispatcher.clear()
+				await this.cache.delete()
+				this.emit("onQuotesUpdated", {})
+			} else {
+				const profile = await this.profileService.getActiveProfile()
+				if (profile) {
+					await this.ensureAlarm()
+					await this.refresh(myGen).catch(() => {})
 				}
-			})
-			.catch((err) => this.log(LogLevel.Warn, "config-change handling failed", err))
+			}
+		})
 	}
 
 	// ── Internals ───────────────────────────────────────────────────────
