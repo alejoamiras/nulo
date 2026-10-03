@@ -1428,7 +1428,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			}
 			this.pendingRestoreSecrets.drop(id)
 			// Deleting a profile mid-restore must also drop + zeroize its rewrap context (its
-			// buffers aren't aged yet, so the TTL sweep wouldn't reap them) — P4 rider Medium.
+			// buffers aren't aged yet, so the TTL sweep wouldn't reap them).
 			this.pendingDekRewraps.drop(id)
 			// A deleted profile's integrity records must not outlive it: a stale blocking record
 			// would keep the barrier up forever, and a stale verified-stamp could let a future
@@ -2310,7 +2310,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				id = await this.repo.generateUniqueId()
 			}
 			// After the id loop, so the MAC binds the settled id. `plainSecret` is the
-			// length-checked backup decode; it is branded only here.
+			// length-checked backup decode; the caller's `finally` wipes it.
 			const newProfile = await newPasswordRow(
 				{ id, name, slots: sealed.encrypted, dekSealed, walletFingerprint },
 				asMasterSecretBytes(plainSecret as Uint8Array<ArrayBuffer>),
