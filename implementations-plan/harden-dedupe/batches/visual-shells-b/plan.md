@@ -106,7 +106,7 @@ Each page's local class becomes `composes: <name> from "../detail-page.module.cs
 
 - `components/Popup/Popup.vue:148` and `components/composite/DappCancelledOverlay.vue:33` → `--scrim-popup`;
 - `components/LegalAcceptanceSheet.vue:136` → `--scrim-sheet`;
-- `components/GlobalLoader.vue:33` → `--scrim-loader`, if its spike passes (Phase 0); otherwise the literal stays;
+- `components/GlobalLoader.vue:33` keeps its literal: its spike failed on Firefox (Phase 0, see Deferred);
 - `components/passkey/PasskeyCeremonyDialog.vue:107` → `--scrim-loader`;
 - `components/composite/BarrierOverlay.vue:31` → `--scrim-barrier`.
 
@@ -194,14 +194,14 @@ Phase 0 starts once visual-shells-a frees the harness. It makes the two harness 
 | activity-page | `#/popup/activity` | same seeds | `activity-icon` = 3 |
 | token-detail | `#/popup/tokens/<id>`, no activity | `seedTokenRow` | `activity-feed-root` = 1 |
 | glossary | Settings → Glossary, plus a scroll-end shot | none | `glossary-entry-*` ≥ 2 |
-| capabilities | `#/popup/windows/capabilities?requestId=hd-cap`: top, the account list, disclosure open with one row expanded, scroll end | port stub `dapp-interaction`: `getInteractionPayload` returns a wire-shaped `CapabilityPayload`, with two `availableAccounts` and one group holding two adjacent capabilities; `isInteractionCancelled` returns false | `cap-account-item` = 2; two adjacent `cap-item` in one group; `cap-details-row` ≥ 2; `cap-details-fns` = 1 |
+| capabilities | `#/windows/capabilities?requestId=hd-cap`: top, the account list, disclosure open with one row expanded, scroll end | port stub `dapp-interaction`: `getInteractionPayload` returns a wire-shaped `CapabilityPayload`, with two `availableAccounts` and one group holding two adjacent capabilities; `isInteractionCancelled` returns false | `cap-account-item` = 2; two adjacent `cap-item` in one group; `cap-details-row` ≥ 2; `cap-details-fns` = 1 |
 | capabilities-cancelled | same route | same stub, but `isInteractionCancelled` returns true | DappCancelledOverlay = 1 |
 | receive-popup | Home → receive | none | popup = 1 |
 | legal-sheet | Home | `reloadWithLegalState`, then `waitForSheet(page, "review")`; on leave, restore the record | sheet = 1 |
 | migration-blocked | Home | write `nulo:schema:blocked = { terminal: true }`; on leave, remove it | `migration-blocked` = 1 |
 | passkey-dialog | `#/popup/profile/new`: passkey method, name typed, create pressed | `navigator.credentials.create` stubbed to never settle; `busy` covers the dialog spinner | dialog = 1 |
-| global-loader (spike, ≤ 30 min) | new page | preload via `evaluateOnNewDocument` that fails the profile port's open synchronously; on Firefox, first check that it runs in a moz-extension document with `chrome` defined | `global-loader` = 1 and stable; `busy: ['[data-testid="global-loader"]']` |
-| send-fee | `#/popup/send` | Testnet RPC refused, as in `send-fee-privacy.test.ts` | `fee-init-degraded` = 1 |
+| global-loader (spike, ≤ 30 min): **failed, dropped** | new page | preload via `evaluateOnNewDocument` that fails the profile port's open synchronously | passed on Chrome; on Firefox the preload never ran in the moz-extension document, by driver or page-initiated navigation |
+| send-fee | `#/popup/send` | none: the live testnet read. A refused RPC (as in `send-fee-privacy.test.ts`) degraded the card in some captures and not in others within 5 min, so it could not be held | the card settles on sponsored with the method and priority rows and no notice, pinned as an exact fingerprint that must still hold after the shot; every `detail_row` in the card is probed |
 | received-detail | `#/popup/received/<id>` | note-receipt seed; it never fetches a fee (Fact 12) | `received-detail-page`, `received-from-card` and `tx-explorer-link` = 1 each; `received-fee-loading` = 0, and the fee row shows its no-fee state; probe the from card (static) and the To card |
 | tx-detail | `#/popup/tx/<hash>` | transfer seed with a dApp origin and a `block` (number and hash), so the block-hash aux line renders | `tx-hash-link` = 1; the aux line visible |
 | tx-mint | `#/popup/tx/<hash>` | a call to `mint_to_private` with its two arguments and a registered token with known decimals (`utils/tx-amount.ts:39`) | `tx-hash-link` = 1; the "Mint amount" caption visible |
@@ -274,8 +274,8 @@ None by design. Every touched surface must be pixel-identical on Chrome and Fire
   - The error snack with `sub` and `action` can only be staged through a failed send (Fact 10).
   - The onboarding and dApp-window layouts are ones popup shots do not cover (Fact 11).
   - The gain is about 20 template lines. `ToastManagerBase` stays untouched.
-- **`GlobalLoader`'s scrim literal,** if its spike fails on either browser.
-- **Any other Phase 0 site that cannot be staged.** It is named here when Phase 0 ends.
+- **`GlobalLoader`'s scrim literal** (`components/GlobalLoader.vue:33`). Its spike failed on Firefox: an `evaluateOnNewDocument` preload never ran in the moz-extension document, whether the driver navigated or the page did, so no capture can hold the loader there. Chrome held it and was stable. It moves with whichever arc gives the harness a Firefox preload.
+- No other Phase 0 site failed to stage.
 
 ## Decisions (delegated)
 
