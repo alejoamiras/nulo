@@ -41,7 +41,9 @@ import {
 	accountRowId,
 	accountRowIdOf,
 	parseAccountRowId,
+	rowMatchesKey,
 	type Account,
+	type AccountScope,
 	type Events,
 	type Methods,
 } from "./spec"
@@ -177,7 +179,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	public async getAccount(profileId: string, chainId: number, address: string): Promise<Account | undefined> {
 		await this.ensureInitialized()
 		const account = await this.storage.get(accountRowId(profileId, chainId, address))
-		return account?.profileId === profileId && account.chainId === chainId && account.address === address ? account : undefined
+		return rowMatchesKey(account, profileId, chainId, address) ? account : undefined
 	}
 
 	public async createAccount(profileId: string, chainId: number, type: AccountType, name: string): Promise<Account> {
@@ -334,9 +336,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	public async getAccountContract(profileId: string, chainId: number, address: string): Promise<IAccountContract> {
 		await this.ensureInitialized()
 		const account = await this.storage.get(accountRowId(profileId, chainId, address))
-		// The row body must agree with the key on every identity field, not only profile/chain:
-		// a row transplanted under another address's key must not redirect signing.
-		if (account?.profileId !== profileId || account.chainId !== chainId || account.address !== address) {
+		if (!rowMatchesKey(account, profileId, chainId, address)) {
 			throw new Error("unknown account address")
 		}
 		if (account.type === AccountType.Imported) {
@@ -406,7 +406,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	public async exportAccount(profileId: string, chainId: number, address: string, password: string, encrypt: boolean): Promise<string> {
 		await this.ensureInitialized()
 		const account = await this.storage.get(accountRowId(profileId, chainId, address))
-		if (account?.profileId !== profileId || account.chainId !== chainId || account.address !== address) {
+		if (!rowMatchesKey(account, profileId, chainId, address)) {
 			throw new Error("unknown account address")
 		}
 		// Service-side authentication: unseal via the profile password (throws on wrong password).
@@ -801,17 +801,13 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		})
 	}
 
-	private readonly accountPurgeSubscribers: Array<
-		(profileId: string, scopes: ReadonlyArray<{ chainId: number; address: string }>) => Promise<void>
-	> = []
+	private readonly accountPurgeSubscribers: Array<(profileId: string, scopes: ReadonlyArray<AccountScope>) => Promise<void>> = []
 
 	/** Register an awaited cleanup for account-scope removals. Peer services call this
 	 *  from their `init()`. `reconcileImportedAccounts` awaits every subscriber BEFORE
 	 *  deleting the Account rows; a subscriber throw aborts the removal with every row
 	 *  still in place — dependents die first, never the other way around. */
-	public registerAccountPurgeSubscriber(
-		fn: (profileId: string, scopes: ReadonlyArray<{ chainId: number; address: string }>) => Promise<void>,
-	): void {
+	public registerAccountPurgeSubscriber(fn: (profileId: string, scopes: ReadonlyArray<AccountScope>) => Promise<void>): void {
 		this.accountPurgeSubscribers.push(fn)
 	}
 
@@ -828,7 +824,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	 * scopes actually deleted: the delete pass re-checks key absence per row, so an account
 	 * whose key appeared during the awaited purge is kept and not reported.
 	 */
-	public async reconcileImportedAccounts(profileId: string): Promise<{ chainId: number; address: string }[]> {
+	public async reconcileImportedAccounts(profileId: string): Promise<AccountScope[]> {
 		await this.ensureInitialized()
 		const imported = (await this.liveRows()).filter((a) => a.profileId === profileId && a.type === AccountType.Imported)
 		const keyless: Account[] = []
@@ -840,7 +836,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		for (const subscriber of this.accountPurgeSubscribers) {
 			await subscriber(profileId, scopes)
 		}
-		const dropped: { chainId: number; address: string }[] = []
+		const dropped: AccountScope[] = []
 		for (const account of keyless) {
 			if (await this.importedKeys.get(profileId, account.chainId, account.address)) continue
 			await this.storage.delete(accountRowIdOf(account))

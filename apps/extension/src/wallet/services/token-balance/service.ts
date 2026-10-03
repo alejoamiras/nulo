@@ -8,6 +8,7 @@ import { EventHandler, Lock } from "@nulo/wallet-core/utils"
 import { reconcilePlan } from "./reconcile-pairs"
 import { isLegacyBalanceRow, rowMatchesToken } from "./balance-identity"
 import { AccountService, type Account } from "@/wallet/services/account/service"
+import { type AccountScope, accountScopeKey } from "@/wallet/services/account/spec"
 import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
@@ -571,14 +572,14 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	 *  sibling profile's rows (shared addresses are a supported state), and an
 	 *  address+profile match would destroy this profile's rows on ANOTHER chain.
 	 *  Idempotent. */
-	public async purgeForAccounts(scopes: ReadonlyArray<{ chainId: number; address: string }>, profileId: string): Promise<void> {
+	public async purgeForAccounts(scopes: ReadonlyArray<AccountScope>, profileId: string): Promise<void> {
 		await this.ensureInitialized()
 		if (scopes.length === 0) return
-		const keys = new Set(scopes.map((s) => `${s.chainId}:${s.address}`))
+		const keys = new Set(scopes.map((s) => accountScopeKey(s.chainId, s.address)))
 		// One hold with the creators, fence before every delete — mirrors purgeForTokens.
 		await this.lock.withLock(async () => {
 			for (const tb of (await this.repo.getAll()).filter(
-				(row) => row.profileId === profileId && keys.has(`${row.chainId}:${row.account}`),
+				(row) => row.profileId === profileId && keys.has(accountScopeKey(row.chainId, row.account)),
 			)) {
 				await this.invalidateAndDelete(tb.id)
 				// Delete-before-emit (the repo-wide purge invariant). The scope's profile
@@ -595,7 +596,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 					raw.profileId === profileId &&
 					typeof raw.chainId === "number" &&
 					typeof raw.account === "string" &&
-					keys.has(`${raw.chainId}:${raw.account}`),
+					keys.has(accountScopeKey(raw.chainId, raw.account)),
 				(id) => this.logDebug(`purged malformed balance row ${id}`),
 			)
 		})

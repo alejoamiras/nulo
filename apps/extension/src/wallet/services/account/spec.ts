@@ -32,6 +32,29 @@ export function accountRowIdOf(account: Pick<Account, "profileId" | "chainId" | 
 }
 
 /**
+ * Whether the row read from `accountRowId(profileId, chainId, address)` agrees with that key on
+ * every identity field: a row transplanted under another key must not redirect signing or export.
+ * RPC arguments are not validated, so with `profileId` omitted and no row the second read throws
+ * the engine's TypeError, which names this parameter.
+ */
+export function rowMatchesKey<T extends Pick<Account, "profileId" | "chainId" | "address">>(
+	account: T | undefined,
+	profileId: string,
+	chainId: number,
+	address: string,
+): account is T {
+	return account?.profileId === profileId && account.chainId === chainId && account.address === address
+}
+
+/** One account on one chain, the unit dependents purge by. */
+export type AccountScope = { chainId: number; address: string }
+
+/** Set key for an `AccountScope`; injective because `chainId` is a number. */
+export function accountScopeKey(chainId: number, address: string): string {
+	return `${chainId}:${address}`
+}
+
+/**
  * Inverse of `accountRowId`: the scope tuple a canonical row key encodes, or
  * undefined for a non-canonical key (legacy/foreign shapes).
  *
@@ -232,7 +255,7 @@ export type Methods = {
 	restoreImportedKeys(rows: ImportedAccountKey[]): Restored<ImportedAccountKey>[]
 
 	/** At restore finalize: drop imported Account rows with no matching key row; returns their addresses. */
-	reconcileImportedAccounts(profileId: string): { chainId: number; address: string }[]
+	reconcileImportedAccounts(profileId: string): AccountScope[]
 }
 
 export type Events = {
