@@ -67,15 +67,20 @@ A state where the guard changes the output (an incoming row from another profile
 
 - The drift pin "an incoming record stamped with another profile is kept under a known scope" is inverted. A record stamped `p2` is dropped, beside an otherwise identical kept `p1` record.
 - A new row: a scope with the account and network known but no profile keeps the `p2` record.
+- New rows for the empty id, which `isForeignProfile` treats as a known id (`activity-rows.ts:72`). Each is beside a kept control:
+  - under scope profile `""`, a `p2` record is dropped;
+  - under scope profile `p1`, a record stamped `""` is dropped.
 - The incoming read-order pin becomes:
   - a record that fails on account: `["accountAddress"]`;
   - fails on network: `["accountAddress", "networkId"]`;
   - fails on profile: `["accountAddress", "networkId", "profileId"]`;
-  - kept: `["accountAddress", "networkId", "profileId", "blockTimestamp", "discoveredAt", "id"]`.
+  - kept: `["accountAddress", "networkId", "profileId", "blockTimestamp", "discoveredAt", "id"]`;
+  - kept, with a block time: `["accountAddress", "networkId", "profileId", "blockTimestamp", "blockTimestamp", "id"]`;
+  - kept under an all-unknown scope: `["profileId", "blockTimestamp", "discoveredAt", "id"]`, because `isForeignProfile` takes both ids as arguments, as the tx pin's unknown-scope row already shows.
 
 `recent-activity-rows.test.ts` is not edited. Its known-scope profile row and its read-order row already pin Home, and they must stay green unchanged through Phase 2.
 
-The edited rows fail on `6fd533a0` and every other row passes. Commit `test: pin that history drops an incoming row stamped with another profile`.
+The inverted pin, the empty-id rows and the read-order rows fail on `6fd533a0`. Every other row passes, the unknown-profile row included. Commit `test: pin that history drops an incoming row stamped with another profile`.
 
 ### Phase 2: green
 
@@ -91,6 +96,9 @@ Make the change above, leaving both test files untouched. Commit `fix(activity):
 | 4 | the profile check moved before the account check | both read-order pins |
 | 5 | Home keeps its inline guard as well (a second read) | Home's read-order pin |
 | 6 | the guard negated: `!isForeignProfile` | every kept-row assertion |
+| 7 | the guard skipped under an unknown scope profile: `scope.profileId && isForeignProfile(…)` | History's unknown-scope read trace |
+| 8 | an empty scope id treated as unknown: `scope.profileId \|\| undefined` | History's empty scope-id row |
+| 9 | an empty row id treated as unstamped: `inc.profileId \|\| undefined` | History's empty row-id row |
 
 **Validation gate:**
 
@@ -119,7 +127,7 @@ The program plan's route-2 criteria, one by one:
 
 - **Invisible:** no pixel, copy, dApp wire code or message, or persisted byte changes on a realistic path. Reachability shows that every row in History's incoming list already names the active profile. The zero-diff shots cover every feed surface that renders incoming rows.
 - **Strictly safer:** it only adds a refusal, of a row the profile scope already says is wrong. Nothing is relaxed, and Home's checks and their order are unchanged.
-- **Red-then-green:** the inverted pin and the new read-order row in `activity-rows.test.ts` fail on `6fd533a0` and pass after the fix.
+- **Red-then-green:** the inverted pin, the two empty-id rows and the updated read-order rows in `activity-rows.test.ts` fail on `6fd533a0` and pass after the fix.
 - **Pre-cleared?** No. The Behaviour rule lists it under "decided per arc by its panel". Activity-feed's plan audit (Codex) recommended it by this route (that plan's Decisions, item 6), and this arc's plan audit decides it.
 
 **PR body text:**
@@ -134,4 +142,9 @@ The program plan's route-2 criteria, one by one:
 
 ## Plan audit
 
-_Pending._
+### Codex round 1 (GPT-6 Astra, xhigh): REVISE
+
+No reachability blocker: Codex found no realistic path where History's list holds a record from another profile (high confidence). It confirmed Home's reads and Vue dependencies are unchanged, and that the change meets route 2. Two test findings, both adopted:
+
+1. **Should-fix: the block-time read-order assertion** (`activity-rows.test.ts:301`) also gains `profileId`. Left as it was, Phase 2 would stay red. **Adopted:** listed in Phase 1.
+2. **Should-fix: three mutants survived the proposed rows.** They were `scope.profileId && …` (no profile read under an unknown scope), `scope.profileId || undefined` and `inc.profileId || undefined`. The last two would relax `isForeignProfile`'s empty-id semantics. **Adopted:** an unknown-scope read trace and two empty-id rows in History's test, and mutants 7 to 9. Home's test file stays untouched.
