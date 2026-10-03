@@ -162,6 +162,25 @@ describe("activateNetworkGuarded", () => {
 		expect(store.network?.id).toBe("n3")
 	})
 
+	test("an activation that throws rejects its own caller, and the next one still runs after it", async () => {
+		const store = makeStore({ id: "n1" }, true)
+		const order: string[] = []
+		store.commitScopeChange.mockImplementationOnce(async () => {
+			order.push("a")
+			throw new Error("guard exploded")
+		})
+		const persist = vi.fn(async () => {
+			order.push("b-persist")
+		})
+		const a = activateNetworkGuarded(store, persist, vi.fn(), { id: "n2" })
+		const b = activateNetworkGuarded(store, persist, vi.fn(), { id: "n3" })
+
+		await expect(a).rejects.toThrow("guard exploded")
+		expect(await b).toBe("activated")
+		expect(order).toEqual(["a", "b-persist"])
+		expect(store.network?.id).toBe("n3")
+	})
+
 	test("a queued activation whose profile changed while waiting is dropped as stale", async () => {
 		// Captured at enqueue under p1; by the time it runs the wallet re-scoped
 		// to p2 (lock → unlock another profile). The target belongs to a foreign

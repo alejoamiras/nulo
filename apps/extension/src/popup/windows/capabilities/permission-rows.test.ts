@@ -257,3 +257,10 @@ describe("defaults", () => {
 		expect(holdsCallScope([])).toBe(false)
 	})
 })
+
+describe("the capability object check accepts arrays", () => {
+	test("an array carrying a capability's fields is read like an object", () => {
+		const disguised = Object.assign([], { type: "transaction", scope: "*" })
+		expect(holdsCallScope([disguised])).toBe(true)
+	})
+})

@@ -65,6 +65,33 @@ describe("lookupActiveProfileWithBackoff", () => {
 		}
 	})
 
+	test("the retries wait exactly 250, 500 and 750 ms between attempts", async () => {
+		vi.useFakeTimers()
+		try {
+			const at: number[] = []
+			const start = Date.now()
+			const rejects = async () => {
+				at.push(Date.now() - start)
+				throw new Error("port not ready")
+			}
+			const lookup = lookupActiveProfileWithBackoff(rejects, { deadlineMs: 10_000 })
+			await vi.advanceTimersByTimeAsync(249)
+			expect(at).toEqual([0])
+			await vi.advanceTimersByTimeAsync(1)
+			expect(at).toEqual([0, 250])
+			await vi.advanceTimersByTimeAsync(499)
+			expect(at).toEqual([0, 250])
+			await vi.advanceTimersByTimeAsync(1)
+			await vi.advanceTimersByTimeAsync(749)
+			expect(at).toEqual([0, 250, 750])
+			await vi.advanceTimersByTimeAsync(1)
+			expect(await lookup).toEqual({ kind: "unreachable" })
+			expect(at).toEqual([0, 250, 750, 1500])
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
 	test("a request the deadline abandons never surfaces as an unhandled rejection", async () => {
 		const unhandled: unknown[] = []
 		const onUnhandled = (reason: unknown) => unhandled.push(reason)

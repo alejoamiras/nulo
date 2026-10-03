@@ -368,6 +368,17 @@ describe("TokenSeeder — lifecycle + marker-shape hardening (codex post-ship au
 		expect((await readMarker())[KEY].outcome).toBe("deleted")
 	})
 
+	test("a marker write that fails rejects its own caller, and the marker lock still runs the next one", async () => {
+		const { seeder, api } = makeSeeder()
+		const set = vi.spyOn(api.storage.local, "set").mockRejectedValueOnce(new Error("quota"))
+		const first = seeder.markDeletedByUser("p1", CHAIN_ID, CONTRACT)
+		const second = seeder.markDeletedByUser("p1", CHAIN_ID, CONTRACT)
+		await expect(first).rejects.toThrow("quota")
+		await expect(second).resolves.toBeUndefined()
+		expect(set).toHaveBeenCalledTimes(2)
+		expect((await readMarker())[KEY].outcome).toBe("deleted")
+	})
+
 	test("corrupt marker primitives/entries never throw — they reset instead of blocking deletion", async () => {
 		const { seeder } = makeSeeder()
 		for (const bad of ["5", JSON.stringify({ [KEY]: "not-an-object" }), JSON.stringify({ [KEY]: { attempts: "NaN" } })]) {

@@ -10,7 +10,7 @@ import {
 	ValidationError,
 } from "@nulo/extension-messaging/errors"
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
-import { dataFieldsCovered, ungrantedAccounts, unwrapOperationResult, WalletSdkDispatcher } from "./dispatcher"
+import { dataFieldsCovered, projectKnownCapability, ungrantedAccounts, unwrapOperationResult, WalletSdkDispatcher } from "./dispatcher"
 import type { Capability, DataCapability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
 import type { CapabilityParams, CapabilityResult } from "./dapp-interaction-protocol"
 import { authorizationsEffective } from "./method-scope-checkers"
@@ -3022,6 +3022,15 @@ describe("authorization-relevant arg-shape guard", () => {
 
 	test("sendTx with non-array exec.calls is rejected before authz", async () => {
 		await expect(dispatcher.dispatch("sendTx", [{ calls: "nope" }], ctx)).rejects.toThrow(/Malformed sendTx/)
+	})
+	test("sendTx with an array exec names the calls, not the payload: arrays pass the object check", async () => {
+		await expect(dispatcher.dispatch("sendTx", [[]], ctx)).rejects.toThrow(
+			new Error("Malformed sendTx request: exec.calls must be an array"),
+		)
+	})
+	test("a capability that is an array is not a known type, even carrying one: it passes through untouched", () => {
+		const disguised = Object.assign([], { type: "accounts", canGet: true })
+		expect(projectKnownCapability(disguised)).toBe(disguised)
 	})
 	test("sendTx with a call missing a string name is rejected", async () => {
 		await expect(dispatcher.dispatch("sendTx", [{ calls: [{ to: "0xabc" }] }], ctx)).rejects.toThrow(/Malformed sendTx/)

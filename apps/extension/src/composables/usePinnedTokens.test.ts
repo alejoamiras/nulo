@@ -156,7 +156,7 @@ beforeEach(() => {
 
 describe("sanitizePinMap", () => {
 	test("rejects every non-map root", () => {
-		for (const raw of [undefined, null, 3, "x", [], [A]]) expect(sanitizePinMap(raw)).toEqual({})
+		for (const raw of [undefined, null, 3, "x", [], [A], [[A]]]) expect(sanitizePinMap(raw)).toEqual({})
 	})
 
 	test("drops non-canonical chain keys, non-array values, non-string and non-address entries", () => {

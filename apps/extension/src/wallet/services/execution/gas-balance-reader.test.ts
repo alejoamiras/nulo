@@ -10,7 +10,12 @@
 
 import { describe, expect, test, vi } from "vitest"
 import { FpcType } from "@/wallet/services/fpc/service"
-import { GAS_BALANCE_TTL_MS, GasBalanceReader, type GasBalanceReaderDeps } from "./gas-balance-reader"
+import {
+	GAS_BALANCE_FAILED_LEG_RETRY_DELAY_MS,
+	GAS_BALANCE_TTL_MS,
+	GasBalanceReader,
+	type GasBalanceReaderDeps,
+} from "./gas-balance-reader"
 
 const bvsMock = vi.hoisted(() => vi.fn())
 vi.mock("./helpers/batched-view-simulation", () => ({
@@ -240,6 +245,30 @@ describe("GasBalanceReader failed-leg retry + degraded caching (cold-start recov
 		// Recovered snapshot is a normal fresh entry: next get serves the cache.
 		await reader.get("net-1", "0xacc")
 		expect(publicCalls).toBe(2)
+	})
+
+	test.each([
+		["the default", undefined, GAS_BALANCE_FAILED_LEG_RETRY_DELAY_MS],
+		["an injected delay", 30, 30],
+	])("the retry waits exactly %s retry delay", async (_label, injected, expected) => {
+		vi.useFakeTimers()
+		try {
+			let calls = 0
+			bvsMock.mockReset().mockImplementation(() => {
+				calls += 1
+				if (calls === 1) throw new Error("Offscreen document closed before fully loading")
+				return encodedResult(100n)
+			})
+			const reader = new GasBalanceReader(makeDeps({ failedLegRetryDelayMs: injected }))
+			const read = reader.get("net-1", "0xacc")
+			await vi.advanceTimersByTimeAsync(expected - 1)
+			expect(calls).toBe(1)
+			await vi.advanceTimersByTimeAsync(1)
+			expect(await read).toEqual({ publicFeeJuice: "100", privateFeeJuice: null })
+			expect(calls).toBe(2)
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	test("a leg that fails BOTH attempts caches already-stale — next get recomputes instead of serving '—' for the TTL", async () => {

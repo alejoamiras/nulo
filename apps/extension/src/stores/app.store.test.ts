@@ -237,6 +237,43 @@ describe("app.store — account-switch containment (Layer A)", () => {
 		expect(store.transactions.map((t) => t.hash)).toEqual(["0xA-tx"])
 	})
 
+	test("a fetch overtaken by an event re-reads after 50 ms, then 100 ms", async () => {
+		vi.useFakeTimers()
+		try {
+			const store = useAppStore()
+			scopeTo(store, "0xA")
+			let resolveFirst!: (rows: Tx[]) => void
+			getTransactionsMock.mockReturnValueOnce(
+				new Promise<Tx[]>((res) => {
+					resolveFirst = res
+				}),
+			)
+			let resolveSecond!: (rows: Tx[]) => void
+			getTransactionsMock.mockReturnValueOnce(
+				new Promise<Tx[]>((res) => {
+					resolveSecond = res
+				}),
+			)
+			getTransactionsMock.mockResolvedValue([])
+			const sync = store.syncTransactions()
+			await store.onTxAdded({ hash: "0xA-1", account: "0xA", chainId: 1, updatedAt: 1, calls: [] } as unknown as Tx)
+			resolveFirst([])
+			await vi.advanceTimersByTimeAsync(49)
+			expect(getTransactionsMock).toHaveBeenCalledTimes(1)
+			await vi.advanceTimersByTimeAsync(1)
+			expect(getTransactionsMock).toHaveBeenCalledTimes(2)
+			await store.onTxAdded({ hash: "0xA-2", account: "0xA", chainId: 1, updatedAt: 2, calls: [] } as unknown as Tx)
+			resolveSecond([])
+			await vi.advanceTimersByTimeAsync(99)
+			expect(getTransactionsMock).toHaveBeenCalledTimes(2)
+			await vi.advanceTimersByTimeAsync(1)
+			expect(getTransactionsMock).toHaveBeenCalledTimes(3)
+			await sync
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
 	test("syncTransactions filters returned rows to the captured account + chain", async () => {
 		const store = useAppStore()
 		scopeTo(store, "0xA")

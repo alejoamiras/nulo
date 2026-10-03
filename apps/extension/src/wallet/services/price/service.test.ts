@@ -12,7 +12,7 @@ import { fakeBrowser } from "@webext-core/fake-browser"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { ServiceCollection } from "@/wallet/base"
-import { LoggerStore } from "@/wallet/logger"
+import { LoggerStore, LogLevel } from "@/wallet/logger"
 import { ConfigStore } from "@/wallet/config"
 import { CONFIG_SERVICE_NAME } from "@/wallet/services/config/spec"
 import { PROFILE_SERVICE_NAME, type ProfileInfo } from "@/wallet/services/profile/spec"
@@ -268,6 +268,25 @@ describe("PriceService — kill switch (showFiatValues)", () => {
 		await pending
 		state.enabled = true
 		expect(await service.getQuotes()).toEqual({})
+	})
+
+	test("a failed transition is logged as a warning, and the next flip still runs behind it", async () => {
+		const { service, state, fakeConfig, fetchFn, browserApi } = await harness()
+		await service.refreshIfStale()
+		// biome-ignore lint/suspicious/noExplicitAny: spying on the protected BaseService log seam
+		const log = vi.spyOn(service as any, "log")
+		const remove = vi.spyOn(browserApi.storage.local, "remove").mockRejectedValueOnce(new Error("quota"))
+		state.enabled = false
+		fakeConfig.onUpdate.invoke({ key: "showFiatValues", value: false })
+		await vi.waitFor(() => expect(log).toHaveBeenCalledWith(LogLevel.Warn, "config-change handling failed", expect.any(Error)))
+		expect(remove).toHaveBeenCalledTimes(1)
+
+		fetchFn.mockClear()
+		state.nowMs += QUOTE_TTL_MS + 1
+		state.enabled = true
+		fakeConfig.onUpdate.invoke({ key: "showFiatValues", value: true })
+		await vi.waitFor(() => expect(fetchFn).toHaveBeenCalled())
+		expect(await alarmExists()).toBe(true)
 	})
 
 	test("flipping back on while unlocked re-creates the alarm and refreshes", async () => {
