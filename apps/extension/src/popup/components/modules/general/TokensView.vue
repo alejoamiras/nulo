@@ -561,15 +561,15 @@ onBeforeUnmount(() => {
 }
 
 .empty_state {
-	composes: empty_state from "./list-empty.module.css";
+	composes: empty_state from "../../../../components/composite/list-empty.module.css";
 }
 
 .empty_headline {
-	composes: empty_headline from "./list-empty.module.css";
+	composes: empty_headline from "../../../../components/composite/list-empty.module.css";
 }
 
 .empty_sub {
-	composes: empty_sub from "./list-empty.module.css";
+	composes: empty_sub from "../../../../components/composite/list-empty.module.css";
 }
 
 .empty_link {

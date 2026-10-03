@@ -75,10 +75,7 @@ const hashSlice = computed(() => {
 
 <style module>
 .title_sep {
-	font-family: var(--font-headline);
-	font-size: 13px;
-	color: var(--nulo-outline);
-	user-select: none;
+	composes: title_sep from "./activity-card.module.css";
 }
 
 .chip {

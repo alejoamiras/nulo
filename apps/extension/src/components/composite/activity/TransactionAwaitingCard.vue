@@ -127,28 +127,12 @@ const showCancel = computed(() => props.cancellable && Boolean(props.jobId) && p
 	color: var(--nulo-secondary);
 }
 
-/* Subtle separator between the title and the title-trailing chip.
- * Matches the settled card's separator so the lifecycle reads identical. */
 .title_sep {
-	font-family: var(--font-headline);
-	font-size: 13px;
-	color: var(--nulo-outline);
-	user-select: none;
+	composes: title_sep from "./activity-card.module.css";
 }
 
-/* Mirror TransactionCard's secondary-row chip styling so the awaiting and
- * settled phases read identically once the wallet swaps the badge. */
 .transfer_chip {
-	flex-shrink: 0;
-	white-space: nowrap;
-
-	font-family: var(--font-mono);
-	font-size: 8px;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
-	background: var(--nulo-surface-low);
-	border: 1px solid var(--hairline-soft);
-	padding: 1px 4px;
+	composes: chip from "./activity-card.module.css";
 }
 
 .action_btn {
