@@ -61,7 +61,7 @@ The callback parameter keeps the name `window`: if Chrome passes no window (a `l
 
 ### C. Session wait (Q-07 c)
 
-`verify/index.vue:118-133` and `useDappApprovalWindow.ts:102-115` are the same block. The hook module gains `untilSessionChecked(isChecked: () => boolean): Promise<void>`, whose body is today's block verbatim: `return new Promise<void>((resolve) => { const stop = watch(isChecked, (checked) => { if (checked) { stop(); resolve() } }, { immediate: true }) })`. Its TSDoc states the precondition in one sentence: call it only while `isChecked()` is false, because on `true` the immediate callback reaches `stop` before it is bound (dev rejects; prod logs and the promise never settles). No new guard is added.
+`verify/index.vue:118-133` and `useDappApprovalWindow.ts:102-115` are the same block. The hook module gains `untilSessionChecked(isChecked: () => boolean): Promise<void>`, whose body is today's block verbatim: `return new Promise<void>((resolve) => { const stop = watch(isChecked, (checked) => { if (checked) { stop(); resolve() } }, { immediate: true }) })`. Its TSDoc states the precondition in one sentence: call it only while `isChecked()` is false, because otherwise the immediate callback reads `stop` before it is initialized. No new guard is added.
 
 Both sites keep `if (!appStore.isSessionChecked) await untilSessionChecked(() => appStore.isSessionChecked)`.
 

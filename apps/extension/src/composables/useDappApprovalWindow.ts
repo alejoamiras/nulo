@@ -64,8 +64,8 @@ export interface UseDappApprovalWindowResult {
 }
 
 /**
- * Resolves once `isChecked()` turns true. Call it only while `isChecked()` is false: on true the
- * immediate callback reaches `stop` before it is bound (dev rejects; prod logs and never settles).
+ * Resolves once `isChecked()` turns true. Call it only while `isChecked()` is false: otherwise the
+ * immediate callback reads `stop` before it is initialized.
  */
 export function untilSessionChecked(isChecked: () => boolean): Promise<void> {
 	return new Promise<void>((resolve) => {
