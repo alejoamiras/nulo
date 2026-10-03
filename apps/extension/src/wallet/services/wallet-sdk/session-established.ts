@@ -5,6 +5,7 @@
  */
 import type { Fr } from "@aztec-labs/foundation/curves/bn254"
 import type { WindowPort } from "@nulo/wallet-core/ports"
+import { walletChainId } from "@/utils/chain-ids"
 import type { ILogger } from "../../logger"
 import { LogLevel } from "../../logger"
 import { createPlaced, topRightOf } from "../window-manager/window-manager"
@@ -12,12 +13,13 @@ import { isPendingVerificationDead, type PendingVerificationEntry, settlePending
 import type { WindowReservation } from "./verify-admission"
 import { describeExternalId } from "@nulo/wallet-bridge"
 
-/** The Nulo chain id derived from a session/discovery's `chainInfo` (chainId ^ version). */
+/** A session's chain id from its dApp-supplied `chainInfo`: `chainId` decodes before `version`, and
+ *  the `Number` rounding and u32 coercion are part of the persisted key, not to be made exact. */
 export function chainInfoToChainId(obj: { chainInfo: { chainId: Fr | string; version: Fr | string } }): number {
 	const raw = obj.chainInfo
 	const chainId = typeof raw.chainId === "string" ? Number(BigInt(raw.chainId)) : Number(raw.chainId.toBigInt())
 	const version = typeof raw.version === "string" ? Number(BigInt(raw.version)) : Number(raw.version.toBigInt())
-	return (chainId ^ version) >>> 0
+	return walletChainId(chainId, version)
 }
 
 /** Deps for {@link handleSessionEstablished} — injected so the path is testable

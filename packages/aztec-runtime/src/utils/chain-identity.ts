@@ -14,6 +14,7 @@
 
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import type { ChainInfo } from "@aztec-labs/entrypoints/interfaces"
+import { walletChainId } from "@nulo/wallet-core/utils"
 import { assertCanonicalL1ChainId } from "@nulo/wallet-crypto"
 
 export interface LiveNodeChainInfo {
@@ -56,7 +57,7 @@ export function assertLiveChainIdentity(network: SelectedNetworkChainInfo, nodeI
 		)
 	}
 	if (network.chainId === 0) return
-	const liveComposite = (nodeInfo.l1ChainId ^ nodeInfo.rollupVersion) >>> 0
+	const liveComposite = walletChainId(nodeInfo.l1ChainId, nodeInfo.rollupVersion)
 	if (network.chainId !== liveComposite) {
 		throw new Error(
 			`Chain identity mismatch: selected network has chainId=${network.chainId} but live node reports composite=${liveComposite} (l1ChainId=${nodeInfo.l1ChainId}, rollupVersion=${nodeInfo.rollupVersion}). Refusing to sign/prove against a drifted endpoint.`,

@@ -1,5 +1,6 @@
 export * from "./alarm-dispatcher"
 export * from "./arrays"
+export * from "./chain-id"
 export * from "./deferred"
 export * from "./encoding"
 export * from "./errors"
