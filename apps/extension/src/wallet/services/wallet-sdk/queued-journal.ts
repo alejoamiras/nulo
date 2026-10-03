@@ -32,6 +32,7 @@ import { resolveAuthorizedSessionAccount } from "@nulo/wallet-bridge"
 import { parseCaipAccount } from "@/wallet/utils/caip"
 import type { CaipAccount } from "@/wallet/services/dapp-interaction/spec"
 import { pickPrimaryMethod } from "@/utils/primary-method"
+import { chainInfoToChainId } from "./session-established"
 
 /** Per-session queued-record cap. Bounds the activity feed under burst flood. */
 export const MAX_QUEUED_PER_SESSION = 8
@@ -40,20 +41,6 @@ export const MAX_QUEUED_GLOBAL = 32
 
 /** Held around count + create, so concurrent arrivals cannot all read a count below the cap. */
 export const queuedCreationLock = new Lock("wallet-sdk-bg:queued-creation")
-
-/**
- * Mirror of background.ts's chainInfoToChainId. Inlined to keep this module
- * test-harness-friendly (avoids dragging the full background.ts import
- * graph into unit tests). XORs chainId with rollup version per
- * NetworkService convention.
- */
-import type { Fr } from "@aztec-labs/foundation/curves/bn254"
-function chainInfoToChainId(obj: { chainInfo: { chainId: Fr | string; version: Fr | string } }): number {
-	const raw = obj.chainInfo
-	const chainId = typeof raw.chainId === "string" ? Number(BigInt(raw.chainId)) : Number(raw.chainId.toBigInt())
-	const version = typeof raw.version === "string" ? Number(BigInt(raw.version)) : Number(raw.version.toBigInt())
-	return (chainId ^ version) >>> 0
-}
 
 export interface TryCreateQueuedJournalDeps {
 	journal: OperationJournalService

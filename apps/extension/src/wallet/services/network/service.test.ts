@@ -265,11 +265,10 @@ describe("NetworkService NodeFactory seam", () => {
 		const { service, factory } = harness({
 			"https://rpc.example/1": { l1ChainId: 11155111, rollupVersion: 4127419662 },
 		})
-		// Exercise via addNetwork, which calls getChainId internally (line ~280).
-		// Note: we sidestep the lock + storage by calling the private method directly.
+		// Calls the private probe directly, past the lock and storage.
 		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
 		const chainId = await (service as any)._getChainId("https://rpc.example/1")
-		expect(chainId).toBe((11155111 ^ 4127419662) >>> 0)
+		expect(chainId).toBe(4138294185)
 		expect(factory.created.length).toBe(1)
 		expect(factory.created[0]!.rpcUrl).toBe("https://rpc.example/1")
 	})

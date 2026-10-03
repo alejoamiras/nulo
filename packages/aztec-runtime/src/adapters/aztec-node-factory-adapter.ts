@@ -8,7 +8,7 @@
  * for the silent single read). A lint guard (`no-restricted-syntax`)
  * enforces that every other reference goes through `NodeFactory.createNode()`.
  *
- * F-011 / Phase 5: scheme allowlist enforced at THIS boundary too (in
+ * Scheme allowlist enforced at THIS boundary too (in
  * addition to the network/spec.ts schema). Defense in depth — if a future
  * code path persists a URL bypassing the schema (e.g., direct storage
  * write, internal bypass), the adapter still refuses to construct a node
@@ -26,6 +26,7 @@ import { createSafeJsonRpcClient } from "@aztec-labs/foundation/json-rpc/client"
 import type { Logger } from "@aztec-labs/foundation/log"
 import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { type AztecNode, AztecNodeApiSchema, createAztecNodeClient } from "@aztec-labs/stdlib/interfaces/client"
+import { walletChainId } from "@nulo/wallet-core/utils"
 import type { NodeFactory } from "../ports/node-factory-port"
 import { makeFetchWithTimeout, makeSingleAttemptFetch } from "../utils/fetch"
 
@@ -98,7 +99,7 @@ export class AztecNodeFactoryAdapter implements NodeFactory {
 		// socket dies WITH its budget (see NodeFactory.probeChainId).
 		const node = createAztecNodeClient(rpcUrl, { fetch: makeSingleAttemptFetch(timeoutMs) })
 		const info = await node.getNodeInfo()
-		return (info.l1ChainId ^ info.rollupVersion) >>> 0
+		return walletChainId(info.l1ChainId, info.rollupVersion)
 	}
 
 	public async readPublicStorageOnce(rpcUrl: string, contract: AztecAddress, slot: Fr, timeoutMs: number): Promise<Fr> {

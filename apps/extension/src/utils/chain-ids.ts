@@ -9,9 +9,10 @@
  * the id was a bare literal with no recorded pair. Keep the pair next to every id.
  */
 
-export function walletChainId(l1ChainId: number, rollupVersion: number): number {
-	return (l1ChainId ^ rollupVersion) >>> 0
-}
+import { walletChainId } from "@nulo/wallet-core/utils"
+
+/** The extension's entry point for the formula; extension code imports it from here. */
+export { walletChainId }
 
 /** Ethereum mainnet's L1 id: the trust root a stored `mainnet`-kind network row is checked against.
  *  No mainnet network is seeded on the V6 line. */

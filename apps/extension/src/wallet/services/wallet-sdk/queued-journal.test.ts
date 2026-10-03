@@ -4,7 +4,10 @@
  */
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import type { WalletMessage } from "@aztec-labs/wallet-sdk/types"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { ActiveSession } from "@aztec-labs/wallet-sdk/extension/handlers"
 import { ScopeViolationError } from "@nulo/extension-messaging/errors"
+import { LogLevel } from "@/wallet/logger"
 import { MAX_QUEUED_GLOBAL, MAX_QUEUED_PER_SESSION, failQueuedForError, tryCreateQueuedJournal } from "./queued-journal"
 import { makeAccountStub, makeDappSessionStub, makeDeps, makeSession } from "./queued-journal.fixtures"
 
@@ -342,5 +345,27 @@ describe("failQueuedForError — CAS against a concurrent claim (N-07)", () => {
 		const { deps, journal } = makeDeps()
 		await failQueuedForError(journal, "no-such-id", refusal, deps.logger)
 		expect(await journal.countOperations({ stage: "failed" })).toBe(0)
+	})
+})
+
+describe("tryCreateQueuedJournal — the session's chain id", () => {
+	const sessionOn = (chainInfo: unknown) => ({ ...makeSession(), chainInfo }) as unknown as ActiveSession
+
+	test("every chain-scoped read gets the unsigned composite, as a decimal string or a number", async () => {
+		const account = makeAccountStub()
+		const { deps, dappSession, networkSvc } = makeDeps({ account: account as never })
+		await tryCreateQueuedJournal(makeSendTxMessage(), sessionOn({ chainId: new Fr(1n), version: new Fr(2n ** 31n) }), deps)
+		expect(dappSession.tryGetDappSessionByOriginAndChain).toHaveBeenCalledWith("https://example.test", "2147483649", "profile-1")
+		expect(account.getAccounts).toHaveBeenCalledWith("profile-1", 2147483649)
+		expect(networkSvc.getNetworksRaw).toHaveBeenCalledWith("profile-1", 2147483649)
+	})
+
+	test("a malformed chainInfo is swallowed with the failure warning, before any session read", async () => {
+		const { deps, dappSession } = makeDeps()
+		const log = vi.spyOn(deps.logger, "log")
+		const id = await tryCreateQueuedJournal(makeSendTxMessage(), sessionOn({ chainId: "zz", version: "0x1" }), deps)
+		expect(id).toBeUndefined()
+		expect(dappSession.tryGetDappSessionByOriginAndChain).not.toHaveBeenCalled()
+		expect(log).toHaveBeenCalledWith("wallet-sdk-bg", LogLevel.Warn, "tryCreateQueuedJournal failed", expect.any(SyntaxError))
 	})
 })

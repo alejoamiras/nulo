@@ -21,7 +21,7 @@ import { Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
-import { CHAIN_IDS, LOCAL_L1_CHAIN_ID, MAINNET_L1_CHAIN_ID, TESTNET_L1_CHAIN_ID } from "@/utils/chain-ids"
+import { CHAIN_IDS, LOCAL_L1_CHAIN_ID, MAINNET_L1_CHAIN_ID, TESTNET_L1_CHAIN_ID, walletChainId } from "@/utils/chain-ids"
 import { TESTNET_RPC_URL } from "@/wallet/constants/network-endpoints"
 import {
 	type ChainKind,
@@ -1013,7 +1013,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			const l1ChainId = info.l1ChainId
 			if (kindHint === "local") return { chainId: 0, l1ChainId }
 			if (sameLocalNetworkUrl(rpcUrl, LOCAL_NETWORK_RPC_URL)) return { chainId: 0, l1ChainId }
-			return { chainId: (info.l1ChainId ^ info.rollupVersion) >>> 0, l1ChainId }
+			return { chainId: walletChainId(info.l1ChainId, info.rollupVersion), l1ChainId }
 		} catch (error) {
 			this.logError("Failed to fetch node info", error)
 			throw new Error("Failed to fetch node info")

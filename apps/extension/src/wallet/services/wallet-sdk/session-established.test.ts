@@ -12,7 +12,8 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 import type { ILogger } from "@/wallet/logger"
 import type { WindowBounds } from "@nulo/wallet-core/ports"
 import { cancelPendingVerification, PENDING_VERIFICATION_STALE_MS, type PendingVerificationEntry } from "./pending-verification"
-import { type SessionEstablishedDeps, handleSessionEstablished } from "./session-established"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { chainInfoToChainId, type SessionEstablishedDeps, handleSessionEstablished } from "./session-established"
 import { VerifyAdmissionGate, type WindowReservation } from "./verify-admission"
 
 const noopLogger = { log: () => {} } as unknown as ILogger
@@ -527,5 +528,41 @@ describe("handleSessionEstablished — the check in the waiting connect window",
 		expect(create).not.toHaveBeenCalled()
 		expect(navigate).not.toHaveBeenCalled()
 		expect(pendingVerification.get("sess-1")?.cancelled).toBe(true)
+	})
+})
+
+// The decoded id keys persisted, MAC'd session rows, so its exact number is frozen.
+describe("chainInfoToChainId", () => {
+	test.each([
+		{ name: "hex strings", chainInfo: { chainId: "0xaa36a7", version: "0xadb36f9d" }, expected: 2904119610 },
+		{ name: "fields, high bit", chainInfo: { chainId: new Fr(1n), version: new Fr(2n ** 31n) }, expected: 2147483649 },
+		// A bigint XOR would give 31338: the Number rounding above 2^53 is part of the key.
+		{ name: "fields above 2^53", chainInfo: { chainId: new Fr(31337n), version: new Fr(2n ** 64n + 3n) }, expected: 31337 },
+	])("$name → $expected", ({ chainInfo, expected }) => {
+		const id = chainInfoToChainId({ chainInfo })
+		expect(id).toBe(expected)
+		expect(typeof id).toBe("number")
+	})
+
+	test("a malformed chainId throws before version is read", () => {
+		const toBigInt = vi.fn(() => 1n)
+		const version = { toBigInt } as unknown as Fr
+		expect(() => chainInfoToChainId({ chainInfo: { chainId: "not-a-number", version } })).toThrow(SyntaxError)
+		expect(toBigInt).not.toHaveBeenCalled()
+	})
+
+	test("a malformed chainInfo rejects the handler before it touches any dependency", async () => {
+		const log = vi.fn()
+		const { deps, terminate } = makeDeps({ logger: { log } as unknown as ILogger })
+		const markerRead = vi.spyOn(deps.pendingVerification, "get")
+		const reservationRead = vi.spyOn(deps.reservations, "reservation")
+		await expect(handleSessionEstablished(makeSession({ chainInfo: { chainId: "zz", version: "0x1" } }), deps)).rejects.toThrow(
+			SyntaxError,
+		)
+		expect(markerRead).not.toHaveBeenCalled()
+		expect(reservationRead).not.toHaveBeenCalled()
+		expect(deps.dappSessionService.tryGetDappSessionByOriginAndChain).not.toHaveBeenCalled()
+		expect(terminate).not.toHaveBeenCalled()
+		expect(log).not.toHaveBeenCalled()
 	})
 })
