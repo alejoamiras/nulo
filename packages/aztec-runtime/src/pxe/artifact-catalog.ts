@@ -17,45 +17,21 @@ import WonderlandTokenJson from "@wonderland-token-artifact"
 import PrivateFPCJson from "@private-fpc-artifact"
 
 /**
- * Single source of truth for the compiled-in artifacts and their class ids.
- *
- * Before this, `known-artifacts.ts` and `note-schemas.ts` each imported the
- * artifacts and called `getContractClassFromArtifact` independently — so the
- * note-schema map could be keyed off a DIFFERENT class-id computation than the
- * known-artifact resolver (a silent "notes won't decode" hazard if an artifact
- * alias or the Aztec class-id derivation ever shifts). Both now look class ids
- * up by `CatalogKey` here, so the two can never diverge.
+ * Single source of truth for the compiled-in artifacts and their class ids: `known-artifacts.ts`
+ * and `note-schemas.ts` both look class ids up by `CatalogKey` here, so the two can never diverge.
  *
  * Per-key cached (NOT an eager all-12 load): note-schemas depends only on its
  * four keys, so a transient failure hashing an unrelated protocol artifact
  * can't break note rendering — while a key requested by both callers is still
  * hashed only once. Invariant: the list stays locally compiled-in — never
  * fetched at runtime, never user-mutable.
+ *
+ * Lazy raw-artifact accessors: requesting one key doesn't force `loadContractArtifact`
+ * parsing of the others. (The JSON module imports are eager via the vite alias;
+ * the parse + class-id hash happen per-key on demand.) Entry order is the
+ * known-artifact resolution order.
  */
-export type CatalogKey =
-	| "authRegistry"
-	| "contractClassRegistry"
-	| "feeJuice"
-	| "contractInstanceRegistry"
-	| "multiCallEntrypoint"
-	| "publicChecks"
-	| "fpc"
-	| "nft"
-	| "sponsoredFpc"
-	| "token"
-	| "wonderlandToken"
-	| "privateFpc"
-
-export type CatalogEntry = {
-	artifact: ContractArtifact
-	/** `getContractClassFromArtifact(artifact).id.toString()` — computed once. */
-	classId: string
-}
-
-/** Lazy raw-artifact accessors: requesting one key doesn't force `loadContractArtifact`
- *  parsing of the others. (The JSON module imports are eager via the vite alias;
- *  the parse + class-id hash happen per-key on demand.) */
-const rawArtifact: Record<CatalogKey, () => ContractArtifact> = {
+const rawArtifact = {
 	authRegistry: () => AuthRegistryArtifact,
 	contractClassRegistry: () => ContractClassRegistryArtifact,
 	feeJuice: () => FeeJuiceArtifact,
@@ -68,23 +44,18 @@ const rawArtifact: Record<CatalogKey, () => ContractArtifact> = {
 	token: () => TokenContractArtifact,
 	wonderlandToken: () => loadContractArtifact(WonderlandTokenJson),
 	privateFpc: () => loadContractArtifact(PrivateFPCJson),
+} satisfies Record<string, () => ContractArtifact>
+
+export type CatalogKey = keyof typeof rawArtifact
+
+export type CatalogEntry = {
+	artifact: ContractArtifact
+	/** `getContractClassFromArtifact(artifact).id.toString()` — computed once. */
+	classId: string
 }
 
 /** The 12 compiled-in keys, in known-artifact resolution order. */
-export const ALL_CATALOG_KEYS: readonly CatalogKey[] = [
-	"authRegistry",
-	"contractClassRegistry",
-	"feeJuice",
-	"contractInstanceRegistry",
-	"multiCallEntrypoint",
-	"publicChecks",
-	"fpc",
-	"nft",
-	"sponsoredFpc",
-	"token",
-	"wonderlandToken",
-	"privateFpc",
-]
+export const ALL_CATALOG_KEYS = Object.keys(rawArtifact) as readonly CatalogKey[]
 
 // The store is held locally (not helper-internal) because the test reset
 // below clears the WHOLE map — the helper's reset is deliberately per-key.
