@@ -2668,6 +2668,14 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			await expect(service.getProfileDek(p.id)).rejects.toThrow(/locked/)
 		})
 
+		test("getProfileDek refuses a reserved id even while its session is open", async () => {
+			const { service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+			expect(await service.getProfileDek(p.id)).toBeDefined()
+			service.getDeletionState().beginDeletion(p.id)
+			await expect(service.getProfileDek(p.id)).rejects.toThrow(/^Invalid profile id$/)
+		})
+
 		// (d) degraded unlock: a corrupt dek slot opens derived-only, emits the event, no bearer.
 		test("(d) a corrupt dekSealed slot → derived-only unlock, onImportedKeysDegraded, no bearer", async () => {
 			const { api, service } = await makeService()
