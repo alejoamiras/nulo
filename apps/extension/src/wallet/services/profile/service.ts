@@ -24,7 +24,6 @@ import {
 	asBase64Ciphertext,
 	asImportedKeysDek,
 	asMasterSecretBytes,
-	computeEnvelopeMacV3,
 	computeWalletFingerprint,
 	deriveDappSessionMacKey as deriveDappSessionMacKeyFromSecrets,
 	deriveMasterFromMnemonic,
@@ -33,7 +32,6 @@ import {
 	IMPORTED_DEK_AAD,
 	IMPORTED_KEYS_DEK_LEN,
 	type ImportedKeysDek,
-	type MacEnvelopeV3,
 	type MasterSecretBytes,
 	type Passhash,
 	PasswordSecretBox,
@@ -46,8 +44,8 @@ import { PasskeyService } from "@/wallet/services/passkey/service"
 import { PasskeyRecoveryCoordinator, type PasskeyRecovery } from "./passkey-recovery-coordinator"
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
 import { SessionManager } from "./session-manager"
+import { envelopeMacFor, macEnvelopeV3, newPasskeyRow, newPasswordRow } from "./profile-row"
 import {
-	mintPxeGeneration,
 	PROFILE_SERVICE_NAME,
 	type ProfileInfo,
 	type Profile,
@@ -389,17 +387,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		try {
 			dek = await this.unsealDekWithPasshash(passhash, row.dekSealed)
 			if (dek) {
-				const macOk = await verifyEnvelopeMacV3(
-					id,
-					secret,
-					dek,
-					this.macEnvelopeV3(
-						{ guard: row.guard, secret: row.secret, entropy: row.entropy },
-						row.dekSealed,
-						row.walletFingerprint,
-					),
-					row.envelopeMac,
-				)
+				const macOk = await this.envelopeMacValid(id, row, secret, dek)
 				if (!macOk) {
 					zeroize(dek)
 					dek = null
@@ -604,23 +592,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				// impossible) — kept uniform with the import/restore paths.
 				const walletFingerprint = await this.assertNotDuplicateWallet(secret, false)
 				const id = await this.nextUnreservedId()
-				// The envelope MAC binds the row's OWN storage key (plus its fingerprint), so it
-				// can only be computed after the id is final — hence inside this locked section,
-				// after allocation. PBKDF2 stays outside; this is microseconds.
-				const envelopeMac = await computeEnvelopeMacV3(id, secret, dek, this.macEnvelopeV3(encrypted, dekSealed, walletFingerprint))
-
-				const profile: Profile = {
-					id,
-					name,
-					type: "password",
-					pxeGeneration: mintPxeGeneration(),
-					dekSealed,
-					walletFingerprint,
-					guard: encrypted.guard,
-					secret: encrypted.secret,
-					entropy: encrypted.entropy,
-					envelopeMac,
-				}
+				// Inside the lock, after allocation: the MAC binds the final id. PBKDF2 stays outside.
+				const profile = await newPasswordRow({ id, name, slots: encrypted, dekSealed, walletFingerprint }, secret, dek)
 				await this.persistNewProfileHoldingLock(profile)
 
 				await this.openSessionVerified(profile, secret, passhash, dek)
@@ -740,8 +713,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		const id = credentialData?.userHandle ?? (await this.nextUnreservedId())
 		const recovery = await this.acquireRecovery({ ceremony: "create", userHandle: id, name }, credentialData)
 		// Fresh imported-keys DEK, sealed under the PRF-derived wrap key while the ceremony's
-		// credential material is in hand (the SIXTH row-construction site — every creation path
-		// mints a DEK + fingerprint).
+		// credential material is in hand.
 		const dek = generateImportedKeysDek()
 
 		try {
@@ -760,15 +732,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				// Invariant assertion (fresh credential ⇒ fresh PRF ⇒ fresh master).
 				const walletFingerprint = await this.assertNotDuplicateWallet(recovery.secret, false)
 
-				const profile: Profile = {
-					id,
-					name,
-					type: "passkey",
-					pxeGeneration: mintPxeGeneration(),
-					dekSealed,
-					walletFingerprint,
-					credentialId: recovery.credentialId,
-				}
+				const profile = newPasskeyRow({ id, name, dekSealed, walletFingerprint, credentialId: recovery.credentialId })
 				await this.persistNewProfileHoldingLock(profile)
 
 				await this.openSessionVerified(profile, recovery.secret, undefined, dek)
@@ -1165,11 +1129,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				profile.secret = resealed.encrypted.secret
 				profile.entropy = resealed.encrypted.entropy
 				profile.dekSealed = rekeyed.newDekSealed
-				profile.envelopeMac = await computeEnvelopeMacV3(
-					id,
+				profile.envelopeMac = await envelopeMacFor(
+					{ id, slots: resealed.encrypted, dekSealed: rekeyed.newDekSealed, walletFingerprint: profile.walletFingerprint },
 					secret,
 					dek,
-					this.macEnvelopeV3(resealed.encrypted, rekeyed.newDekSealed, profile.walletFingerprint),
 				)
 				await this.repo.set(id, profile)
 				this.emit("onProfileUpdated", this.getProfileInfo(profile))
@@ -2019,19 +1982,6 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		}
 	}
 
-	/** The envelope MAC v3 preimage for a sealed profile record: the row's OWN storage key
-	 *  first (kills whole-envelope swaps between same-password profiles — B's authentic
-	 *  envelope pasted under A's id fails verification even though every byte, including the
-	 *  original tag, is genuine), then the four sealed slots, then the plaintext fingerprint
-	 *  (blinding the duplicate guard becomes a detectable tamper). */
-	private macEnvelopeV3(
-		p: { guard: string; secret: string; entropy: string },
-		dekSealed: string,
-		walletFingerprint: string,
-	): MacEnvelopeV3 {
-		return { guard: p.guard, secret: p.secret, entropy: p.entropy, dek: dekSealed, walletFingerprint }
-	}
-
 	/**
 	 * Does the stored MAC still cover this exact record? EVERY site that is about to trust the DEK
 	 * must ask — not just the unlock path. The DEK slot's AAD is a purpose constant, not
@@ -2053,7 +2003,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		secret: MasterSecretBytes,
 		dek: ImportedKeysDek,
 	): Promise<boolean> {
-		return verifyEnvelopeMacV3(requestedId, secret, dek, this.macEnvelopeV3(p, p.dekSealed, p.walletFingerprint), p.envelopeMac)
+		return verifyEnvelopeMacV3(requestedId, secret, dek, macEnvelopeV3(p, p.dekSealed, p.walletFingerprint), p.envelopeMac)
 	}
 
 	/** Seal the imported-keys DEK under the password credential (EncryptionKey — the audited
@@ -2160,19 +2110,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				const id = await this.nextUnreservedId()
 				const encrypted = await this.secretBox.sealWithPasshash(passhash, secret, entropy)
 				const dekSealed = await this.sealDekWithPasshash(passhash, dek)
-				const envelopeMac = await computeEnvelopeMacV3(id, secret, dek, this.macEnvelopeV3(encrypted, dekSealed, walletFingerprint))
-				const profile: Profile = {
-					id,
-					name,
-					type: "password",
-					pxeGeneration: mintPxeGeneration(),
-					dekSealed,
-					walletFingerprint,
-					guard: encrypted.guard,
-					secret: encrypted.secret,
-					entropy: encrypted.entropy,
-					envelopeMac,
-				}
+				const profile = await newPasswordRow({ id, name, slots: encrypted, dekSealed, walletFingerprint }, secret, dek)
 				await this.persistNewProfileHoldingLock(profile)
 				await this.openSessionVerified(profile, secret, passhash, dek)
 				return profile
@@ -2219,16 +2157,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					userHandle = await this.nextUnreservedId()
 				}
 
-				const id = userHandle
-				const profile: Profile = {
-					id,
-					name,
-					type: "passkey",
-					pxeGeneration: mintPxeGeneration(),
-					dekSealed,
-					walletFingerprint,
-					credentialId,
-				}
+				const profile = newPasskeyRow({ id: userHandle, name, dekSealed, walletFingerprint, credentialId })
 				await this.persistNewProfileHoldingLock(profile)
 				await this.openSessionVerified(profile, secret, undefined, dek)
 				return profile
@@ -2408,29 +2337,13 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			while ((await this.repo.contains(id)) || this.deletionState.isReserved(id)) {
 				id = await this.repo.generateUniqueId()
 			}
-			// MAC v3 binds the row's OWN id — computed only after the id loop above
-			// settles it.
-			const envelopeMac = await computeEnvelopeMacV3(
-				id,
+			// After the id loop, so the MAC binds the settled id. `plainSecret` is the
+			// length-checked backup decode; it is branded only here.
+			const newProfile = await newPasswordRow(
+				{ id, name, slots: sealed.encrypted, dekSealed, walletFingerprint },
 				asMasterSecretBytes(plainSecret as Uint8Array<ArrayBuffer>),
 				destinationDek,
-				this.macEnvelopeV3(sealed.encrypted, dekSealed, walletFingerprint),
 			)
-
-			const newProfile: Profile = {
-				id,
-				name,
-				type: "password",
-				// Fresh generation even on a same-id re-import: the D4 fence
-				// distinguishes this incarnation from the deleted one.
-				pxeGeneration: mintPxeGeneration(),
-				dekSealed,
-				walletFingerprint,
-				guard: sealed.encrypted.guard,
-				secret: sealed.encrypted.secret,
-				entropy: sealed.encrypted.entropy,
-				envelopeMac,
-			}
 
 			await this.writeMarkerThenRowHoldingLock(id, newProfile)
 
@@ -2587,15 +2500,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			id = await this.nextUnreservedId()
 		}
 
-		const newProfile: Profile = {
-			id,
-			name,
-			type: "passkey",
-			pxeGeneration: mintPxeGeneration(),
-			dekSealed,
-			walletFingerprint,
-			credentialId: recovery.credentialId,
-		}
+		const newProfile = newPasskeyRow({ id, name, dekSealed, walletFingerprint, credentialId: recovery.credentialId })
 		// Same marker-before-row bracket as the password branch (a torn passkey
 		// import must not escape detection).
 		await this.writeMarkerThenRowHoldingLock(id, newProfile)
