@@ -386,7 +386,7 @@ Every state in the Phase 0 table must be pixel-identical, with identical probes,
 ## Deferred
 
 - `NewSenderPopup.vue`'s shake: a different animation, not a copy.
-- `export/full.vue`'s encrypt-pair shake, only if Phase 0 cannot stage it on both browsers.
+- `export/full.vue`'s encrypt-pair shake. The Phase 0 spike was not attempted: it needs a passkey profile, a virtual authenticator, a WebAuthn ceremony and a profile deletion on both browsers. The file keeps its own keyframes.
 - Q-08 (b), the new-password pair (Decisions).
 
 ## Decisions (delegated)
