@@ -33,12 +33,28 @@ What each composing class keeps locally, and which shared longhands it meets on 
   - Notes come from a fake `note` Port behind a wrapped `chrome.runtime.connect`. Plain assignment worked on both browsers, with no `defineProperty` needed.
   - Token detail is one seeded token row.
 - **Masks:** the clock-derived "Expires" line and the random profile ID.
-- **Base 585dda2a against head 4995abec, Chrome 152 and Firefox 153, dark and light:** 132 of 132 identical. That is 72 shots over 18 surfaces, plus 60 computed-style records over 15 probed surfaces. The record states are:
-  - rest, hover, `:active` and keyboard focus;
-  - action focus, including the revoke reveal;
-  - a forced disabled toolbar button;
-  - a SettingField forced to last-of-type;
+- **Base 585dda2a against head 40d10344, Chrome 152 and Firefox 153, dark and light:** 132 of 132 identical. That is 72 shots over 18 surfaces, plus 60 computed-style records over 15 probed surfaces. The record states are:
+  - rest, hover, `:active` and keyboard focus, on rows and on all toolbar buttons, both token-detail buttons included;
+  - hover and focus on row actions, including the revoke reveal and the disconnect SVG's red fill;
+  - the notes error card hovered, pressed and focused (E2: the red left border holds while the other sides take the hover colour);
+  - every row of both network-detail containers, so each container's true last row (`::after` hidden) is recorded;
+  - the twins' `.row_text` and `.actions` containers (`min-width`, `flex-shrink`);
+  - a forced disabled toolbar button and a SettingField forced to last-of-type;
   - the four late revisits.
+- A probe now fails when one of its watch locators matches nothing, so a record cannot silently omit an element.
 - **Stability**, base against itself on both browsers: 132 of 132 identical.
 - **Forced diff:** a throwaway build with the shared row's `cursor` set to `default`. The pixels stayed identical and the records failed with 128 and 80 leaves, all `cursor`. So the records see what pixels cannot.
 - **Probe fix while building:** a pointer press focuses its target, and re-focusing the focused element is a no-op. Firefox's first run therefore found the card target without `:focus-visible`. The probe now blurs before each keyboard focus, and it throws whenever its target does not match `:focus-visible`.
+
+## Codex loop
+
+- **Code round 1** (GPT-6 Astra, xhigh): NOT CONVERGED, two should-fix and two nits, all adopted. Its own rebuild of all 31 compositions agreed with the disjointness table, and it re-compared the stored artifacts (72/72 shots, 60/60 records), finding no cascade bug.
+  1. **The probes omitted elements whose declarations moved:** the twins' `.row_text` and `.actions` containers, and the disconnect SVG's red fill. They are now in the watch lists.
+  2. **The state checklist was partly unimplemented.** Added:
+     - toolbar `:active` on the connected-apps list and authwits, and focus on the connected-app detail;
+     - refresh-button hover, active and focus;
+     - the network-detail rows whose `::after` is hidden;
+     - the notes error card through hover, press and focus.
+  3. **Comments:** the wrap rule's "instead of truncating" claim was false, since the clamp truncates. It now states only its ordering invariant, and the toolbar module lost a narrating line.
+  4. **The plan embedded the harness's local path.** It now names the local screenshot harness without one.
+- After round 1: lint, `typecheck:all` and `test:all` (8656 passed) are green; base against head 40d10344 and `--stability` are each 132 of 132 identical.
