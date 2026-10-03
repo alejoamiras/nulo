@@ -103,7 +103,17 @@ describe("TransactionService — DROPPED debounce + resurrection", () => {
 		vi.useRealTimers()
 	})
 
-	const add = (hash = HASH) => service.addTransaction({ type: 0 } as never, 1, ACCOUNT, [], "0", 0 as never, hash, ENDPOINT)
+	const add = (hash = HASH) =>
+		service.addTransaction({
+			origin: { type: 0 } as never,
+			chainId: 1,
+			account: ACCOUNT,
+			calls: [],
+			nonce: "0",
+			feePaymentMethod: 0 as never,
+			hash,
+			submittedEndpointUrl: ENDPOINT,
+		})
 	const tick = (ms: number) => vi.advanceTimersByTimeAsync(ms)
 
 	test("DROPPED inside the grace window never finalizes; past grace + streak it does", async () => {

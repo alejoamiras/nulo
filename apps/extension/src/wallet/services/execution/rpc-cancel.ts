@@ -51,6 +51,11 @@ export interface CancellableTask {
 	fail(error: unknown): void
 }
 
+/** A stage-boundary cancel checkpoint for work that has no journal id yet. */
+export function throwIfAborted(signal: AbortSignal | undefined): void {
+	if (signal?.aborted) throw new JobCancelledSentinel("")
+}
+
 export function maybeRethrowAsRpcCancel(error: unknown, task: Pick<CancellableTask, "cancel">): void {
 	if (!(error instanceof JobCancelledSentinel)) return
 	task.cancel()

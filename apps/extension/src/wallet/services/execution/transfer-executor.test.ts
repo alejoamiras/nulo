@@ -129,7 +129,11 @@ const RECORD_FIELDS = [
 /** The activity record `addTransaction` received, by field name. */
 function recordedTx(deps: TransferExecutorDeps): Record<(typeof RECORD_FIELDS)[number], unknown> {
 	const args = (deps.addTransaction as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
-	return Object.fromEntries(RECORD_FIELDS.map((field, i) => [field, args[i]])) as Record<(typeof RECORD_FIELDS)[number], unknown>
+	expect(args).toHaveLength(1)
+	const input = args[0] as Record<(typeof RECORD_FIELDS)[number], unknown>
+	// Key order is evaluation order: the literal must read its values in the field order.
+	expect(Object.keys(input)).toEqual([...RECORD_FIELDS])
+	return input
 }
 
 describe("TransferExecutor.execute", () => {

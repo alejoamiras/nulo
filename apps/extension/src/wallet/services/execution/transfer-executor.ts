@@ -39,7 +39,7 @@ import type { FeeEstimate } from "./fee/fee-strategy"
 import { fingerprintBaseFee } from "./estimate-reuse-shared"
 import { failureKind } from "./mark-failed-unless-cancelled"
 import type { OperationPlanner, TransferRequest } from "./operation-planner"
-import { maybeRethrowAsRpcCancel } from "./rpc-cancel"
+import { maybeRethrowAsRpcCancel, throwIfAborted } from "./rpc-cancel"
 import type { Action, FeeOptions, FeeSettings, TransferFeeEstimate } from "./spec"
 import { probeSponsorFunding } from "./sponsor-funding"
 import { fingerprintFeeSettings, type TransferEstimateReuse } from "./transfer-estimate-reuse"
@@ -180,11 +180,11 @@ export class TransferExecutor {
 				},
 				submittedEndpointUrl,
 				recordTransaction: (hash) =>
-					this.deps.addTransaction(
+					this.deps.addTransaction({
 						origin,
-						network.chainId,
-						accountAddress,
-						[
+						chainId: network.chainId,
+						account: accountAddress,
+						calls: [
 							{
 								contract: activityToken.contract,
 								method: activityFnName,
@@ -204,15 +204,15 @@ export class TransferExecutor {
 								],
 							},
 						],
-						nonce.toString(),
+						nonce: nonce.toString(),
 						feePaymentMethod,
 						hash,
 						submittedEndpointUrl,
-						getEstimatedFee(txRequest),
-						getGasDetails(txRequest),
+						estimatedFee: getEstimatedFee(txRequest),
+						gasDetails: getGasDetails(txRequest),
 						fence,
-						network.id,
-					),
+						networkId: network.id,
+					}),
 			})
 			transferTask.complete()
 			return txHash.toString()
@@ -348,21 +348,18 @@ export class TransferExecutor {
 		// Stage-boundary cancellation: an in-flight sim can't be preempted, but
 		// each next stage — and critically the stash — must not run after a
 		// cancel. A cancelled estimate never leaves a signed request cached.
-		const checkCancelled = (): void => {
-			if (signal?.aborted) throw new JobCancelledSentinel("")
-		}
-		checkCancelled()
+		throwIfAborted(signal)
 		const fence = await this.deps.captureExecutionFence()
 		const { op, token, fn, args } = await this.deps.planner.buildTransferOperation(req)
-		checkCancelled()
+		throwIfAborted(signal)
 
 		const built = await this.deps.buildAndEstimate(op, op.feeSettings, fence, undefined, signal)
 		const { txRequest, network, nonce, feePaymentMethod, initializesAccount: builtInitializes } = built
-		checkCancelled()
+		throwIfAborted(signal)
 		const sponsorFunding = await probeSponsorFunding(built, this.deps.readPublicStorageOnce, (msg, data) =>
 			this.deps.logDebug(msg, data),
 		)
-		checkCancelled()
+		throwIfAborted(signal)
 
 		const maxFeeRaw = BigInt(getEstimatedFee(txRequest))
 

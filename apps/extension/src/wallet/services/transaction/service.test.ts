@@ -65,20 +65,20 @@ describe("TransactionService.addTransaction — D13 execution fence", () => {
 	})
 
 	const add = (hash: string, fence?: ExecutionFence, networkId?: string) =>
-		service.addTransaction(
-			{ type: 0 } as never,
-			1,
-			ACCOUNT,
-			[],
-			"0",
-			0 as never,
+		service.addTransaction({
+			origin: { type: 0 } as never,
+			chainId: 1,
+			account: ACCOUNT,
+			calls: [],
+			nonce: "0",
+			feePaymentMethod: 0 as never,
 			hash,
-			undefined,
-			undefined,
-			undefined,
+			submittedEndpointUrl: undefined,
+			estimatedFee: undefined,
+			gasDetails: undefined,
 			fence,
 			networkId,
-		)
+		})
 
 	test("deleting one profile's transactions spares another profile sharing the address", async () => {
 		// Two profiles built from one mnemonic own the same address. An
@@ -182,20 +182,27 @@ describe("TransactionService.addTransaction — D13 execution fence", () => {
 
 	/** Every field set, each to a distinct value. */
 	const addFull = (fence: ExecutionFence, hash = "0xfull") =>
-		service.addTransaction(
-			{ type: 1, name: "dapp" } as never,
-			3,
-			ACCOUNT,
-			[{ contract: "0xc", method: "m", args: ["1"] }] as never,
-			"0x07",
-			2 as never,
+		service.addTransaction({
+			origin: { type: 1, name: "dapp" } as never,
+			chainId: 3,
+			account: ACCOUNT,
+			calls: [{ contract: "0xc", method: "m", args: ["1"] }] as never,
+			nonce: "0x07",
+			feePaymentMethod: 2 as never,
 			hash,
-			"https://rpc.example",
-			"880",
-			{ l2GasLimit: 200, daGasLimit: 100, teardownL2GasLimit: 20, teardownDaGasLimit: 10, feePerL2Gas: "3", feePerDaGas: "2" },
+			submittedEndpointUrl: "https://rpc.example",
+			estimatedFee: "880",
+			gasDetails: {
+				l2GasLimit: 200,
+				daGasLimit: 100,
+				teardownL2GasLimit: 20,
+				teardownDaGasLimit: 10,
+				feePerL2Gas: "3",
+				feePerDaGas: "2",
+			},
 			fence,
-			"net-9",
-		)
+			networkId: "net-9",
+		})
 
 	test("the persisted row's raw bytes, in the literal's key order", async () => {
 		vi.setSystemTime(1_700_000_000_000)

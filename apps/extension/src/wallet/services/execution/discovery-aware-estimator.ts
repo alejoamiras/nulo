@@ -21,12 +21,12 @@
  * derivation against a drifted RPC — it is pinned as preserved.
  */
 
-import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import type { WrappedTask } from "@/wallet/services/task/service"
 import type { AuthwitDiscoverer, BuildTxRequestFn } from "./authwit-discoverer"
 import { CollectingDiscoveryProbe } from "./discovery-probe"
 import type { FeeEstimate } from "./fee/fee-strategy"
+import { throwIfAborted } from "./rpc-cancel"
 import type { Action, AddPrivateAuthwitAction, FeeOptions, FeeSettings, Operation, SendTransactionOperation } from "./spec"
 import type { DiscoveredAuthwit } from "@nulo/wallet-bridge"
 
@@ -125,7 +125,7 @@ export class DiscoveryAwareEstimator {
 		)
 		// Stage boundary preserved from the inline shape: a cancel landing
 		// during discovery must not start the sizing pipeline.
-		if (signal?.aborted) throw new JobCancelledSentinel("")
+		throwIfAborted(signal)
 		const finalActions = discoveredActions.length ? [...actions, ...discoveredActions] : [...actions]
 		const op = {
 			...operation,
