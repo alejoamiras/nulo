@@ -55,6 +55,19 @@
 - **Local gates at the head:** `lint`, `typecheck:all`, `test:all`, `test:ci-gating` and `audit:vue` exit 0. The smoke file `tests/e2e/endpoints.test.ts` passes 6/6 on Chrome and on Firefox.
 - **`test:release` exits 1 on the same three environmental failures as arc 7:** the `zip-reproducible` tests, because `zip` is not installed on this machine. The other 161 tests pass.
 
+## Code review
+
+- **Round 1** (Codex, GPT-6 Astra, xhigh): NOT CONVERGED, one should-fix and one nit, both adopted.
+  - **Should-fix, adopted: the status skeleton changed the await shape.** Returning the async helper added a settlement hop, and the async probe callback another. Measured after the probe resolves, on the shared service test setup: base 4 and 2 microtasks (getNodeStatus, probeNodeStatus), skeleton 5 and 4, inline again 4 and 2. Both bodies stay inline because an extracted async body cannot keep the base's await shape. Only the synchronous `findPrimaryEndpoint` and `isLocalNetworkTarget` helpers are shared. `getNodeStatus` still passes no kind hint (B-09 as at base).
+  - **Nit, adopted:** the adapter's `isAllowedRpcUrl` doc and `NewEndpointPopup.test.ts`'s header are now one sentence each.
+  - Restacked onto `harden-dedupe` at `169bed04` (arcs 6 and 8) with no conflicts.
+  - The status mutants were rerun on the inline bodies, and all 5 were killed: the kind applied in getNodeStatus, the kind ignored in probeNodeStatus, the carve-out before the probe, and the checks moved inside the catch on each method.
+  - **Re-proved at the new head:**
+    - `lint`, `test:all`, `test:ci-gating` and `audit:vue` exit 0.
+    - `test:release` exits 0, 164 pass, with a user-local `zip`: the Ubuntu `zip` .deb was fetched with `apt-get download` and unpacked with `dpkg -x` into a scratch dir on PATH for that run only, with no sudo and no system install.
+    - `THIRD-PARTY-NOTICES.txt` is identical on both browsers.
+    - Shots: base `169bed04` vs the new head, 44/44 identical; stability on the head, 44/44 identical. The same fixture and port discipline was used, and no registry row or process was left.
+
 ## Screenshots
 
 - **A fake node, no proxy.** `ne-fixture.ts`, beside the harness, answers the SDK's batched `aztec_getNodeInfo` with the identity its path names (`/l1/<n>/rv/<n>`). It drives the real popup, client, service and adapter, because `http://127.0.0.1` is already allowlisted and in the manifest's host permissions.
