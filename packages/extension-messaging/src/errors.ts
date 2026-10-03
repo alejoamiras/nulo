@@ -172,15 +172,22 @@ export class JobCancelledError extends WalletError {
  * so dApps that JSON.parse the wrapped error message can discriminate.
  *
  * Message text is a public contract — substring-matching dApps lock it in.
- * Keep the literal stable across versions; never interpolate user input
- * (origin, session, address) because the wallet-sdk wraps the envelope in
- * `new Error(JSON.stringify(error))` and unescaped input would break the JSON.
+ * Keep the literal stable across versions, and never interpolate user input
+ * (origin, session, address): the message reaches the calling dApp.
  */
 export class CapabilityNotGrantedError extends WalletError {
 	public static readonly CODE = "CAPABILITY_NOT_GRANTED"
 
 	public constructor(capabilityType: string, message = `${capabilityType} capability not granted. Call requestCapabilities() first.`) {
 		super(CapabilityNotGrantedError.CODE, message, { capabilityType }, "CapabilityNotGrantedError")
+	}
+
+	/** Keeps the payload's message and only its `capabilityType`, so both the `instanceof` and the
+	 *  substring-match contracts survive the JSON boundary. */
+	public static fromPayload(payload: WalletErrorPayload): CapabilityNotGrantedError {
+		// The wire `details` is unvalidated.
+		const details = payload.details as { capabilityType?: string } | undefined
+		return new CapabilityNotGrantedError(details?.capabilityType ?? "unknown", payload.message)
 	}
 }
 
@@ -206,9 +213,8 @@ export class ScopeViolationError extends WalletError {
  *
  * Maps to JSON-RPC code -32005 ("Limit exceeded") when surfaced to dApps, with
  * `data.walletErrorCode = "TOO_MANY_PENDING"`. The message is a stable public
- * contract — never interpolate origin/profile/account: the wallet-sdk wraps the
- * envelope in `new Error(JSON.stringify(error))` (unescaped input breaks the
- * JSON), and naming the full lane would leak it to the calling dApp.
+ * contract — never interpolate origin/profile/account: naming the full lane
+ * would leak it to the calling dApp.
  */
 export class TooManyPendingError extends WalletError {
 	public static readonly CODE = "TOO_MANY_PENDING"
@@ -427,14 +433,8 @@ export class RestoreTornError extends WalletError {
  * Raised by `createPasskeyProfile` / `importPasskey` when the profile id
  * the caller pre-reserved was claimed by another writer between the
  * unlocked WebAuthn ceremony and the locked persistence step. Callers
- * should retry the entire flow with a freshly-generated id.
- *
- * Background — the previous behavior silently regenerated the id under
- * the lock without re-running WebAuthn, which left the WebAuthn
- * credential's `userHandle` (= the OLD id) out of sync with the
- * persisted profile id. Surfacing the conflict puts the retry decision
- * back in the caller's hands so the userHandle ↔ profile-id binding
- * stays consistent across the WebAuthn boundary.
+ * should retry the entire flow with a freshly-generated id: the credential's
+ * WebAuthn `userHandle` IS the profile id, so the id can never change after the ceremony.
  */
 export class ProfileIdConflictError extends WalletError {
 	public static readonly CODE = "PROFILE_ID_CONFLICT"
@@ -478,37 +478,38 @@ export class RecoveryModeError extends WalletError {
 }
 
 /**
- * Closed, code-keyed view of {@link WalletErrorPayload} for the reconstruction
- * switch below. The WIRE type stays the permissive `WalletErrorPayload` (so
- * `toPayload`, `messages.ts`, and the `errorPayload?: unknown` transport boundary
- * are untouched); this union only types `details` per code so each case reads it
- * without a per-case cast. The two structured codes carry their detail shape; the
- * rest keep `details?: unknown`. (A later boundary-decode parser — Q-01 — will
- * VALIDATE the wire into this shape; today it is one documented cast.)
+ * Every class a wire `code` rebuilds as. Two subclasses are absent on purpose: `TooManyPendingError`
+ * rebuilds as the base `WalletError`, and `RpcConnectError` never crosses the wire.
  */
-type KnownWalletErrorPayload =
-	| { code: typeof RpcTimeoutError.CODE; message: string; details?: unknown }
-	| { code: typeof RpcDisconnectedError.CODE; message: string; details?: unknown }
-	| { code: typeof UserRejectedError.CODE; message: string; details?: unknown }
-	| { code: typeof JobCancelledError.CODE; message: string; details?: { jobId?: string } }
-	| { code: typeof CapabilityNotGrantedError.CODE; message: string; details?: { capabilityType?: string } }
-	| { code: typeof ScopeViolationError.CODE; message: string; details?: unknown }
-	| { code: typeof ValidationError.CODE; message: string; details?: unknown }
-	| { code: typeof InvalidPasswordError.CODE; message: string; details?: unknown }
-	| { code: typeof AccountAddressInconsistencyError.CODE; message: string; details?: unknown }
-	| { code: typeof RestoreTornError.CODE; message: string; details?: unknown }
-	| { code: typeof RecoveryModeError.CODE; message: string; details?: unknown }
-	| { code: typeof ProfileIdConflictError.CODE; message: string; details?: unknown }
-	| { code: typeof DuplicateWalletError.CODE; message: string; details?: { existingProfileName?: string } }
-	| { code: typeof DuplicateInitializationError.CODE; message: string; details?: unknown }
-	| { code: typeof UnsupportedMethodError.CODE; message: string; details?: unknown }
-	| { code: typeof PxeStaleAnchorError.CODE; message: string; details?: unknown }
-	| { code: typeof ContractNotRegisteredError.CODE; message: string; details?: unknown }
-	| { code: typeof ChainNotSupportedError.CODE; message: string; details?: unknown }
-	| { code: typeof PxeStoreKeyMissingError.CODE; message: string; details?: unknown }
-	| { code: typeof SessionEndedError.CODE; message: string; details?: unknown }
-	| { code: typeof TermsAcceptanceRequiredError.CODE; message: string; details?: unknown }
-	| { code: typeof OperationNotRecordedError.CODE; message: string; details?: unknown }
+const REBUILT_AS = [
+	RpcTimeoutError,
+	RpcDisconnectedError,
+	UserRejectedError,
+	JobCancelledError,
+	CapabilityNotGrantedError,
+	ScopeViolationError,
+	ValidationError,
+	InvalidPasswordError,
+	AccountAddressInconsistencyError,
+	RestoreTornError,
+	RecoveryModeError,
+	ProfileIdConflictError,
+	DuplicateWalletError,
+	DuplicateInitializationError,
+	UnsupportedMethodError,
+	PxeStaleAnchorError,
+	ContractNotRegisteredError,
+	ChainNotSupportedError,
+	PxeStoreKeyMissingError,
+	SessionEndedError,
+	TermsAcceptanceRequiredError,
+	OperationNotRecordedError,
+] as const
+
+/** A `Map`, not an object, so a code such as `"constructor"` resolves to nothing. */
+const BY_CODE: ReadonlyMap<string, typeof CapabilityNotGrantedError | (new (message: string, details?: never) => WalletError)> = new Map(
+	REBUILT_AS.map((ctor) => [ctor.CODE, ctor]),
+)
 
 /**
  * Reconstruct a WalletError (concrete subclass if the code is recognised)
@@ -516,61 +517,12 @@ type KnownWalletErrorPayload =
  * the code preserved so telemetry / log analysis can still group them.
  */
 export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError {
-	// One documented boundary cast (the wire `details` is unvalidated). The closed
-	// union then lets each case read `details` with no per-case cast; an unknown
-	// runtime code falls to the permissive `payload` in `default`.
-	const known = payload as KnownWalletErrorPayload
-	switch (known.code) {
-		case RpcTimeoutError.CODE:
-			return new RpcTimeoutError(known.message, known.details)
-		case RpcDisconnectedError.CODE:
-			return new RpcDisconnectedError(known.message, known.details)
-		case UserRejectedError.CODE:
-			return new UserRejectedError(known.message, known.details)
-		case JobCancelledError.CODE:
-			return new JobCancelledError(known.message, known.details)
-		case CapabilityNotGrantedError.CODE:
-			// Reconstruct preserves both the capabilityType discriminator and the
-			// stable message wording so the popup-side / dApp-side instanceof check
-			// and substring-match contracts both survive the JSON boundary.
-			return new CapabilityNotGrantedError(known.details?.capabilityType ?? "unknown", known.message)
-		case ScopeViolationError.CODE:
-			return new ScopeViolationError(known.message)
-		case ValidationError.CODE:
-			return new ValidationError(known.message, known.details)
-		case InvalidPasswordError.CODE:
-			return new InvalidPasswordError(known.message, known.details)
-		case AccountAddressInconsistencyError.CODE:
-			return new AccountAddressInconsistencyError(known.message, known.details)
-		case RestoreTornError.CODE:
-			return new RestoreTornError(known.message, known.details)
-		case RecoveryModeError.CODE:
-			return new RecoveryModeError(known.message, known.details)
-		case ProfileIdConflictError.CODE:
-			return new ProfileIdConflictError(known.message, known.details)
-		case DuplicateWalletError.CODE:
-			return new DuplicateWalletError(known.message, known.details)
-		case DuplicateInitializationError.CODE:
-			return new DuplicateInitializationError(known.message, known.details)
-		case UnsupportedMethodError.CODE:
-			return new UnsupportedMethodError(known.message, known.details)
-		case PxeStaleAnchorError.CODE:
-			return new PxeStaleAnchorError(known.message, known.details)
-		case ContractNotRegisteredError.CODE:
-			return new ContractNotRegisteredError(known.message, known.details)
-		case ChainNotSupportedError.CODE:
-			return new ChainNotSupportedError()
-		case PxeStoreKeyMissingError.CODE:
-			return new PxeStoreKeyMissingError(known.message, known.details)
-		case SessionEndedError.CODE:
-			return new SessionEndedError()
-		case TermsAcceptanceRequiredError.CODE:
-			return new TermsAcceptanceRequiredError()
-		case OperationNotRecordedError.CODE:
-			return new OperationNotRecordedError()
-		default:
-			return new WalletError(payload.code, payload.message, payload.details)
-	}
+	const ctor = BY_CODE.get(payload.code)
+	if (ctor === undefined) return new WalletError(payload.code, payload.message, payload.details)
+	if (ctor === CapabilityNotGrantedError) return CapabilityNotGrantedError.fromPayload(payload)
+	// The wire `details` is unvalidated. Constant-message constructors ignore both arguments, and
+	// `ScopeViolationError` ignores the details.
+	return new ctor(payload.message, payload.details as never)
 }
 
 /**
