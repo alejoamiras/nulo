@@ -320,7 +320,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	): Promise<Account | undefined> {
 		return this.tupleLocks.withLock(accountRowId(profileId, chainId, address), async () => {
 			const account = await this.storage.get(accountRowId(profileId, chainId, address))
-			if (account?.profileId !== profileId || account.chainId !== chainId) {
+			if (!rowMatchesKey(account, profileId, chainId, address)) {
 				return undefined
 			}
 			if (account[field] !== value) {

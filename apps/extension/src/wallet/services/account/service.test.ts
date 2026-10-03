@@ -15,6 +15,7 @@ import { ConfigStore } from "@/wallet/config"
 import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/spec"
 import { ERR_UNATTENDED_LIVE_CHECK, NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
 import { svc } from "../composition-harness"
+import { recordWrites } from "../storage-write-log"
 import { AccountService } from "./service"
 import { accountRowId } from "./spec"
 
@@ -610,6 +611,18 @@ describe("AccountService keyed reads bind the row body to the requested address"
 		expect(await service.getAccount("p1", 1, "0xA")).toBeUndefined()
 		await expect(service.getAccountContract("p1", 1, "0xA")).rejects.toThrow("unknown account address")
 		await expect(service.exportAccount("p1", 1, "0xA", "pw", false)).rejects.toThrow("unknown account address")
+	})
+
+	test("a rename of A finds B's transplanted row absent: no write under B's key, no emit", async () => {
+		const { api, service } = await makeHarness()
+		await api.storage.local.set({ [`nulo:core:accounts@${accountRowId("p1", 1, "0xA")}`]: JSON.stringify(mkAccount("0xB")) })
+		const { log } = recordWrites(api.storage.local, "nulo:core:accounts@")
+		const emit = vi.spyOn(service as unknown as { emit: (e: string, p: unknown) => void }, "emit")
+		expect(await service.changeAccountName("p1", 1, "0xA", "renamed")).toBeUndefined()
+		expect(await service.changeAccountVisibility("p1", 1, "0xA", false)).toBeUndefined()
+		expect(log).toEqual([])
+		expect(emit).not.toHaveBeenCalled()
+		expect(Object.keys(await api.storage.local.get(null))).toEqual([`nulo:core:accounts@${accountRowId("p1", 1, "0xA")}`])
 	})
 
 	test.each([
