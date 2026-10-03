@@ -1,5 +1,7 @@
-import { mount } from "@vue/test-utils"
-import { describe, expect, it } from "vitest"
+import { Flex, Icon, Input, MaterialIcon, Text } from "@nulo/design"
+import { mount, type VueWrapper } from "@vue/test-utils"
+import { afterEach, describe, expect, it } from "vitest"
+import { expectMaskToggle, expectNativeAttrs, nativeInput, pasteInto } from "../../../../tests/helpers/credential-pins"
 import ImportSecretForm from "./ImportSecretForm.vue"
 
 const stubs = {
@@ -89,5 +91,56 @@ describe("ImportSecretForm", () => {
 			global: { stubs },
 		})
 		expect(full.text()).toContain("Correct")
+	})
+})
+
+describe("ImportSecretForm — credential controls, real Input", () => {
+	const mounted: VueWrapper[] = []
+	afterEach(() => {
+		for (const w of mounted.splice(0)) w.unmount()
+	})
+	const mountReal = () => {
+		const w = mount(ImportSecretForm, {
+			props: baseProps(),
+			attachTo: document.body,
+			global: { components: { Flex, Icon, Input, MaterialIcon, Text } },
+		})
+		mounted.push(w)
+		return w
+	}
+	const SEED = "import-seed-input"
+	const PAIR = ["import-password-input", "import-password-confirm-input"]
+
+	it("the phrase toggle masks the phrase alone", async () => {
+		await expectMaskToggle(mountReal(), {
+			toggle: "import-seed-input-visibility-toggle",
+			field: SEED,
+			drives: [SEED],
+			others: PAIR,
+			subject: "recovery phrase",
+		})
+	})
+
+	it("the password toggle masks both password fields and never the phrase", async () => {
+		await expectMaskToggle(mountReal(), {
+			toggle: "import-password-input-visibility-toggle",
+			field: PAIR[0],
+			drives: PAIR,
+			others: [SEED],
+		})
+	})
+
+	it("native attributes per field, and nothing is focused on mount", () => {
+		const w = mountReal()
+		expectNativeAttrs(w, SEED, { autocomplete: "off", autocapitalize: null, autocorrect: null })
+		for (const id of PAIR) expectNativeAttrs(w, id, { autocomplete: "new-password", autocapitalize: null, autocorrect: null })
+		expect(document.activeElement).toBe(document.body)
+	})
+
+	it("a paste into the phrase is native; a paste into a password field is capped at 128", () => {
+		const w = mountReal()
+		expect(pasteInto(nativeInput(w, SEED), "x".repeat(300))).toBe(false)
+		expect(pasteInto(nativeInput(w, PAIR[0]), "y".repeat(130))).toBe(true)
+		expect(w.emitted("update:password")?.at(-1)).toEqual(["y".repeat(128)])
 	})
 })

@@ -76,3 +76,15 @@ describe("composite/SecretUnlockSection", () => {
 		expect(errEl.text()).toContain("Wrong password")
 	})
 })
+
+describe("composite/SecretUnlockSection — the shake", () => {
+	test("the input's wrapper carries the shake class exactly while error is set", async () => {
+		const w = factory({ error: false })
+		const shaker = () => w.get("[data-input-stub]").element.parentElement as HTMLElement
+		expect(shaker().className).not.toMatch(/shake/)
+		await w.setProps({ error: true })
+		expect(shaker().className).toMatch(/shake/)
+		await w.setProps({ error: false })
+		expect(shaker().className).not.toMatch(/shake/)
+	})
+})

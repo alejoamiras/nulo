@@ -1,7 +1,9 @@
 import { createTestingPinia } from "@pinia/testing"
 import { flushPromises, mount } from "@vue/test-utils"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import { RestoreTornError } from "@nulo/extension-messaging/errors"
+import { InvalidPasswordError, RestoreTornError } from "@nulo/extension-messaging/errors"
+import { Flex, Input, MaterialIcon, Text } from "@nulo/design"
+import { expectMaskToggle, expectNativeAttrs, nativeInput, typeNow } from "../../../tests/helpers/credential-pins"
 import { useAppStore } from "@/stores/app.store"
 import { managers } from "@/utils/core"
 import { AccountServiceClient } from "@/wallet/services/account/client"
@@ -317,5 +319,61 @@ describe("auth.vue — the account client survives an unlock", () => {
 		expect(AccountServiceClient).not.toHaveBeenCalled()
 		expect(managers.account).toBe(existing)
 		expect(initTransactionServiceMock).toHaveBeenCalled()
+	})
+})
+
+describe("auth.vue — the password field's controls, real Input", () => {
+	const mountReal = () => {
+		const wrapper = mount(Auth, {
+			attachTo: document.body,
+			global: {
+				plugins: [createTestingPinia({ createSpy: vi.fn, stubActions: false })],
+				components: { Flex, Input, MaterialIcon, Text },
+				stubs: {
+					Button: { template: `<button type="submit" v-bind="$attrs"><slot /></button>` },
+					Tooltip: { template: `<div><slot /></div>` },
+					AuthProfilePill: true,
+					PasskeyCeremonyDialog: true,
+					Transition: true,
+				},
+			},
+		})
+		useAppStore().profile = { id: "p1", name: "P", type: "password" } as never
+		return wrapper
+	}
+	const FIELD = "auth-password-input"
+	let wrapper: ReturnType<typeof mountReal> | undefined
+	afterEach(() => {
+		wrapper?.unmount()
+		wrapper = undefined
+	})
+
+	test("focused on mount, current-password autofill, no autocapitalize or autocorrect", async () => {
+		wrapper = mountReal()
+		await flushPromises()
+		expect(document.activeElement).toBe(nativeInput(wrapper, FIELD))
+		expectNativeAttrs(wrapper, FIELD, { autocomplete: "current-password", autocapitalize: "none", autocorrect: "off" })
+	})
+
+	test("the toggle masks the field and never submits the form", async () => {
+		wrapper = mountReal()
+		await flushPromises()
+		typeNow(nativeInput(wrapper, FIELD), "pass1234")
+		await expectMaskToggle(wrapper, { toggle: "auth-password-input-visibility-toggle", field: FIELD, drives: [FIELD] })
+		await flushPromises()
+		expect(unlockProfile).not.toHaveBeenCalled()
+	})
+
+	test("a wrong password shakes the field's wrapper", async () => {
+		unlockProfile.mockRejectedValue(new InvalidPasswordError())
+		wrapper = mountReal()
+		await flushPromises()
+		const shaker = () => (wrapper as NonNullable<typeof wrapper>).get(`[data-testid="${FIELD}"]`).element.parentElement as HTMLElement
+		expect(shaker().className).not.toMatch(/shake/)
+		typeNow(nativeInput(wrapper, FIELD), "wrong-pass")
+		await wrapper.find("form").trigger("submit")
+		await flushPromises()
+		expect(unlockProfile).toHaveBeenCalledTimes(1)
+		expect(shaker().className).toMatch(/shake/)
 	})
 })
