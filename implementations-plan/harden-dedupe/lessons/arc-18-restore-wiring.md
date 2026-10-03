@@ -49,6 +49,19 @@
 | M12 | `return await rollbackAndFail` becomes `return rollbackAndFail` | case 8 |
 | M13 | `await Promise.resolve()` before relink | case 4 (microtask snapshot) |
 
+## Code review round 1: CONVERGED
+
+- **Codex (GPT-6 Astra, xhigh): converged, high confidence, no blocker or should-fix.** It confirmed:
+  - the move is exact, local names and the cap included;
+  - the await shape, argument order, synchronous relink, try/finally, `return await rollbackAndFail` and disconnect order are unchanged;
+  - no runtime validation changed;
+  - the `.eslintrc-auto-import.json` entry is harmless;
+  - `restoreNetworksStage` already existed at the base;
+  - nothing conflicts with arcs 12 or 13.
+
+  Narrowing `RestoreData` stays a follow-up.
+- **One nit, adopted: the boundary comment overstated the behaviour.** Relink calls no service, and a malformed result does not always throw. The comment now says only two things: the account and token restores forward absent slices unchanged, and their results stay unvalidated, so the local names matter because native errors reach the import failure copy.
+
 ## Gates
 
 - **Phase 1 and Phase 2:** `bun run lint`, `typecheck:all`, `test:all`, `test:ci-gating` and `audit:vue` all exit 0, and `bun run build` exits 0. No workflow file changed, so `lint:actions` is not needed.
