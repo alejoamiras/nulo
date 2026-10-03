@@ -897,6 +897,28 @@ function rejectThrottled(discovery: PendingDiscovery, deps: DiscoveryDeps, why: 
 	deps.logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (${why}): request ${describeExternalId(discovery.requestId)}`)
 }
 
+/** A verify-window slot for a user-approved connection, which spends no reconnect token. Returns
+ *  `admitAsync`'s Promise unchanged (no `async`, no `await`), so each caller's one await keeps its tick. */
+function admitVerifyWindow(discovery: PendingDiscovery, deps: DiscoveryDeps) {
+	return admitAsync(deps.admission, {
+		id: discovery.requestId,
+		origin: discovery.origin,
+		deadline: discoveryDeadline(discovery),
+		needsWindow: true,
+		consumesToken: false,
+	})
+}
+
+function rejectIfNotAdmitted(
+	discovery: PendingDiscovery,
+	deps: DiscoveryDeps,
+	admitted: Awaited<ReturnType<typeof admitAsync>>,
+): admitted is "rejected" | "expired" {
+	if (admitted !== "rejected" && admitted !== "expired") return false
+	rejectThrottled(discovery, deps, admitted === "expired" ? "expired while queued" : "verify-window queue full")
+	return true
+}
+
 /** Returning user on this chain: approve through the origin's reconnect budget. A remembered
  *  handshake is the one a reload loop repeats, so it always spends a token; only an untrusted
  *  session needs a verify window and so a slot. Synchronous when admitted at once. */
@@ -964,17 +986,8 @@ async function approveAfterPopup(discovery: PendingDiscovery, chainId: string, d
 	}
 	// A duplicate of a fresh connection verifies like one: it needs a window slot, but the
 	// user's Allow on the twin popup covers it, so it spends no reconnect token.
-	const admitted = await admitAsync(deps.admission, {
-		id: discovery.requestId,
-		origin: discovery.origin,
-		deadline: discoveryDeadline(discovery),
-		needsWindow: true,
-		consumesToken: false,
-	})
-	if (admitted === "rejected" || admitted === "expired") {
-		rejectThrottled(discovery, deps, admitted === "expired" ? "expired while queued" : "verify-window queue full")
-		return
-	}
+	const admitted = await admitVerifyWindow(discovery, deps)
+	if (rejectIfNotAdmitted(discovery, deps, admitted)) return
 	approveAdmitted(discovery, chainId, deps, admitted, "pending popup resolved")
 }
 
@@ -1038,17 +1051,8 @@ async function runDiscoveryPopup(
 		// The verify window this connection will open is reserved BEFORE the session is written,
 		// while the dedupe promise stays pending, so waiters cannot be released against a session
 		// that is still queued for its slot.
-		const admitted = await admitAsync(deps.admission, {
-			id: discovery.requestId,
-			origin: discovery.origin,
-			deadline: discoveryDeadline(discovery),
-			needsWindow: true,
-			consumesToken: false,
-		})
-		if (admitted === "rejected" || admitted === "expired") {
-			rejectThrottled(discovery, deps, admitted === "expired" ? "expired while queued" : "verify-window queue full")
-			return
-		}
+		const admitted = await admitVerifyWindow(discovery, deps)
+		if (rejectIfNotAdmitted(discovery, deps, admitted)) return
 		if (waitingWindow !== undefined) {
 			// A window closed while its Allow was queued fails the attach: its removal was buffered.
 			if (!admitted?.attach(waitingWindow)) {

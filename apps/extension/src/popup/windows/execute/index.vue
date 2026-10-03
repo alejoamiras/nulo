@@ -328,30 +328,14 @@ async function buildOperationsFromPayload(
 				pushUniqueAccount(accounts, account)
 				break
 			}
-			case "aztec_sendTx": {
+			case "aztec_sendTx":
+			case "send_transaction": {
 				const [network, account] = await getNetworkAndAccount(op.account)
 				// A dApp-supplied fee path pre-fills embedded so the FeeSettingsCard is suppressed. A
 				// requested self-pay (the account named as payer with no fee call) renders the card locked
 				// to Fee Juice and derives the settings once a verified balance can pay — nothing is
 				// pre-filled, so Confirm stays off over an empty or unread balance. Otherwise leave
 				// feeSettings undefined for the user; `requiresFeeSelection` at approve() gates undefined.
-				operations.push({
-					...op,
-					network,
-					networkId: network.id,
-					account,
-					accountAddress: account.address,
-					feeSettings: isEmbeddedFeePayment(op) ? { paymentMethod: { kind: "embedded" } } : undefined,
-				})
-				pushUniqueAccount(accounts, account)
-				break
-			}
-			case "send_transaction": {
-				const [network, account] = await getNetworkAndAccount(op.account)
-				// dApp may embed the fee payment via op.fee.embeddedFeePayment; in
-				// that case pre-fill embedded so the FeeSettingsCard is suppressed.
-				// Otherwise leave feeSettings undefined for user selection;
-				// `requiresFeeSelection` at approve() gates undefined.
 				operations.push({
 					...op,
 					network,
