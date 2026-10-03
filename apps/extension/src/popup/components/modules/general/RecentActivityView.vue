@@ -880,7 +880,7 @@ onBeforeUnmount(() => {
 <style module>
 .section_header {
 	padding-bottom: 8px;
-	border-bottom: 1px solid rgba(74, 70, 63, 0.2);
+	border-bottom: 1px solid var(--hairline-soft);
 }
 
 .archive_link {

@@ -244,4 +244,6 @@ Each LIGHT or MID batch gets `batches/<batch>/plan.md`; this index names each ba
 
 - [design-tokens](batches/design-tokens/plan.md): landed as #762.
 - [error-registry](batches/error-registry/plan.md): landed as #763.
-- [visual-shells-a](batches/visual-shells-a/plan.md): in review.
+- [visual-shells-a](batches/visual-shells-a/plan.md): landed as #764.
+- [chain-id](batches/chain-id/plan.md): landed as #765.
+- visual-shells-b: in review.

@@ -133,7 +133,7 @@ onBeforeUnmount(() => {
 	display: flex;
 	align-items: flex-end;
 
-	background-color: rgba(10, 9, 8, 0.82);
+	background-color: var(--scrim-sheet);
 }
 
 .sheet {

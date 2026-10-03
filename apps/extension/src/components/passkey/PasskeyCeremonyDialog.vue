@@ -104,7 +104,7 @@ onBeforeUnmount(() => {
 	align-items: center;
 	justify-content: center;
 
-	background: rgba(10, 9, 8, 0.85);
+	background: var(--scrim-loader);
 
 	/* Intercept ALL pointer events — no click-outside dismissal. */
 	pointer-events: auto;

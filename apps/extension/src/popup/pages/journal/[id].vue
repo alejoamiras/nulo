@@ -27,6 +27,7 @@ import { ConfigServiceClient } from "@/wallet/services/config/client"
 import { TokenServiceClient } from "@/wallet/services/token/client"
 
 /** Utils */
+import { DETAIL_TIME_FORMAT } from "../detail-page"
 import { categoricalLabel, journalTerminalDisplay, sanitizeJournalSubtitle } from "@/utils/journal-state"
 import { bindJournalDetailUpdates, readJournalDetail } from "./journal-detail-scope"
 import { humanizeMethodName, formatTransferType } from "@/utils/tx-enrichment"
@@ -142,12 +143,12 @@ const showOutcome = computed(() => {
 
 const createdAtLabel = computed(() => {
 	if (!op.value?.createdAt) return null
-	return DateTime.fromMillis(op.value.createdAt).toFormat("MMM dd, yyyy 'at' HH:mm")
+	return DateTime.fromMillis(op.value.createdAt).toFormat(DETAIL_TIME_FORMAT)
 })
 
 const terminalAtLabel = computed(() => {
 	if (!op.value?.terminalAt) return null
-	return DateTime.fromMillis(op.value.terminalAt).toFormat("MMM dd, yyyy 'at' HH:mm")
+	return DateTime.fromMillis(op.value.terminalAt).toFormat(DETAIL_TIME_FORMAT)
 })
 
 // A send its wallet is still checking has not ended as far as the wallet knows.
@@ -312,10 +313,7 @@ onBeforeUnmount(() => {
 
 <style module>
 .wrapper {
-	flex: 1;
-	overflow: auto;
-	scrollbar-gutter: stable;
-	background: var(--app-bg);
+	composes: wrapper from "../detail-page.module.css";
 	padding-bottom: var(--nav-clearance);
 }
 
@@ -343,43 +341,8 @@ onBeforeUnmount(() => {
 	composes: amount_fiat from "../detail-page.module.css";
 }
 
-
-/* Categorical chip — same pattern as tx/[id].vue's transfer_type_chip:
-   inline pill, mono headline, uppercase, 1px border. */
 .category_chip {
-	align-self: center;
-
-	padding: 5px 12px;
-	border: 1px solid var(--nulo-border);
-	background: transparent;
-
-	font-family: var(--font-headline);
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 0.15em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
-}
-
-/* Origin chip — small subtitle row above the details box */
-.origin_row {
-	align-self: center;
-}
-
-.origin_label {
-	font-family: var(--font-headline);
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
-}
-
-.origin_value {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	color: var(--nulo-secondary);
-	word-break: break-all;
+	composes: type_chip from "../detail-page.module.css";
 }
 
 .details_box {
@@ -401,11 +364,8 @@ onBeforeUnmount(() => {
 	color: var(--txt-primary);
 }
 
-/* Developer-mode error block — preserved styling */
 .dev_box {
-	padding: 12px;
-	border: 1px solid var(--nulo-border);
-	background: transparent;
+	composes: details_box from "../detail-page.module.css";
 }
 
 .code_block {

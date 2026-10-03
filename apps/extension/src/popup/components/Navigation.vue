@@ -58,7 +58,7 @@ const navigationLinks = [
 	align-items: center;
 
 	background: var(--app-bg);
-	border-top: 1px solid rgba(74, 70, 63, 0.2);
+	border-top: 1px solid var(--hairline-soft);
 
 	padding: 0 16px;
 	height: 64px;

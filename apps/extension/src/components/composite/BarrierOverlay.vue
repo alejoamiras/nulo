@@ -28,7 +28,7 @@ defineProps({
 	justify-content: center;
 	align-items: center;
 
-	background-color: rgba(10, 9, 8, 0.92);
+	background-color: var(--scrim-barrier);
 	z-index: 10000;
 }
 

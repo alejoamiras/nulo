@@ -78,7 +78,7 @@ const hasSub = computed(() => line.value !== undefined || slots.sub !== undefine
 }
 
 .row + .row {
-	border-top: 1px solid rgba(74, 70, 63, 0.2);
+	border-top: 1px solid var(--hairline-soft);
 }
 
 :global([theme="light"]) .row + .row {
