@@ -49,3 +49,7 @@
 - **Order.** The test commit is red at its own commit on the null-pattern row, and green from the code commit on. After that commit the coverage block matches the pre-arc dispatcher exactly, comments aside (the move-check script, run against the Phase 1 commit, leaves only comment lines and the relocated `grantsOfType`).
 - **Mutation:** swapping `scopeCovers` back to `matchesPattern` turns the null-pattern row red on Bun (`'ep.contract'` expected, `'pattern.contract'` received). The private-events row can go red only on SpiderMonkey; on Bun the unit suite cannot tell the two forms apart.
 - **Gates at the code head:** `lint`, `typecheck:all`, `test:all`, `test:ci-gating` and `audit:vue` all exit 0. `wallet-bridge` has 596 tests, the extension 8,900. Network e2e was not rerun: the code change restores expressions the e2e already ran against before this arc.
+
+## Codex code review round 2
+
+- Code round 2: CONVERGED, one README nit adopted.
