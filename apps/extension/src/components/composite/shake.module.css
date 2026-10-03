@@ -1,0 +1,29 @@
+/* Composed per role. The name role's 0.4 s matches the 400 ms after which useProfileNameField drops the class. */
+@keyframes shakeInput {
+	0% {
+		transform: translateX(0);
+	}
+	20% {
+		transform: translateX(-4px);
+	}
+	40% {
+		transform: translateX(4px);
+	}
+	60% {
+		transform: translateX(-3px);
+	}
+	80% {
+		transform: translateX(2px);
+	}
+	100% {
+		transform: translateX(0);
+	}
+}
+
+.shake_password {
+	animation: shakeInput 0.3s ease;
+}
+
+.shake_name {
+	animation: shakeInput 0.4s ease;
+}
