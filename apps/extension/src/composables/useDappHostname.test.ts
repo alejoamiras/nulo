@@ -58,3 +58,45 @@ describe("composables/useDappHostname", () => {
 		expect(isSuspicious.value).toBe(true)
 	})
 })
+
+/**
+ * Origins as the SDK serializes a tab URL (`new URL(tab.url).origin`, or "unknown"), plus the
+ * raw strings a stored row could carry. Values hold on Bun, jsdom, Chrome and Firefox; inputs whose
+ * parse differs by engine (`https://xn--.example`, a space inside the host) are left out.
+ */
+describe("composables/useDappHostname — hostile origins", () => {
+	test.each([
+		["https://dapp.example", "dapp.example", false],
+		["https://DApp.EXAMPLE", "dapp.example", false],
+		["https://dapp.example.", "dapp.example.", false],
+		["https://dapp.example:8443", "dapp.example", false],
+		["http://dapp.example", "dapp.example", false],
+		["https://dapp.example/path?q=1#h", "dapp.example", false],
+		["https://user:pw@dapp.example", "dapp.example", false],
+		["https://dapp.example@evil.example", "evil.example", false],
+		["https://dapp.example%40evil.example", "https://dapp.example%40evil.example", false],
+		["http://[::1]:5173", "[::1]", false],
+		["https://[::ffff:127.0.0.1]", "[::ffff:7f00:1]", false],
+		["https://0x7f.1", "127.0.0.1", false],
+		["https://dapp.example.evil.example", "dapp.example.evil.example", false],
+		["https://dapp-example.com", "dapp-example.com", false],
+		["https://exámple.com", "xn--exmple-qta.com", true],
+		["https://аpple.com", "xn--pple-43d.com", true],
+		["https://XN--EXMPLE-CUA.com", "xn--exmple-cua.com", true],
+		["https://a.xn--p1ai", "a.xn--p1ai", true],
+		["https://ｄａｐｐ.example", "dapp.example", false],
+		["https://dapp.ex­ample", "dapp.example", false],
+		["https://dapp.ex​ample", "dapp.example", false],
+		["https://dapp.example。evil", "dapp.example.evil", false],
+		["null", "null", false],
+		["unknown", "unknown", false],
+		["file:///etc/passwd", "", false],
+		["exámple", "exámple", true],
+		["xn--exmple-cua", "xn--exmple-cua", true],
+		["XN--EXMPLE-CUA", "XN--EXMPLE-CUA", false],
+	])("%s → %s, flagged %s", (url, hostname, suspicious) => {
+		const view = useDappHostname(ref({ url }))
+		expect(view.hostname.value).toBe(hostname)
+		expect(view.isSuspicious.value).toBe(suspicious)
+	})
+})

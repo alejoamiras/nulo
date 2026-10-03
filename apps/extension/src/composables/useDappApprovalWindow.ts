@@ -21,6 +21,7 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from "vue"
 import { useRouter } from "vue-router"
 import { useAppStore } from "@/stores/app.store"
+import { closeCurrentWindow } from "@/utils/close-current-window"
 import type { ProfileInfo } from "@/wallet/services/profile/client"
 
 export type DappWindowError = { title: string; tooltip: string; type: string }
@@ -62,6 +63,25 @@ export interface UseDappApprovalWindowResult {
 	clearError: () => void
 }
 
+/**
+ * Resolves once `isChecked()` turns true. Call it only while `isChecked()` is false: otherwise the
+ * immediate callback reads `stop` before it is initialized.
+ */
+export function untilSessionChecked(isChecked: () => boolean): Promise<void> {
+	return new Promise<void>((resolve) => {
+		const stop = watch(
+			isChecked,
+			(checked) => {
+				if (checked) {
+					stop()
+					resolve()
+				}
+			},
+			{ immediate: true },
+		)
+	})
+}
+
 export function useDappApprovalWindow(options: UseDappApprovalWindowOptions): UseDappApprovalWindowResult {
 	const appStore = useAppStore()
 	const router = useRouter()
@@ -87,9 +107,7 @@ export function useDappApprovalWindow(options: UseDappApprovalWindowOptions): Us
 
 	const closeWindow = (interactionCompleted?: boolean) => {
 		if (interactionCompleted) completeInteraction()
-		chrome.windows.getCurrent(undefined, (window) => {
-			if (window.id) chrome.windows.remove(window.id)
-		})
+		closeCurrentWindow()
 	}
 
 	const onActiveProfileChanged = (profile?: ProfileInfo) => {
@@ -99,20 +117,7 @@ export function useDappApprovalWindow(options: UseDappApprovalWindowOptions): Us
 	const start = async () => {
 		options.connectServices()
 
-		if (!appStore.isSessionChecked) {
-			await new Promise<void>((resolve) => {
-				const stop = watch(
-					() => appStore.isSessionChecked,
-					(checked) => {
-						if (checked) {
-							stop()
-							resolve()
-						}
-					},
-					{ immediate: true },
-				)
-			})
-		}
+		if (!appStore.isSessionChecked) await untilSessionChecked(() => appStore.isSessionChecked)
 
 		if (!appStore.isLogined) {
 			appStore.pageAwaitingAuth = router.currentRoute.value.fullPath

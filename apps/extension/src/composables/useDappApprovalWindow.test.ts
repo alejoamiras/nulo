@@ -254,3 +254,52 @@ describe("useDappApprovalWindow", () => {
 		expect(shell.processingError.value).toBeUndefined()
 	})
 })
+
+describe("useDappApprovalWindow — the session wait's slow path", () => {
+	/** Counts microtask rungs from the moment it starts, so a test can pin how many ticks an effect takes. */
+	function microtaskLadder(): () => number {
+		let rung = 0
+		const step = () => {
+			rung++
+			if (rung < 20) queueMicrotask(step)
+		}
+		queueMicrotask(step)
+		return () => rung
+	}
+
+	test("init runs on a fixed tick after the flag flips, and the watcher stops", async () => {
+		const checked = ref(false)
+		let reads = 0
+		appStoreMock = {
+			get isSessionChecked() {
+				reads++
+				return checked.value
+			},
+			isLogined: true,
+			pageAwaitingAuth: "",
+		} as unknown as typeof appStoreMock
+		let initAt = -1
+		let rung = () => -1
+		const { shell } = makeShell({
+			init: vi.fn(async () => {
+				initAt = rung()
+			}),
+		})
+		void shell.start()
+		await flushPromises()
+		expect(initAt).toBe(-1)
+
+		checked.value = true
+		rung = microtaskLadder()
+		await flushPromises()
+		// Today's rung; an extra `async` layer around the wait moves it.
+		expect(initAt).toBe(1)
+
+		const before = reads
+		checked.value = false
+		await flushPromises()
+		checked.value = true
+		await flushPromises()
+		expect(reads).toBe(before)
+	})
+})

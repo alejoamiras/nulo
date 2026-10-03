@@ -10,6 +10,8 @@ import { hashToEmoji } from "@aztec-labs/wallet-sdk/crypto"
 /** Composables */
 import { vSnackFooter } from "@/composables/snackInset"
 import { refuseRepeatEnter } from "@/composables/usePopupEntity"
+import { useDappHostname } from "@/composables/useDappHostname"
+import { untilSessionChecked } from "@/composables/useDappApprovalWindow"
 
 /** Services */
 import { DappSessionServiceClient, type DappSession, type DappMetadata } from "@/wallet/services/dapp-session/client"
@@ -18,6 +20,7 @@ import { NetworkServiceClient, type Network } from "@/wallet/services/network/cl
 import { parseCaipAccount, resolveNetworkByChainId } from "@/wallet/utils/caip"
 
 /** Utils */
+import { closeCurrentWindow } from "@/utils/close-current-window"
 import { verifyHeaderLabels } from "./header-labels"
 
 /** Store */
@@ -49,22 +52,7 @@ const header = computed(() =>
 		: undefined,
 )
 
-/** Anti-phishing: normalized hostname + IDN / punycode flag. */
-const dappHostname = computed(() => {
-	if (!dapp.value?.url) return ""
-	try {
-		return new URL(dapp.value.url).hostname
-	} catch {
-		return dapp.value.url
-	}
-})
-const hostnameHasNonAscii = computed(() => {
-	const h = dappHostname.value
-	for (const ch of h) {
-		if (ch.charCodeAt(0) > 127) return true
-	}
-	return h.split(".").some((label) => label.startsWith("xn--"))
-})
+const { hostname: dappHostname, isSuspicious: hostnameHasNonAscii } = useDappHostname(dapp)
 
 const dappSessionService = new DappSessionServiceClient()
 
@@ -72,15 +60,7 @@ const handleConfirm = async () => {
 	if (alwaysTrust.value && session.value) {
 		await dappSessionService.setTrustedVerification(session.value.id, true)
 	}
-	closeWindow()
-}
-
-const closeWindow = () => {
-	chrome.windows.getCurrent(undefined, (window) => {
-		if (window.id) {
-			chrome.windows.remove(window.id)
-		}
-	})
+	closeCurrentWindow()
 }
 
 async function resolveSigners() {
@@ -116,20 +96,7 @@ onMounted(async () => {
 	dappSessionService.connect()
 
 	// Wait for app to establish session before resolving signer names.
-	if (!appStore.isSessionChecked) {
-		await new Promise<void>((resolve) => {
-			const stop = watch(
-				() => appStore.isSessionChecked,
-				(checked) => {
-					if (checked) {
-						stop()
-						resolve()
-					}
-				},
-				{ immediate: true },
-			)
-		})
-	}
+	if (!appStore.isSessionChecked) await untilSessionChecked(() => appStore.isSessionChecked)
 
 	const sessionId = router.currentRoute.value.query.sessionId as string
 	// Per-session snapshot the SW passes when opening this window (B-06). A concurrent
@@ -140,14 +107,14 @@ onMounted(async () => {
 	isReconnect.value = router.currentRoute.value.query.isReconnect === "true"
 
 	if (!sessionId) {
-		closeWindow()
+		closeCurrentWindow()
 		return
 	}
 
 	try {
 		session.value = await dappSessionService.getDappSession(sessionId)
 		if (!session.value) {
-			closeWindow()
+			closeCurrentWindow()
 			return
 		}
 
@@ -163,7 +130,7 @@ onMounted(async () => {
 
 		await resolveSigners()
 	} catch {
-		closeWindow()
+		closeCurrentWindow()
 	}
 })
 
