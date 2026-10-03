@@ -18,7 +18,7 @@
   - The harness's shallow `{ ...DEFAULTS }` shares the `network` and `account` objects, so an in-place `chainId` edit leaked into later tests. The `beforeEach` assigns fresh objects.
 - **Complexity.** The first composable body scored 23. Three synchronous helpers (`superseded`, `settleRejected`, `land`) brought it under 15 without moving the single `await` or changing the check order.
 - **Test-file diff from Phase 1 to head is wider than the plan's pass criterion said.** `token-order.test.ts` changed its import line, not only additions, and the effect tests in all three component suites were strengthened after the mutation run (next section).
-- **Mutation checks**, in scratch with each file restored from a copy (never with git). 40 mutants; 38 killed on the first run.
+- **Mutation checks**, in scratch with each file restored from a copy (never with git). 40 mutants: the first run killed 36 (C20, A12, A4 and A5 survived); the final count is 38 killed and 2 equivalent. The final run, after code review round 1, counts a kill only for a named failed test in vitest's JSON report, and logged 0 errors.
 
   | Group | Mutants | Result |
   |---|---|---|
@@ -38,3 +38,11 @@
     - the Send picker shows its search box past Home's three rows, so the plain-list surface now carries three rows.
   - The corrected run then retried every 10 s for the full two-hour limit without winning the shared harness lock against other arcs' runs. The base-vs-head zero diff and `--stability` are still owed.
 - **Shell discipline in an isolated worktree.** The guard refused compound git commands, heredocs, and `sed` with a variable operand; plain single commands, scratch scripts and the Edit tool worked.
+
+## Code review round 1: NOT CONVERGED
+
+- **Codex found no production regression** in 20 base/head probes and held A4/A5 equivalent for these consumers. Three findings, all adopted (detail in the batch plan's Decisions):
+  - **The screenshots skipped the retry states.** `home-loading` holds forever and `home-rejected-past-cap` always rejects. Added a pre-cap rejected snapshot and a same-mount rejection that the timed retry recovers. The proxy gained a per-port call log and `seq` rules (each port's nth call gets the nth answer), so each surface asserts that every token-balance port asked exactly twice.
+  - **The mutation script counted any nonzero exit as a kill and overwrote its report.** The claimed "38 killed on the first run" was 36. The script now judges from vitest's JSON report (kill = a named failed test; nonzero exit without one = error) and appends to `results.jsonl`. Lesson: a mutation verdict needs the failing test's name on record, or a crash reads as a kill.
+  - **Drift 6 is visible**: the list's refresh dot reads `isUpdating`, so it can be wrong until B's own fetch lands. Reworded; no production change.
+- **Restacked onto `1a08fa52`** (arcs 10, 12, 15, 11, 19, 22, 19b and 15b landed) without conflict; no manifest changed. With arc 15 landed, `dispose()` now calls `fence.invalidate()`.

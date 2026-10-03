@@ -102,7 +102,7 @@ Read on `harden-dedupe` at `eb06c37d`; none of these files changed since `2adab9
      As built, steps 6 to 8 sit in three synchronous helpers (`superseded`, `settleRejected`, `land`), which keep the function under the complexity budget without changing the order.
    - **`onBalanceUpdated(tb)`:** dirty if in scope, then replace the first id match, unscoped. Both views run this today.
    - **The connect listener** is added when the composable is called. From the second connect on, it refetches.
-   - **`dispose()`:** bump the fence (`void fence.begin()`), `clearTimeout`, then remove the connect listener.
+   - **`dispose()`:** bump the fence (`fence.invalidate()`, from arc 15), `clearTimeout`, then remove the connect listener.
 4. **`TokensView`:**
    - `let scopeGen = 0` (with its comment) and `withTaskFlags` move above the client, because `mapRow: withTaskFlags` is read at the call.
    - The composable is called right after `new TokenBalanceServiceClient()`, with `scopeFence: () => { const atStart = scopeGen; return () => scopeGen === atStart }`.
@@ -144,7 +144,7 @@ Read on `harden-dedupe` at `eb06c37d`; none of these files changed since `2adab9
 
 ### Coupling with neighbouring arcs
 
-- **arc 15 (async-primitives)** adds `RunFence.invalidate()`. At restack, `dispose()` swaps `void fence.begin()` for it.
+- **arc 15 (async-primitives)** adds `RunFence.invalidate()`. Built before it landed with `void fence.begin()`; the restack onto `1a08fa52` swapped in `fence.invalidate()`.
 - **popup-plumbing (arc 20)** edits `SelectTokenPopup.vue:40-42`.
 - **activity-feed (arc 22)** edits `TokensView.vue:59-76`.
 
@@ -306,7 +306,8 @@ What Changes 2 to 7.
 Detail in `../../lessons/arc-21-balance-snapshot.md`.
 
 - Phase 1 green on the unchanged code; Phases 2 and 3 left every frozen test green.
-- Mutation: 40 mutants, 38 killed on the first run. C20 and A12 (a predicate over a built object) survived because the effect tests only edited `chainId` in place; the tests now also replace the network object, and both are killed. A4 and A5 (`dispose` after `disconnect()`) are equivalent by probe of the messaging client: `disconnect()` never fires `onConnected` or sends a request.
+- Mutation: 40 mutants; 38 killed, 2 equivalent (A4, A5). The first run killed 36. C20 and A12 (a predicate over a built object) survived because the effect tests only edited `chainId` in place; the tests now also replace the network object. A4 and A5 (`dispose` after `disconnect()`) are equivalent for these consumers by probe of the messaging client: `disconnect()` never fires `onConnected` or sends a request, and neither view listens to `onDisconnected`. After code review round 1, the script records a kill only for a named failed test (an exit without one is an error), and the full set was rerun at the restacked code head: 38 killed, each with its failing tests on record, 0 errors.
+- Restacked onto `harden-dedupe` at `1a08fa52` without conflict; no manifest changed.
 - Gates green at `6a0db7de`.
 - Screenshots: not yet captured. The surface file is written, and two staging errors in it were fixed: holdings counts five rows, and the picker shows search past three rows. The final run never won the shared harness lock within its two-hour limit.
 
@@ -329,7 +330,7 @@ The surfaces go in `~/.cache/hd-shots/surfaces/balance-snapshot.ts`, modelled on
 
 | host | states |
 |---|---|
-| Home (`popup/pages/general.vue`: BalanceView and TokensView) | loading (hero skeleton, ghost rows after 300 ms); loaded with priced, unpriced and empty rows and the partial caption; a malformed row; overflow with View all; loaded empty (`$0.00` and the empty state); a rejected snapshot before and after the 12 s cap |
+| Home (`popup/pages/general.vue`: BalanceView and TokensView) | loading (hero skeleton, ghost rows after 300 ms); loaded with priced, unpriced and empty rows and the partial caption; a malformed row; overflow with View all; loaded empty (`$0.00` and the empty state); a rejected snapshot before and after the 12 s cap (initial and timed retry both rejected, one of each per view); a same-mount rejection the timed retry recovers |
 | Token page (`popup/pages/tokens/[id].vue`) | a priced token; a malformed token row |
 | Holdings (`popup/pages/holdings.vue`) | priced, unpriced, malformed and empty (folded) rows with the partial summary; fiat off |
 | Send picker (`SelectTokenPopup` over `popup/pages/send.vue`) | the ordered list with a malformed row; search shown; no results; load error |
@@ -346,7 +347,7 @@ Each host is captured on Chrome and Firefox, in dark and light. The parent again
 3. **Watch keys differ per host.** TokensView keys `network.id` and BalanceView `network.chainId`, so an in-place chain-id change resets only the hero. The picker has no profile (`SelectTokenPopup.vue:144`). Holdings keys `[profile, account, chainId]` (`holdings.vue:103-109`) and Send `[profile, network.id, account]` (`send.vue:613-620`).
 4. **Update scoping.** The views replace any id match; the picker only an in-scope one (`:82`).
 5. **Holdings' `accept`** reads `tb.token.chainId` without `?.` (`holdings.vue:54`).
-6. **TokensView's retry timer crosses a scope change.** A retry armed in A fires during B's task wait, before B's own fetch clears it. It requests B's rows and flags them from A's task list. Today this is invisible: the flags it would get wrong are `isUpdating`, which B's own fetch recomputes once its task snapshot lands, and `isMinting`, which nothing reads. Pinned by T12.
+6. **TokensView's retry timer crosses a scope change.** A retry armed in A fires during B's task wait, before B's own fetch clears it. It requests B's rows and flags them from A's task list. That is a temporary refresh-indicator drift, preserved: `isUpdating` feeds `anyRefreshing` (`TokensView.vue:83`), which drives the list's refresh dot, so B's dot can be wrong (missing, or shown) until B's own fetch recomputes the flags from B's tasks. `isMinting` is read by nothing. Pinned by T12; no production change.
 
 ## Deferred (program follow-ups)
 
@@ -391,3 +392,11 @@ All adopted:
 
 - **Ask 1, the BalanceView add-dedupe.** Both legs reject route 2. Codex pointed to the alignment arc, Opus to follow-ups. The coordinator's call: preserved drift, recorded in Deferred, and listed as a UX risk in the program's final report. It takes no slot on the owner page.
 - **Ask 2, scope boundary.** Confirmed by both legs: only the picker shares the predicate.
+
+### Code review round 1, Codex (GPT-6 Astra, xhigh): NOT CONVERGED
+
+No production regression in 20 base/head probes. A4 and A5 held equivalent for these consumers; the composable and its helpers judged proportionate. All findings adopted:
+
+1. **Should-fix: the screenshots omitted the retry states.** Added `home-rejected-pre-cap` (each view's first snapshot and its timed retry rejected, before the cap) and `home-retry-recovered` (each view's first snapshot rejects, its retry answers, the rows land). Both, and `home-rejected-past-cap`, assert that every token-balance port the mount opened asked exactly twice, before and after the shot.
+2. **Should-fix: the mutation evidence did not enforce the kill criterion.** Any nonzero exit counted as a kill, the report was overwritten per run, and the first run had 36 kills, not 38. The script now reads vitest's JSON report, records a kill only for a named failed test, keeps load failures as errors, and appends every result to one log. The full set was rerun: 38 killed, 2 equivalent, 0 errors.
+3. **Nit: drift 6 is not invisible.** Reworded as a preserved, temporary refresh-indicator drift (the list's refresh dot reads `isUpdating`).
