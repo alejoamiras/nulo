@@ -73,6 +73,35 @@ export async function findFunctionBySelector(artifact: ContractArtifact, selecto
 	return undefined
 }
 
+/** How a site words a name/selector mismatch, and whether it lets a call without a name through.
+ *  Only `undefined` is absent: `""` is a name, and a mismatched one. */
+export type SelectorBindingPolicy = {
+	readonly label: "call name" | "authwit call name"
+	readonly absentName: "allowed" | "refused"
+}
+export const CALL_BINDING: SelectorBindingPolicy = { label: "call name", absentName: "allowed" }
+export const AUTHWIT_CALL_BINDING: SelectorBindingPolicy = { label: "authwit call name", absentName: "allowed" }
+/** For the fast path, whose scope check authorized the call by its name alone. */
+export const NAMED_CALL_BINDING: SelectorBindingPolicy = { label: "call name", absentName: "refused" }
+
+/** Scope checks authorize a dApp call by its name, execution dispatches its selector: refuse
+ *  unless the selector resolved (`fn`) to the function the name claims. `claim.to` appears in the
+ *  message exactly as the caller passes it. */
+export function assertSelectorBinding(
+	fn: FunctionAbi | undefined,
+	claim: { readonly name?: string; readonly to: { toString(): string } },
+	policy: SelectorBindingPolicy,
+): FunctionAbi {
+	if (!fn) {
+		throw new Error("Method not found")
+	}
+	const absentAllowed = policy.absentName === "allowed" && claim.name === undefined
+	if (!absentAllowed && claim.name !== fn.name) {
+		throw new Error(`Scope violation: ${policy.label} "${claim.name}" does not match selector's function "${fn.name}" on ${claim.to}`)
+	}
+	return fn
+}
+
 /** Register `instance`+`artifact` with PXE iff `contract` isn't already known —
  *  the single-contract twin of `ContractResolver.ensureContractsRegistered`, for
  *  the per-contract registration prologues in token/fpc that resolve one instance

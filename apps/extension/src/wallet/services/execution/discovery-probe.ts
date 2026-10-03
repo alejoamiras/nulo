@@ -1,13 +1,11 @@
 /**
  * `CollectingDiscoveryProbe` — the concrete `DiscoveryProbe` handed to folded
- * strategy runs. It owns the three fold-safety rules the measurement arc
- * pinned (single-sim-estimates B1):
+ * strategy runs. It owns the three fold-safety rules:
  *
  * - **Chain-bound extraction**: the authwit message hash derives from the LIVE
  *   node's `getNodeInfo()`, fetched lazily ONLY when effects exist and
- *   asserted against the stored network identity first
- *   (`assertLiveChainIdentity` — F-012 / A-01 V-01, ledger #11). Byte-mirrors
- *   `AuthwitDiscoverer.discoverPrivateAuthwits`' effect loop.
+ *   checked against the stored network identity first (`liveChainInfo`). The
+ *   decode loop is `decodeAuthwitEffects`, shared with the other discovery paths.
  * - **First-sim-only**: a probe instance responds to exactly ONE extraction.
  *   The folded two-pass runs Pass 2 with the discovered witnesses attached —
  *   the Pass-2 sim re-emits the same `CallAuthorizationRequest`s (Noir emits
@@ -23,28 +21,15 @@
  * discovery sim's return value in the folded flow.
  */
 
-import { CallAuthorizationRequest, computeAuthWitMessageHash } from "@aztec-labs/aztec.js/authorization"
-import { Fr } from "@aztec-labs/foundation/curves/bn254"
-import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { collectOffchainEffects } from "@aztec-labs/stdlib/tx"
-import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
+import { liveChainInfo } from "@nulo/aztec-runtime/utils"
+import type { DiscoveredAuthwit } from "@nulo/wallet-bridge"
+import { type AuthwitDecodeCrypto, decodeAuthwitEffects } from "./decode-authwit-effects"
 import type { DiscoveryProbe } from "./discovery-aware-estimator"
 import type { FeeEstimate } from "./fee/fee-strategy"
 import type { AddPrivateAuthwitAction } from "./spec"
-import type { DiscoveredAuthwit } from "@nulo/wallet-bridge"
-import { type DecodedAuthRequest, toDiscoveredAuthwit } from "./discovered-authwit"
 
-/** Hash seams injectable for unit tests — the real ones run Barretenberg WASM
- *  (poseidon2), which is e2e-only. Production uses the module defaults. */
-export interface DiscoveryProbeCrypto {
-	fromFields(data: Fr[]): Promise<DecodedAuthRequest>
-	computeMessageHash(intent: { consumer: AztecAddress; innerHash: Fr }, chainInfo: { chainId: Fr; version: Fr }): Promise<Fr>
-}
-
-const realCrypto: DiscoveryProbeCrypto = {
-	fromFields: (data) => CallAuthorizationRequest.fromFields(data),
-	computeMessageHash: (intent, chainInfo) => computeAuthWitMessageHash(intent, chainInfo),
-}
+export type { AuthwitDecodeCrypto as DiscoveryProbeCrypto } from "./decode-authwit-effects"
 
 export class CollectingDiscoveryProbe implements DiscoveryProbe {
 	/** Actions this probe's one extraction produced — executor bookkeeping. */
@@ -55,7 +40,7 @@ export class CollectingDiscoveryProbe implements DiscoveryProbe {
 
 	public constructor(
 		private readonly existingMessageHashes: ReadonlySet<string> = new Set(),
-		private readonly crypto: DiscoveryProbeCrypto = realCrypto,
+		private readonly crypto?: AuthwitDecodeCrypto,
 	) {}
 
 	public async extractEffects(
@@ -75,28 +60,16 @@ export class CollectingDiscoveryProbe implements DiscoveryProbe {
 		}
 
 		const nodeInfo = await ctx.node.getNodeInfo()
-		assertLiveChainIdentity(ctx.network, nodeInfo)
-		const chainInfo = { chainId: new Fr(nodeInfo.l1ChainId), version: new Fr(nodeInfo.rollupVersion) }
+		const chainInfo = liveChainInfo(ctx.network, nodeInfo)
 
 		const seen = new Set(this.existingMessageHashes)
-		for (const effect of effects) {
-			try {
-				const authRequest = await this.crypto.fromFields(effect.data)
-				const messageHash = await this.crypto.computeMessageHash(
-					{ consumer: effect.contractAddress, innerHash: authRequest.innerHash as Fr },
-					chainInfo,
-				)
-				const key = messageHash.toString()
-				if (seen.has(key)) {
-					continue
-				}
-				const record = toDiscoveredAuthwit(effect.contractAddress, authRequest, messageHash)
-				seen.add(key)
-				this.collected.push({ kind: "add_private_authwit", content: { kind: "message_hash", messageHash: key } })
-				this.discovered.push(record)
-			} catch {
-				// Effect is not a CallAuthorizationRequest — skip (discoverer-verbatim).
+		for (const { record } of await decodeAuthwitEffects(effects, chainInfo, this.crypto)) {
+			if (seen.has(record.messageHash)) {
+				continue
 			}
+			seen.add(record.messageHash)
+			this.collected.push({ kind: "add_private_authwit", content: { kind: "message_hash", messageHash: record.messageHash } })
+			this.discovered.push(record)
 		}
 		return [...this.collected]
 	}

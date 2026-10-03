@@ -18,7 +18,7 @@ dispatch, and collaborator wiring; the work lives in focused modules.
 | `execution-coordinator.ts` | Shared prove → send → record → journal pipeline (`proveAndSend`) + the three task-lifecycle wrappers (`simulateTxTask`, `proveTxTask`, `sendTxTask`). |
 | `tx-request-builder.ts` | `buildStandard` / `buildNoFrom` — payload → `TxExecutionRequest` with account entrypoint wiring. Returns `BuiltStandardTx` / `BuiltNoFromTx`. |
 | `operation-planner.ts` | `TransferRequest` → `SendTransactionOperation` (token transfer-fn resolution) + aztec.js payload processing. |
-| `contract-resolver.ts` | Instance/artifact resolution cascade (PXE → node → known bundle) + `ensureContractsRegistered` + function lookup helpers. |
+| `contract-resolver.ts` | Instance/artifact resolution cascade (PXE → node → known bundle) + `ensureContractsRegistered` + function lookup helpers, plus the selector binding guard. |
 | `authwit-discoverer.ts` | Offchain-effect-driven private authwit discovery for dApp sends. |
 | `fee/` | Fee strategies (`fj`, `fjwc`, `fpc`, `embedded`) behind `FeeStrategy`; gas-limit shaping (`suggestGasLimits` / `finalizeGasLimits`); embedded-FPC gas cap. FPC is two-pass — byte-parity-sensitive, see `strategies-structural.test.ts`. |
 | `transfer-estimate-reuse.ts` | One-shot estimate→confirm reuse cache (fingerprint-validated snapshot; fj/fpc only). |

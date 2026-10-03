@@ -63,7 +63,14 @@ import { StepContent, type TaskService, type WrappedTask } from "@/wallet/servic
 import type { TxCall } from "@/wallet/services/transaction/service"
 import { getAuthRegistryAddress, getSetAuthorizedFn, getSetAuthorizedSelector } from "@/wallet/utils/auth-registry"
 import type { AuthwitDiscoverer } from "./authwit-discoverer"
-import { type ContractResolver, findFunctionByName, findFunctionBySelector, requireArtifact } from "./contract-resolver"
+import {
+	assertSelectorBinding,
+	CALL_BINDING,
+	type ContractResolver,
+	findFunctionByName,
+	findFunctionBySelector,
+	requireArtifact,
+} from "./contract-resolver"
 import { fenceChecks } from "./execution-coordinator"
 import type { Action, AuthwitContent, AztecSendTxOperation } from "./spec"
 
@@ -337,15 +344,11 @@ export class TxRequestBuilder {
 		}
 		const call = await FunctionCall.schema.parseAsync(rawCalls[0])
 		const noFromArtifact = requireArtifact(instances, artifacts, call.to.toString())
-		const noFromFn = await findFunctionBySelector(noFromArtifact, call.selector.toString())
-		if (!noFromFn) {
-			throw new Error("Method not found")
-		}
-		if (call.name !== undefined && call.name !== noFromFn.name) {
-			throw new Error(
-				`Scope violation: call name "${call.name}" does not match selector's function "${noFromFn.name}" on ${call.to.toString()}`,
-			)
-		}
+		const noFromFn = assertSelectorBinding(
+			await findFunctionBySelector(noFromArtifact, call.selector.toString()),
+			{ name: call.name, to: call.to.toString() },
+			CALL_BINDING,
+		)
 		if (noFromFn.functionType !== FunctionType.PRIVATE) {
 			throw new Error("DefaultEntrypoint only supports private functions")
 		}
@@ -588,15 +591,10 @@ function validateEncodedCallFn(
 	action: Extract<Action, { kind: "encoded_call" }>,
 	fn: Awaited<ReturnType<typeof findFunctionBySelector>>,
 ): NonNullable<Awaited<ReturnType<typeof findFunctionBySelector>>> {
-	if (!fn) {
-		throw new Error("Method not found")
-	}
-	if (action.name !== undefined && action.name !== fn.name) {
-		throw new Error(`Scope violation: call name "${action.name}" does not match selector's function "${fn.name}" on ${action.to}`)
-	}
-	action.type = fn.functionType
-	action.isStatic = fn.isStatic
-	return fn
+	const bound = assertSelectorBinding(fn, action, CALL_BINDING)
+	action.type = bound.functionType
+	action.isStatic = bound.isStatic
+	return bound
 }
 
 function newEncodedCallFunctionCall(
