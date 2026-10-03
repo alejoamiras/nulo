@@ -154,7 +154,7 @@ const Root = (_, { slots }) => {
 
 <style module>
 .wrapper {
-	position: relative;
+	composes: divider from "./settings-row.module.css";
 
 	display: flex;
 	align-items: center;
@@ -170,16 +170,8 @@ const Root = (_, { slots }) => {
 	}
 
 	&::after {
-		position: absolute;
-		bottom: 0;
 		left: 20px;
 		right: 20px;
-		display: block;
-		height: 1px;
-
-		background: rgba(74, 70, 63, 0.3);
-
-		content: " ";
 	}
 
 	&:last-child::after {

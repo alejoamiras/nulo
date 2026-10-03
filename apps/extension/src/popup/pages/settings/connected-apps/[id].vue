@@ -366,22 +366,7 @@ onBeforeUnmount(() => {
 }
 
 .icon_btn {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-
-	width: 32px;
-	height: 32px;
-
-	background: transparent;
-	border: none;
-	cursor: pointer;
-
-	transition: background 0.2s var(--bezier);
-
-	&:hover {
-		background: color-mix(in srgb, var(--nulo-accent) 8%, transparent);
-	}
+	composes: icon_btn from "../../toolbar-button.module.css";
 }
 
 .action_icon {

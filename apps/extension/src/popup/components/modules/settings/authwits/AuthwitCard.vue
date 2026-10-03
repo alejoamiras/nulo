@@ -63,61 +63,24 @@ const titleId = useId()
 
 <style module>
 .card {
-	position: relative;
-	display: flex;
-	flex-direction: column;
-	gap: 10px;
-
-	cursor: pointer;
+	composes: card from "../record-card.module.css";
 
 	border: 1px solid var(--nulo-border);
 
 	padding: 12px;
 
-	transition: all 0.2s var(--bezier);
-
-	&:hover,
-	&:has(> [data-row-target]:focus-visible) {
-		background: var(--nulo-surface-low);
-		border-color: var(--nulo-outline);
-	}
-
-	&:has(> [data-row-target]:focus-visible) {
-		outline: 2px solid var(--nulo-accent);
-		outline-offset: -2px;
-	}
-
 	&:hover .revoke,
 	&:focus-within .revoke {
 		opacity: 1;
 	}
-
-	&:active {
-		background: var(--nulo-surface-high);
-	}
 }
 
 .header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 12px;
+	composes: header from "../record-card.module.css";
 }
 
 .type {
-	flex: 1;
-	min-width: 0;
-
-	font-family: var(--font-headline);
-	font-size: 13px;
-	font-weight: 700;
-	letter-spacing: 0.04em;
-	text-transform: uppercase;
-	color: var(--txt-primary);
-
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	composes: type from "../record-card.module.css";
 }
 
 .revoke {
@@ -127,43 +90,18 @@ const titleId = useId()
 }
 
 .kv_grid {
-	display: grid;
-	grid-template-columns: minmax(90px, 120px) 1fr;
-	gap: 4px 12px;
-	align-items: baseline;
+	composes: kv_grid from "../record-card.module.css";
 }
 
 .kv_key {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	color: var(--nulo-outline);
-
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	composes: kv_key from "../record-card.module.css";
 }
 
 .kv_val {
-	font-family: var(--font-mono);
-	font-size: 12px;
-	color: var(--txt-primary);
-
-	min-width: 0;
-
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	composes: kv_val from "../record-card.module.css";
 }
 
-/* Addresses / hashes wrap onto 2 lines instead of truncating —
- * users need to glance-verify head + tail bytes. */
 .kv_val_wrap {
-	white-space: normal;
-	overflow-wrap: anywhere;
-	line-height: 1.4;
-	display: -webkit-box;
-	-webkit-box-orient: vertical;
-	-webkit-line-clamp: 2;
-	line-clamp: 2;
+	composes: kv_val_wrap from "../record-card.module.css";
 }
 </style>

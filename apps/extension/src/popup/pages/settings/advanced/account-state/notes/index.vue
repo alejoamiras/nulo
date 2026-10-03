@@ -259,38 +259,13 @@ onBeforeUnmount(() => {
 
 <style module>
 .card {
-	position: relative;
-	display: flex;
-	flex-direction: column;
-	gap: 10px;
+	composes: card from "../../../../../components/modules/settings/record-card.module.css";
 
-	cursor: pointer;
-
-	/* Structural border on 3 sides; the left edge is a 4px colored
-	   accent per-contract (getColorFromAddress inline style) so notes
-	   from the same contract share a visual band. Keeps the chip
-	   itself neutral — avoids collision with semantic red/orange. */
+	/* The inline left-border color groups notes by contract. */
 	border: 1px solid var(--nulo-border);
 	border-left: 4px solid var(--nulo-border);
 
 	padding: 12px 12px 12px 10px;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover,
-	&:has(> [data-row-target]:focus-visible) {
-		background: var(--nulo-surface-low);
-		border-color: var(--nulo-outline);
-	}
-
-	&:has(> [data-row-target]:focus-visible) {
-		outline: 2px solid var(--nulo-accent);
-		outline-offset: -2px;
-	}
-
-	&:active {
-		background: var(--nulo-surface-high);
-	}
 }
 
 .card_error {
@@ -298,26 +273,11 @@ onBeforeUnmount(() => {
 }
 
 .header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 12px;
+	composes: header from "../../../../../components/modules/settings/record-card.module.css";
 }
 
 .type {
-	flex: 1;
-	min-width: 0;
-
-	font-family: var(--font-headline);
-	font-size: 13px;
-	font-weight: 700;
-	letter-spacing: 0.04em;
-	text-transform: uppercase;
-	color: var(--txt-primary);
-
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	composes: type from "../../../../../components/modules/settings/record-card.module.css";
 }
 
 .contract {
@@ -352,43 +312,19 @@ onBeforeUnmount(() => {
 }
 
 .kv_grid {
-	display: grid;
-	grid-template-columns: minmax(90px, 120px) 1fr;
-	gap: 4px 12px;
-	align-items: baseline;
+	composes: kv_grid from "../../../../../components/modules/settings/record-card.module.css";
 }
 
 .kv_key {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	color: var(--nulo-outline);
-
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	composes: kv_key from "../../../../../components/modules/settings/record-card.module.css";
 }
 
 .kv_val {
-	font-family: var(--font-mono);
-	font-size: 12px;
-	color: var(--txt-primary);
-
-	min-width: 0;
-
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	composes: kv_val from "../../../../../components/modules/settings/record-card.module.css";
 }
 
-/** Long hex values get a 2-line wrap so users can glance-verify head + tail. */
 .kv_val_wrap {
-	white-space: normal;
-	overflow-wrap: anywhere;
-	line-height: 1.4;
-	display: -webkit-box;
-	-webkit-box-orient: vertical;
-	-webkit-line-clamp: 2;
-	line-clamp: 2;
+	composes: kv_val_wrap from "../../../../../components/modules/settings/record-card.module.css";
 }
 
 .raw {
