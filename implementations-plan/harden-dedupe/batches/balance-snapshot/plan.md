@@ -425,3 +425,16 @@ Round 2's findings resolved; all 24 retry pairs byte-identical; no production fi
    Only `holdings-fiat-off` checks its rows as a set, since the image already compares their order.
 
 The probe now loads the surface file with its imports stubbed and runs each surface's real predicate: 52 of 52 cases as expected. Every surface's fixture state passes, and each wrong state is rejected: the unknown dash, `$0.00`, a mid-count figure, `0 USDC`, an unpriced order, a missing or unmarked row, and an incomplete call count. All 16 surfaces rerun base `1a08fa52` vs head `e4b5822d`: 64 of 64 identical, and 64 of 64 under `--stability`.
+
+### Code review round 4, Codex: NOT CONVERGED
+
+Round 3 resolved. Codex reproduced all 52 probe cases and all 128 image pairs; no production finding. One should-fix, adopted together with an audit of every stub:
+
+1. **Should-fix: the fiat-off surface was staged with a quote production never sends.** With fiat display off, the price service answers `{}` to both reads (`apps/extension/src/wallet/services/price/service.ts:142`, `:153`). The stub answered the `$1` quote, so the capture showed `≈ $10.00` under USDC and sorted it first, and the order-free check accepted it.
+   - The fiat-off spec now answers `{}`.
+   - The base capture renders `[ALPHA, USDC, BROKEN]` with no `token-fiat` line, on both browsers and in both themes; the check pins that order, zero `token-fiat` elements and one malformed row.
+   - `holdings-mixed` pins its one `token-fiat` line.
+
+   **Stub audit:** every stubbed answer was checked against the production line that can return it in that surface's settings; the table is in the arc's lessons. The void methods (`refreshTokenBalance`, `cancelEstimate`) now answer `undefined`, as production's `Promise<void>` does, instead of `null`. Every other answer was already one production gives.
+
+The probe now runs 72 cases, all as expected. New cases: the priced order, a `token-fiat` line, a missing fiat line on fiat on, and a quote present in a fiat-off stub. It also checks that every fiat-on surface's stub carries the quote. All 16 surfaces rerun base `1a08fa52` vs head `e4b5822d`: 64 of 64 identical, and 64 of 64 under `--stability`.

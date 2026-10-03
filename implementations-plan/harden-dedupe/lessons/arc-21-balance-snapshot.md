@@ -63,3 +63,29 @@
   - one row-set check (`holdings-fiat-off`) is left order-free, because the image compares that order.
 - **Probing the real predicates.** Surfaces register their predicate in an exported `wants` map. The probe loads a copy of the surface file with its four imports stubbed, then runs every surface's real check against the fixture's state and against the wrong states a loose check passes: 52 of 52 as expected. Testing a hand copy of a predicate proves the copy, not the check.
 - **Evidence:** all 16 surfaces, base vs head 64 of 64 identical and `--stability` 64 of 64. The exact checks passed on the first run, which also confirms the fixture values they name.
+
+## Code review round 4: NOT CONVERGED
+
+- **A stub can stage a screen no user can reach, and an exact zero diff only proves the stub is stable.** The fiat-off surface answered the `$1` quote, while production answers `{}` with fiat display off (`price/service.ts:142`, `:153`). The capture showed a fiat line and a priced order that cannot happen with fiat off.
+  - Now the stub answers `{}`. The base capture renders `[ALPHA, USDC, BROKEN]` with no `token-fiat` line, and the check pins exactly that.
+  - Each surface now logs its reached state (`[hd-state]`), so the order is read from the capture, not assumed.
+- **Stub audit.** Each stubbed answer, checked against the production line that returns it in that surface's settings (fiat on by default, `wallet/config/config.ts:34`; the fixture's own account and chain):
+
+  | Port and method | Answer | Surfaces | Production can return it because |
+  |---|---|---|---|
+  | `price.refreshIfStale`, `getQuotes` | `{ [id]: quote }` (`usd: 1`, `fetchedAt` now, `providerUpdatedAt: null`) | every fiat-on surface | fiat on, the fresh cache is returned (`price/service.ts:140-160`); the shape is `PriceQuote` (`price/spec.ts:4-12`) |
+  | `price.refreshIfStale`, `getQuotes` | `{}` | holdings-fiat-off | fiat off returns `{}` (`price/service.ts:142`, `:153`); this was the mismatch, now fixed |
+  | `price` event `onQuotesUpdated` (injected) | the same quote | the four picker surfaces (fiat on) | a refresh emits the usable quotes (`price/service.ts:366`) |
+  | `token-balance.getTokenBalances` | the fixture rows, all for the active account and chain | Home, token page, Holdings, picker | it returns the account's rows joined to their registered tokens (`token-balance/service.ts:188-199`); the fixture models an account holding those tokens |
+  | the same, a malformed row (`"1.5"`) | as given | the `*-malformed` surfaces, Holdings, picker | the storage codec accepts any string (`token-balance/spec.ts:44-52`), and restored backups are untrusted input |
+  | the same, rejected | `{ error }` | the rejected and retry surfaces, picker-error | a thrown read becomes an error response (`extension-messaging/src/core/error-response.ts:25-28`); a lost port rejects the pending request (`background/client.ts:88`) |
+  | the same, held | no answer | home-loading | the read awaits service initialisation (`token-balance/service.ts:189`) |
+  | the same, `seq` (reject, then rows) | per port | home-retry-recovered | a transient failure followed by a normal read, both above |
+  | `token-balance.refreshTokenBalance` | `undefined` (was `null`) | token page | a known row is queued and returns `void` (`token-balance/service.ts:202-208`) |
+  | `execution.getGasBalances` | public and private Fee Juice, 5 each | Send (picker surfaces) | it returns `GasBalances` strings (`execution/service.ts:928`, `wallet-bridge/src/fee.ts:36-44`); the private side is read through the canonical PrivateFPC |
+  | `execution.peekGasBalances` | `null` | Send | no cached entry yet (`execution/gas-balance-reader.ts:116-118`) |
+  | `execution.cancelEstimate` | `undefined` (was `null`) | Send | `Promise<void>` (`execution/service.ts:565-570`) |
+  | `fpc.getFpcs` | the real service's list | Send | read through the real service at setup |
+  | tasks, config, token | not stubbed | all | the real services answer |
+
+- **Evidence:** 72 of 72 probe cases as expected, including the fiat-off stub's `{}` check, which fails on a fiat-on spec, and the quote check on every fiat-on surface. All 16 surfaces: 64 of 64 identical base vs head, and 64 of 64 under `--stability`.
