@@ -146,6 +146,7 @@
     "REVIEW_ARM_MS": true,
     "ReceivedType": true,
     "Ref": true,
+    "RestoreData": true,
     "RestoreIo": true,
     "RestoreScratch": true,
     "RestoreStage": true,

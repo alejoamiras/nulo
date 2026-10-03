@@ -221,7 +221,7 @@ declare global {
   const ref: typeof import('vue').ref
   const refreshBalances: typeof import('../utils/core').refreshBalances
   const refuseRepeatEnter: typeof import('../composables/usePopupEntity').refuseRepeatEnter
-  const relinkRestoredTokenBalances: typeof import('../composables/useFullBackupImport').relinkRestoredTokenBalances
+  const relinkRestoredTokenBalances: typeof import('../composables/full-backup-restore').relinkRestoredTokenBalances
   const remapByMap: typeof import('../utils/full-backup-helpers').remapByMap
   const remapNetworkIdByChain: typeof import('../utils/full-backup-helpers').remapNetworkIdByChain
   const requireAccount: typeof import('../utils/core').requireAccount
@@ -234,7 +234,7 @@ declare global {
   const resolveRestoredActiveNetworkId: typeof import('../utils/full-backup-helpers').resolveRestoredActiveNetworkId
   const resolveRestoredActiveNetworkIdByChain: typeof import('../utils/full-backup-helpers').resolveRestoredActiveNetworkIdByChain
   const restoreAccountStateStage: typeof import('../composables/full-backup-restore').restoreAccountStateStage
-  const restoreAccountsAndFilterOwnedSlices: typeof import('../composables/useFullBackupImport').restoreAccountsAndFilterOwnedSlices
+  const restoreAccountsAndFilterOwnedSlices: typeof import('../composables/full-backup-restore').restoreAccountsAndFilterOwnedSlices
   const restoreAccountsStage: typeof import('../composables/full-backup-restore').restoreAccountsStage
   const restoreActiveNetworkPointer: typeof import('../composables/full-backup-restore').restoreActiveNetworkPointer
   const restoreNetworksStage: typeof import('../composables/full-backup-restore').restoreNetworksStage
@@ -355,7 +355,7 @@ declare global {
   export type { ImportCompletionDeps, ImportCompletionOutcome } from '../composables/completeImportWithRecovery'
   import('../composables/completeImportWithRecovery')
   // @ts-ignore
-  export type { RestoreIo, StageFail, StageOutcome, RestoreScratch, ProfileRestoreClient, NetworkRestoreClient, AccountRestoreClient, RestoredNetwork, SliceRestoreClient, AccountStateRetryContext } from '../composables/full-backup-restore'
+  export type { RestoreIo, StageFail, StageOutcome, RestoreScratch, ProfileRestoreClient, NetworkRestoreClient, AccountRestoreClient, RestoredNetwork, RestoreData, SliceRestoreClient, AccountStateRetryContext } from '../composables/full-backup-restore'
   import('../composables/full-backup-restore')
   // @ts-ignore
   export type { ImportChainSyncDeps } from '../composables/importChainSync'
@@ -748,7 +748,7 @@ declare module 'vue' {
     readonly ref: UnwrapRef<typeof import('vue')['ref']>
     readonly refreshBalances: UnwrapRef<typeof import('../utils/core')['refreshBalances']>
     readonly refuseRepeatEnter: UnwrapRef<typeof import('../composables/usePopupEntity')['refuseRepeatEnter']>
-    readonly relinkRestoredTokenBalances: UnwrapRef<typeof import('../composables/useFullBackupImport')['relinkRestoredTokenBalances']>
+    readonly relinkRestoredTokenBalances: UnwrapRef<typeof import('../composables/full-backup-restore')['relinkRestoredTokenBalances']>
     readonly remapByMap: UnwrapRef<typeof import('../utils/full-backup-helpers')['remapByMap']>
     readonly remapNetworkIdByChain: UnwrapRef<typeof import('../utils/full-backup-helpers')['remapNetworkIdByChain']>
     readonly requireAccount: UnwrapRef<typeof import('../utils/core')['requireAccount']>
@@ -760,7 +760,7 @@ declare module 'vue' {
     readonly resolveReceivedType: UnwrapRef<typeof import('../utils/received-display')['resolveReceivedType']>
     readonly resolveRestoredActiveNetworkIdByChain: UnwrapRef<typeof import('../utils/full-backup-helpers')['resolveRestoredActiveNetworkIdByChain']>
     readonly restoreAccountStateStage: UnwrapRef<typeof import('../composables/full-backup-restore')['restoreAccountStateStage']>
-    readonly restoreAccountsAndFilterOwnedSlices: UnwrapRef<typeof import('../composables/useFullBackupImport')['restoreAccountsAndFilterOwnedSlices']>
+    readonly restoreAccountsAndFilterOwnedSlices: UnwrapRef<typeof import('../composables/full-backup-restore')['restoreAccountsAndFilterOwnedSlices']>
     readonly restoreAccountsStage: UnwrapRef<typeof import('../composables/full-backup-restore')['restoreAccountsStage']>
     readonly restoreActiveNetworkPointer: UnwrapRef<typeof import('../composables/full-backup-restore')['restoreActiveNetworkPointer']>
     readonly restoreServiceSlices: UnwrapRef<typeof import('../composables/full-backup-restore')['restoreServiceSlices']>

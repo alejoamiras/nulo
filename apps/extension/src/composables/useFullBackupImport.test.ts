@@ -174,12 +174,8 @@ vi.mock("@/wallet/storage/migrations", async () => {
 })
 
 // Imported AFTER mocks are registered.
-import {
-	relinkRestoredTokenBalances,
-	restoreAccountsAndFilterOwnedSlices,
-	useFullBackupImport,
-	validateAndMigrateBackup,
-} from "./useFullBackupImport"
+import { relinkRestoredTokenBalances, restoreAccountsAndFilterOwnedSlices } from "./full-backup-restore"
+import { useFullBackupImport, validateAndMigrateBackup } from "./useFullBackupImport"
 import { awaitLivenessAdvance, readLiveness } from "@/utils/background-liveness"
 import { ACCOUNT_STATE_SKIP_DEADLINE } from "@/wallet/services/account-state/normalize"
 

@@ -15,7 +15,9 @@ import { awaitLivenessAdvance, readLiveness } from "@/utils/background-liveness"
 import { capRecords, remapNetworkIdByChain, resolveRestoredActiveNetworkIdByChain } from "@/utils/full-backup-helpers"
 import type { PasskeyRequest } from "@/wallet/services/passkey/spec"
 import type { RestoreSecret } from "@/wallet/services/profile/client"
-import { IMPORTED_KEYS_SERVICE_NAME } from "@/wallet/services/account/spec"
+import { ACCOUNT_SERVICE_NAME, IMPORTED_KEYS_SERVICE_NAME } from "@/wallet/services/account/spec"
+import { AUTH_REGISTRY_SERVICE_NAME } from "@/wallet/services/auth-registry/spec"
+import { TOKEN_BALANCE_SERVICE_NAME } from "@/wallet/services/token-balance/spec"
 import { ACCOUNT_STATE_SERVICE_NAME } from "@/wallet/services/account-state/spec"
 import { TRANSACTION_SERVICE_NAME } from "@/wallet/services/transaction/spec"
 import { TOKEN_SERVICE_NAME } from "@/wallet/services/token/spec"
@@ -127,6 +129,7 @@ export interface NetworkRestoreClient {
 	disconnect(): void
 }
 export interface AccountRestoreClient {
+	restore(rows: unknown[] | undefined): Promise<unknown>
 	restoreImportedKeys(rows: unknown[]): Promise<unknown>
 	reconcileImportedAccounts(profileId: string): Promise<unknown[]>
 	disconnect(): void
@@ -310,6 +313,171 @@ export async function restoreActiveNetworkPointer(
 	}
 }
 
+/** The migrated backup body the restore stages read and filter in place. */
+export type RestoreData = Record<string, unknown> & {
+	account?: unknown[]
+	network?: unknown[]
+	token?: unknown[]
+	"token-balance"?: Array<Record<string, unknown>>
+	profile?: { id: string; name?: string }
+}
+
+/** Bound on dropped-balance records. This path never reaches the collector, so it carries no cap
+ *  of its own — and a hostile backup can ship tens of thousands of un-relinkable rows. */
+const MAX_DROPPED_BALANCES_RECORDED = 200
+
+// Both transforms forward an absent slice to its service unchanged and never validate a service
+// result: a malformed one throws natively, and that message, which names these locals, reaches
+// the failure copy.
+
+/**
+ * Restores the account slice, then drops every transaction, authwit and token-balance row whose
+ * account this restore did not import successfully. Mutates `data` in place and returns the
+ * `${chainId}:${address}` allow-set of imported accounts, which the balance re-link requires for
+ * its chain-equality check: thread it, never re-derive it. Client lifecycle, the duplicate-account
+ * catch and stage markers stay with the caller; every throw propagates with its identity intact
+ * (the caller matches `.message`, the outer catch classifies disconnects).
+ */
+export async function restoreAccountsAndFilterOwnedSlices(
+	data: RestoreData,
+	accountService: AccountRestoreClient,
+	recordRestoreErrors: (serviceName: string, rows: unknown) => void,
+): Promise<Set<string>> {
+	const importedChainAddress = new Set<string>()
+	const newAccounts = await accountService.restore(data.account)
+	recordRestoreErrors(ACCOUNT_SERVICE_NAME, newAccounts)
+
+	// Provenance filter for EVERY account-owned slice (tx, auth-registry,
+	// token-balance). Each service writes rows verbatim and reads them by
+	// `account`, so a backup row whose `account` is NOT an account
+	// SUCCESSFULLY imported by THIS restore could surface in a victim
+	// profile (auth-registry corrupts its revocation index; a balance
+	// grafts under the victim). "Account exists in storage" is NOT
+	// sufficient (a crafted backup could name a pre-existing foreign
+	// account); the allow-set is exactly this restore's accounts. Drop
+	// BEFORE the restore loop below writes them.
+	const importedAddresses = new Set<string>()
+	for (const a of newAccounts as Array<{ address?: unknown; chainId?: unknown; restoreError?: unknown }>) {
+		if (a.restoreError || typeof a.address !== "string") continue
+		importedAddresses.add(a.address)
+		if (typeof a.chainId === "number") importedChainAddress.add(`${a.chainId}:${a.address}`)
+	}
+	// Drop-and-record via console.warn, NOT restoreErrorLog: a filtered row
+	// is a security action (foreign/corrupt account, nothing the user did or
+	// can fix), so it must not flip a clean import into the "finished with
+	// errors" UX. A failed-account row is already surfaced by its account's
+	// own restoreError above.
+	const filterByAccount = (name: string, keep: (row: Record<string, unknown>) => boolean, label: string) => {
+		const slice = (data as Record<string, unknown>)[name]
+		if (!Array.isArray(slice)) return
+		let dropped = 0
+		;(data as Record<string, unknown>)[name] = (slice as Array<Record<string, unknown>>).filter((row) => {
+			const ok = keep(row)
+			if (!ok) dropped++
+			return ok
+		})
+		if (dropped > 0) {
+			console.warn(`[full-backup-import] dropped ${dropped} ${label} referencing an account not imported from this backup`)
+		}
+	}
+	// tx carries its OWN chainId → key by the (chainId, account) tuple so a
+	// tx can't reference an imported address on a DIFFERENT chain.
+	filterByAccount(
+		TRANSACTION_SERVICE_NAME,
+		(tx) => typeof tx.account === "string" && typeof tx.chainId === "number" && importedChainAddress.has(`${tx.chainId}:${tx.account}`),
+		"transaction(s)",
+	)
+	// auth-registry rows carry their own chainId → the same (chainId, account) key as txs.
+	// token-balance rows carry identity fields too, but those are DERIVED service-side at
+	// restore — address membership here is a pre-filter, with token-ownership + chain-equality
+	// in the re-link step below.
+	filterByAccount(
+		AUTH_REGISTRY_SERVICE_NAME,
+		(aw) => typeof aw.account === "string" && typeof aw.chainId === "number" && importedChainAddress.has(`${aw.chainId}:${aw.account}`),
+		"authwit(s)",
+	)
+	filterByAccount(
+		TOKEN_BALANCE_SERVICE_NAME,
+		(tb) => typeof tb.account === "string" && importedAddresses.has(tb.account),
+		"token-balance(s)",
+	)
+	return importedChainAddress
+}
+
+/**
+ * Re-links restored balance rows to this restore's tokens by result index and drops each one whose
+ * account was not imported on its token's chain. Mutates `data["token-balance"]` in place and
+ * returns the dropped rows, restoreError-tagged, for the caller to append.
+ */
+export function relinkRestoredTokenBalances(
+	data: RestoreData,
+	newTokens: Array<{ id: unknown; chainId: number; contract: string; restoreError?: string }>,
+	importedChainAddress: ReadonlySet<string>,
+): unknown[] {
+	// Pair each restored token to its source by RESULT INDEX
+	// (`TokenService.restore` returns one ordered result per input, same as
+	// networks). This REPLACES the (chainId,contract) composite key: no
+	// cross-chain collapse, no ambiguity heuristic, and one duplicate token
+	// FAILING no longer drops a surviving token's balance. The index also
+	// gives token-OWNERSHIP for free — a balance's token maps only to a
+	// token THIS restore created.
+	const oldTokens = data.token as Array<{ id: unknown; chainId: number }>
+	// NB (dup-token-id): the index-paired maps below key on `old.id`, so two
+	// backup tokens sharing an id would last-wins-collapse. That case is
+	// UNREACHABLE here — backup normalization rejects a slice with a duplicate
+	// row id up front (backup-migration-registry.ts "duplicate row id"), so a
+	// dup-token-id backup fails before restore. No composable guard needed.
+	const oldIdToNew = new Map<unknown, unknown>()
+	const oldIdToChain = new Map<unknown, number>()
+	for (let i = 0; i < newTokens.length; i++) {
+		const old = oldTokens[i]
+		if (!old || newTokens[i].restoreError) continue
+		// Chain authority is the RESTORED token (parsed, persisted) — the old row is raw
+		// attacker-controlled blob content, and a failed row must not feed the chain map.
+		oldIdToChain.set(old.id, newTokens[i].chainId)
+		oldIdToNew.set(old.id, newTokens[i].id)
+	}
+	const droppedBalances: unknown[] = []
+	let droppedTotal = 0
+	data["token-balance"] = (data["token-balance"] as Array<Record<string, unknown>>).flatMap(
+		(tb: Record<string, unknown>, index: number) => {
+			const newId = oldIdToNew.get(tb.token)
+			// token/account chain-equality (final pass): the balance's account
+			// must be an account imported ON THE TOKEN'S CHAIN. Addresses are
+			// chain-distinct, so this rejects a balance pairing an imported
+			// account with a token on a chain that account wasn't imported on.
+			const tokenChain = oldIdToChain.get(tb.token)
+			const chainOk =
+				tokenChain !== undefined && typeof tb.account === "string" && importedChainAddress.has(`${tokenChain}:${tb.account}`)
+			if (newId === undefined || !chainOk) {
+				// This path bypasses `collectRestoreErrors` entirely — these rows are dropped BEFORE any
+				// service sees them — so it must do its own allowlisting AND its own bounding.
+				//
+				// `tb` is raw, unvalidated backup content: it carries `publicBalance`/`privateBalance`,
+				// and migration validates only `tb.id`, so `token` can be an arbitrary nested object
+				// holding a URL or a secret. Only the POSITION is recorded, which is all that
+				// distinguishes one dropped row from another anyway.
+				droppedTotal++
+				if (droppedBalances.length < MAX_DROPPED_BALANCES_RECORDED) {
+					droppedBalances.push({
+						row: index,
+						restoreError: "Token balance could not be re-linked to a restored token",
+					})
+				}
+				return []
+			}
+			return [{ ...tb, token: newId }]
+		},
+	)
+	// Say what was dropped rather than letting the cap read as "exactly 200 failures".
+	if (droppedTotal > droppedBalances.length) {
+		droppedBalances.push({
+			restoreError: `${droppedTotal - droppedBalances.length} further dropped balance(s) not recorded`,
+		})
+	}
+	return droppedBalances
+}
+
 /**
  * Accounts stage: account rows + imported-account key rows (RIGHT AFTER the account rows and
  * BEFORE reconciliation/finalize — the ciphertext is HKDF-bound to (master, chainId, address),
@@ -323,24 +491,14 @@ export async function restoreAccountsStage(
 		profileService: ProfileRestoreClient
 		profileId: string
 		io: RestoreIo
-		/** Stays exported from useFullBackupImport.ts — injected to avoid a module cycle. */
-		restoreAccountsAndFilterOwnedSlices: (
-			data: never,
-			accountService: never,
-			record: (name: string, rows: unknown) => void,
-		) => Promise<ReadonlySet<string>>
 	},
 ): Promise<({ kind: "proceed"; importedChainAddress: ReadonlySet<string> } & Record<never, never>) | StageFail> {
 	const { accountService, profileService, profileId, io } = deps
 	try {
-		const importedChainAddress = await deps.restoreAccountsAndFilterOwnedSlices(
-			data as never,
-			accountService as never,
-			io.recordRestoreErrors,
-		)
+		const importedChainAddress = await restoreAccountsAndFilterOwnedSlices(data, accountService, io.recordRestoreErrors)
 		const importedKeySlice = data[IMPORTED_KEYS_SERVICE_NAME]
 		if (Array.isArray(importedKeySlice)) {
-			io.recordRestoreErrors(IMPORTED_KEYS_SERVICE_NAME, await accountService.restoreImportedKeys(importedKeySlice as never))
+			io.recordRestoreErrors(IMPORTED_KEYS_SERVICE_NAME, await accountService.restoreImportedKeys(importedKeySlice))
 		}
 		return { kind: "proceed", importedChainAddress }
 	} catch (err) {
@@ -374,18 +532,17 @@ export async function restoreTokensStage(
 	data: Record<string, unknown>,
 	importedChainAddress: ReadonlySet<string>,
 	io: RestoreIo,
-	relinkRestoredTokenBalances: (data: never, newTokens: never, allow: ReadonlySet<string>) => unknown[],
 ): Promise<void> {
 	const tokenService = new TokenServiceClient()
 	let tokenRestoreResult: unknown
 	try {
-		tokenRestoreResult = await tokenService.restore(data.token as never)
+		tokenRestoreResult = await tokenService.restore(data.token)
 	} finally {
 		tokenService.disconnect() // P7: disconnect even if restore throws
 	}
 	const newTokens = tokenRestoreResult as Array<{ id: unknown; chainId: number; contract: string; restoreError?: string }>
 	if ((data["token-balance"] as unknown[] | undefined)?.length) {
-		const droppedBalances = relinkRestoredTokenBalances(data as never, newTokens as never, importedChainAddress)
+		const droppedBalances = relinkRestoredTokenBalances(data, newTokens, importedChainAddress)
 		if (droppedBalances.length) io.appendErrors("token-balance", droppedBalances)
 	}
 	io.recordRestoreErrors(TOKEN_SERVICE_NAME, newTokens)
