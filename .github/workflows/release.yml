@@ -66,6 +66,7 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
       version: ${{ steps.release.outputs.version }}
+      pr: ${{ steps.release.outputs.pr }}
     steps:
       # App-authenticated token: ensures (a) the Release PR's commits are
       # bot-verified (satisfies main's "signed commits required" rule), and
@@ -88,6 +89,17 @@ jobs:
           # against dev with a malformed title (component+version both miss).
           target-branch: main
           token: ${{ steps.app.outputs.token }}
+
+  # ADVISORY, like sync-main-to-dev: nothing waits on it, so a red run never holds a release.
+  release-pr-lockfile:
+    needs: release-please
+    if: needs.release-please.outputs.pr != ''
+    uses: ./.github/workflows/_release-pr-lockfile.yml
+    with:
+      pr: ${{ needs.release-please.outputs.pr }}
+    secrets:
+      RELEASE_PLEASE_APP_ID: ${{ secrets.RELEASE_PLEASE_APP_ID }}
+      RELEASE_PLEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
 
   # release-please-action@v4 abort bug: after a Release PR merges, the action logs
   # "untagged, merged release PRs outstanding" and never tags, so release_created

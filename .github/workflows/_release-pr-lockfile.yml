@@ -1,0 +1,51 @@
+name: _Release PR lockfile (reusable)
+# release-please bumps apps/extension/package.json but cannot edit bun.lock, so this writes the same
+# version into bun.lock on the Release PR's branch (scripts/release/lock-version-run.ts). Callers
+# make it advisory: no job waits on it, so a failure never holds a release.
+on:
+  workflow_call:
+    inputs:
+      pr:
+        description: release-please-action's `pr` output, the Release PR it created or updated, as JSON.
+        required: true
+        type: string
+    secrets:
+      RELEASE_PLEASE_APP_ID:
+        required: true
+      RELEASE_PLEASE_APP_PRIVATE_KEY:
+        required: true
+
+# The write goes through the App token; the job token only checks the script out.
+permissions:
+  contents: read
+
+jobs:
+  lock-version:
+    name: bun.lock records the Release PR's version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # A commit made with the App token is GitHub-signed, as main requires, and re-runs the PR's CI
+      # at once; a GITHUB_TOKEN commit's runs would wait for approval. Scoped to contents: the job
+      # writes one file.
+      - name: Mint App token
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_PLEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      # No workspace install: the script needs only Bun built-ins, and this job holds a write token.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - name: Write the version into bun.lock
+        env:
+          PR_JSON: ${{ inputs.pr }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: bun scripts/release/lock-version-run.ts

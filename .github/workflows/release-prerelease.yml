@@ -30,6 +30,8 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      pr: ${{ steps.release.outputs.pr }}
     steps:
       # App-authenticated token: required for the Prerelease PR's commits to
       # satisfy `dev`'s signed-commits + Quality-check rules (same secrets
@@ -42,6 +44,7 @@ jobs:
           private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
 
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
         with:
           config-file: .github/release-please-prerelease-config.json
           manifest-file: .release-please-prerelease-manifest.json
@@ -50,3 +53,16 @@ jobs:
           # the workflow keeps working if the default changes).
           target-branch: dev
           token: ${{ steps.app.outputs.token }}
+
+  # ADVISORY: nothing waits on it, so a red run never holds the rc cut.
+  release-pr-lockfile:
+    needs: release-please
+    if: needs.release-please.outputs.pr != ''
+    permissions:
+      contents: read
+    uses: ./.github/workflows/_release-pr-lockfile.yml
+    with:
+      pr: ${{ needs.release-please.outputs.pr }}
+    secrets:
+      RELEASE_PLEASE_APP_ID: ${{ secrets.RELEASE_PLEASE_APP_ID }}
+      RELEASE_PLEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
