@@ -24,7 +24,7 @@ import {
 } from "@nulo/wallet-core/activity"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { EntityStorage } from "@/wallet/storage"
-import { KeyedLock } from "@/wallet/utils"
+import { getRandomHex, KeyedLock } from "@/wallet/utils"
 import {
 	ACTIVITY_COUNTER_STORAGE_ROOT,
 	ACTIVITY_INCARNATION_STORAGE_ROOT,
@@ -47,9 +47,7 @@ function increment(counter: string): string {
 
 /** 128 bits of provenance, so a generation can never be silently reused. */
 function mintNonce(): string {
-	const bytes = new Uint8Array(16)
-	crypto.getRandomValues(bytes)
-	return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("")
+	return getRandomHex(32)
 }
 
 const EMPTY_COUNTER: ActivityCounterRow = { allocated: ZERO, committed: ZERO, settled: [] }

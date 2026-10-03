@@ -1,6 +1,6 @@
 import type { ActivityScope } from "@nulo/wallet-core/activity"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
-import { beforeEach, describe, expect, test } from "vitest"
+import { beforeEach, describe, expect, test, vi } from "vitest"
 import { ActivityProtocolCoordinator } from "./coordinator"
 
 const SCOPE: ActivityScope = { profileId: "p1", networkId: "n1", chainId: 1, accountAddress: "0xabc" }
@@ -14,6 +14,23 @@ describe("ActivityProtocolCoordinator", () => {
 		api = new FakeBrowserApi()
 		api.reset()
 		coordinator = new ActivityProtocolCoordinator(api)
+	})
+
+	test("a nonce is 16 random bytes as lowercase zero-padded hex", async () => {
+		const sizes: number[] = []
+		const spy = vi.spyOn(globalThis.crypto, "getRandomValues").mockImplementation(<T extends ArrayBufferView | null>(array: T): T => {
+			const bytes = array as unknown as Uint8Array
+			sizes.push(bytes.length)
+			for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 17 + 3) & 0xff
+			return array
+		})
+		try {
+			const { nonce } = await coordinator.currentIncarnation(SCOPE)
+			expect(sizes).toEqual([16])
+			expect(nonce).toBe("031425364758697a8b9cadbecfe0f102")
+		} finally {
+			spy.mockRestore()
+		}
 	})
 
 	test("mints one incarnation per scope and keeps returning it", async () => {

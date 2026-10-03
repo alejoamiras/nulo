@@ -17,6 +17,7 @@
 
 import type { DappSession } from "./spec"
 import { toBase64 } from "@nulo/wallet-core/utils"
+import { fromBase64Lenient } from "@/wallet/utils/lenient-base64"
 
 /** The signed view of a row: everything except the `mac` field itself. */
 export type SignableDappSession = Omit<DappSession, "mac">
@@ -56,7 +57,7 @@ export async function signDappSession(key: CryptoKey, row: SignableDappSession):
 export async function verifyDappSession(key: CryptoKey, row: SignableDappSession, mac: string): Promise<boolean> {
 	let macBytes: Uint8Array<ArrayBuffer>
 	try {
-		macBytes = new Uint8Array(Buffer.from(mac, "base64"))
+		macBytes = new Uint8Array(fromBase64Lenient(mac))
 	} catch {
 		return false
 	}

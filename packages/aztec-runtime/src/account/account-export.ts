@@ -19,7 +19,7 @@
  * requires explicit confirmation; "tampered export fails closed" holds for the ENCRYPTED variant
  * (AES-GCM authenticates under the password) and for non-self-consistent plaintext mutations.
  */
-import { fromBase64, toBase64 } from "@nulo/wallet-core/utils"
+import { bytesToHex, fromBase64, toBase64 } from "@nulo/wallet-core/utils"
 import { EncryptionKey, zeroize } from "@nulo/wallet-crypto"
 import { Fq } from "@aztec-labs/foundation/curves/bn254"
 import { sha256 } from "@aztec-labs/foundation/crypto/sha256"
@@ -77,7 +77,7 @@ const CANONICAL_FIELDS = [
 function canonicalChecksum(body: Omit<AccountExportV1, "checksum">): string {
 	// A pinned, order-fixed JSON array of [key, value] pairs — independent of JS object key order.
 	const canonical = JSON.stringify(CANONICAL_FIELDS.map((k) => [k, (body as Record<string, unknown>)[k]]))
-	return Buffer.from(sha256(Buffer.from(canonical, "utf8"))).toString("hex")
+	return bytesToHex(sha256(Buffer.from(canonical, "utf8")))
 }
 
 /** Assemble a plaintext export for a signing key (Fq) + the account's L1 id + its address. */

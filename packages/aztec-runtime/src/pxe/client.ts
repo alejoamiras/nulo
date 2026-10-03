@@ -22,6 +22,7 @@ import type { PrivateEventFilter } from "@aztec-labs/aztec.js/wallet"
 import type { PackedPrivateEvent } from "@aztec-labs/pxe/client/bundle"
 import z from "zod"
 import type { ILogger } from "@nulo/wallet-core/logger"
+import { toBase64 } from "@nulo/wallet-core/utils"
 import type { ServiceSpec } from "@nulo/wallet-core/base"
 import { ServiceClient } from "@nulo/extension-messaging/offscreen"
 import type { NetworkInfo } from "./chain-runtime"
@@ -205,7 +206,7 @@ export class PxeServiceClientBase extends ServiceClient<Methods, PxeEvents> impl
 			// immutable); the key bytes below are, in every exit path.
 			await this.requestAlreadyReady(
 				"provisionChainStoreKey" as T,
-				...([profileId, btoa(String.fromCharCode(...provision.key)), provision.generation] as unknown as Parameters<Methods[T]>),
+				...([profileId, toBase64(provision.key), provision.generation] as unknown as Parameters<Methods[T]>),
 			)
 			// A provision/retry send failure propagates AS ITSELF (more
 			// diagnostic than the original marker error), and the retry runs

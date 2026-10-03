@@ -35,6 +35,7 @@ import { UserRejectedError } from "@nulo/extension-messaging/errors"
 /** Utils */
 import { downloadFile } from "@/utils"
 import { MAX_BACKUP_FILE_BYTES, assembleFullBackup } from "@/utils/full-backup-helpers"
+import { toBase64 } from "@nulo/wallet-core/utils"
 
 /** Composables */
 import { useToast } from "@/composables/toast.js"
@@ -345,7 +346,7 @@ async function handleEncrypt() {
 		if (gen !== generation) return
 		const key = await EncryptionKey.fromPasshash(passhash)
 		if (gen !== generation) return
-		const sealed = Buffer(await key.encrypt(new TextEncoder().encode(plaintext))).toString("base64")
+		const sealed = toBase64(await key.encrypt(new TextEncoder().encode(plaintext)))
 		if (gen !== generation) return
 		// Encrypted-side half of the shared size invariant (base64 + AES-GCM
 		// overhead could in principle cross the line a plain file sits under).

@@ -58,7 +58,7 @@ describe("buildCreateOptions", () => {
 
 // jsdom ships no WebAuthn, so the ceremony's `instanceof` checks need real classes to match.
 class StubAssertionResponse {
-	constructor(readonly userHandle: Uint8Array | null) {}
+	constructor(readonly userHandle: ArrayBuffer | Uint8Array | null) {}
 }
 class StubCredential {
 	constructor(
@@ -152,5 +152,31 @@ describe("runPasskeyCeremony in create mode", () => {
 		await runPasskeyCeremony(CREATE_REQUEST, signal)
 		expect(create.mock.calls[0][0].signal).toBe(signal)
 		expect(get.mock.calls[0][0].signal).toBe(signal)
+	})
+})
+
+describe("runPasskeyCeremony in get mode", () => {
+	const get = vi.fn<(o: GetArgs) => Promise<unknown>>()
+	const HANDLE = new Uint8Array([0xa3, 0xf2, 0x9b, 0x14])
+
+	beforeEach(() => {
+		get.mockReset()
+		vi.stubGlobal("PublicKeyCredential", StubCredential)
+		vi.stubGlobal("AuthenticatorAssertionResponse", StubAssertionResponse)
+		vi.stubGlobal("navigator", { credentials: { create: vi.fn(), get } })
+	})
+
+	afterEach(() => {
+		vi.unstubAllGlobals()
+	})
+
+	// The DOM hands `userHandle` over as an ArrayBuffer; the Uint8Array row covers a view.
+	it.each([
+		["ArrayBuffer", () => HANDLE.slice().buffer],
+		["Uint8Array", () => HANDLE.slice()],
+	])("returns the assertion's %s user handle as lowercase hex", async (_label, handle) => {
+		get.mockResolvedValue(new StubCredential(RAW_ID, { prf: { results: { first: PRF_AT_GET } } }, new StubAssertionResponse(handle())))
+		const data = await runPasskeyCeremony({ mode: "get" })
+		expect(data).toEqual({ id: b64(RAW_ID), prf: b64(PRF_AT_GET), userHandle: "a3f29b14" })
 	})
 })
