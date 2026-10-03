@@ -252,18 +252,17 @@ the RPC endpoint or disabling fiat prices does not disable them.
 
 ### 5.10 The "Get Fee Juice" and "Get private gas" links
 
-**What it is:** when an account cannot pay a transaction's fee, the send screens offer a link to
-`https://testnet.app.unleashed.systems`, a bridge application I operate as a separate project. The
-link is the same on every network.
+**What it is:** the send screens link to `https://testnet.app.unleashed.systems`, a bridge application
+I operate as a separate project: when an account cannot pay a transaction's fee, and on the review
+screen when paying the fee would publish your address as the fee payer. The link is the same on
+every network.
 
 **What it reveals:** nothing until you click. The link carries no account address or other wallet
-data and opens without a referrer, so the site sees an ordinary visit: your IP address and browser
-headers, like any website you visit. Its hosting is provided by Cloudflare, Inc., as for `nulo.sh`;
-§ 5.5 describes what those requests expose and what the hosting tools show me, and its retention
-applies to them.
+data and opens without a referrer, so a click is an ordinary website visit: the site and Cloudflare,
+Inc., which hosts it, receive your IP address and browser headers.
 
-**After it opens:** the application runs on its own, and the requests it makes, for example to an
-Aztec node, are not covered by this policy.
+**After it opens:** the application runs on its own. The requests it makes, for example to an Aztec
+node, are not Nulo's, and this policy does not describe them.
 
 **Your control:** the site is contacted only if you follow the link.
 

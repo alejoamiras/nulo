@@ -1,62 +1,72 @@
 import { describe, expect, test } from "bun:test"
-import { type LockIO, runLockVersion } from "./lock-version-run"
+import { ATTEMPTS, type LockIO, runLockVersion } from "./lock-version-run"
 
-const PR = JSON.stringify({ headBranchName: "release-please--branches--main", baseBranchName: "main", number: 7 })
+const BRANCH = "release-please--branches--main"
+const PR = JSON.stringify({ headBranchName: BRANCH, baseBranchName: "main", number: 7 })
 const lock = (version: string) =>
 	`{\n  "workspaces": {\n    "apps/extension": {\n      "name": "@nulo/extension",\n      "version": "${version}",\n    },\n  },\n}\n`
+const pkg = (version: string) => JSON.stringify({ name: "@nulo/extension", version })
 
-function harness(packageVersion: string, lockVersion: string) {
+/** The branch at successive heads: each commit attempt moves it on, and a commit lands only on the newest. */
+function harness(heads: { packageVersion: string; lockVersion: string }[]) {
 	const calls: string[] = []
-	const writes: { path: string; branch: string; text: string; replacing: string; message: string }[] = []
-	const files: Record<string, string> = {
-		"apps/extension/package.json": JSON.stringify({ name: "@nulo/extension", version: packageVersion }),
-		"bun.lock": lock(lockVersion),
-	}
+	const commits: { expectedHead: string; text: string; message: string }[] = []
+	let attempts = 0
 	const io: LockIO = {
 		async head(branch) {
 			calls.push(`head ${branch}`)
-			return "c0ffee"
+			return `h${Math.min(attempts, heads.length - 1)}`
 		},
 		async read(path, commit) {
 			calls.push(`read ${path}@${commit}`)
-			return { text: files[path] ?? "", sha: `sha-of-${path}` }
+			const at = heads[Number(commit.slice(1))]
+			if (!at) throw new Error(`no head ${commit}`)
+			return path === "bun.lock" ? lock(at.lockVersion) : pkg(at.packageVersion)
 		},
-		async write(path, branch, text, replacing, message) {
-			writes.push({ path, branch, text, replacing, message })
+		async commit(_branch, expectedHead, _path, text, message) {
+			attempts++
+			if (expectedHead !== `h${heads.length - 1}`) return false
+			commits.push({ expectedHead, text, message })
+			return true
 		},
 		log: () => {},
 	}
-	return { io, calls, writes }
+	return { io, calls, commits }
 }
 
 describe("runLockVersion", () => {
-	test("reads both files from the branch head and writes the PR's version over the lockfile's blob", async () => {
-		const h = harness("0.31.0", "0.30.0")
+	test("reads both files at the branch head and commits the PR's version onto that head", async () => {
+		const h = harness([{ packageVersion: "0.31.0", lockVersion: "0.30.0" }])
 		expect(await runLockVersion(PR, h.io)).toBe(0)
-		expect(h.calls).toEqual(["head release-please--branches--main", "read apps/extension/package.json@c0ffee", "read bun.lock@c0ffee"])
-		expect(h.writes).toEqual([
-			{
-				path: "bun.lock",
-				branch: "release-please--branches--main",
-				text: lock("0.31.0"),
-				replacing: "sha-of-bun.lock",
-				message: "chore: record 0.31.0 in bun.lock",
-			},
+		expect(h.calls).toEqual([`head ${BRANCH}`, "read apps/extension/package.json@h0", "read bun.lock@h0"])
+		expect(h.commits).toEqual([{ expectedHead: "h0", text: lock("0.31.0"), message: "chore: record 0.31.0 in bun.lock" }])
+	})
+
+	test("when the version moves under the write while bun.lock stays, it rereads and writes the new version", async () => {
+		const h = harness([
+			{ packageVersion: "0.31.0", lockVersion: "0.30.0" },
+			{ packageVersion: "0.32.0", lockVersion: "0.30.0" },
 		])
-	})
-
-	test("writes nothing when the lockfile is already in step", async () => {
-		const h = harness("0.31.0", "0.31.0")
 		expect(await runLockVersion(PR, h.io)).toBe(0)
-		expect(h.writes).toEqual([])
+		expect(h.commits).toEqual([{ expectedHead: "h1", text: lock("0.32.0"), message: "chore: record 0.32.0 in bun.lock" }])
 	})
 
-	test("fails without touching GitHub for a branch release-please did not name, and without writing for a bad version", async () => {
-		const stranger = harness("0.31.0", "0.30.0")
+	test("writes nothing when bun.lock is in step, and gives up on a branch that never holds still", async () => {
+		const still = harness([{ packageVersion: "0.31.0", lockVersion: "0.31.0" }])
+		expect(await runLockVersion(PR, still.io)).toBe(0)
+		expect(still.commits).toEqual([])
+		const restless = harness([{ packageVersion: "0.31.0", lockVersion: "0.30.0" }])
+		restless.io.commit = async () => false
+		expect(await runLockVersion(PR, restless.io)).toBe(1)
+		expect(restless.calls.filter((c) => c.startsWith("head"))).toHaveLength(ATTEMPTS)
+	})
+
+	test("fails without touching GitHub for a branch release-please did not name, and without committing for a bad version", async () => {
+		const stranger = harness([{ packageVersion: "0.31.0", lockVersion: "0.30.0" }])
 		expect(await runLockVersion(JSON.stringify({ headBranchName: "main" }), stranger.io)).toBe(1)
 		expect(stranger.calls).toEqual([])
-		const garbled = harness("next", "0.30.0")
+		const garbled = harness([{ packageVersion: "next", lockVersion: "0.30.0" }])
 		expect(await runLockVersion(PR, garbled.io)).toBe(1)
-		expect(garbled.writes).toEqual([])
+		expect(garbled.commits).toEqual([])
 	})
 })
