@@ -119,3 +119,26 @@ describe("forChain", () => {
 		expect(forChain(rows, undefined)).toEqual([])
 	})
 })
+
+describe("classifyRow — row reads", () => {
+	test("a row without a token throws before its numbers are judged", () => {
+		expect(() => classifyRow({ publicBalance: "1" } as unknown as OrderableRow, ctx({}))).toThrow(TypeError)
+	})
+
+	test("a held row's balance properties are read twice", () => {
+		const reads = { pub: 0, priv: 0 }
+		const counted = {
+			get publicBalance() {
+				reads.pub++
+				return "5"
+			},
+			get privateBalance() {
+				reads.priv++
+				return "0"
+			},
+			token: row("C").token,
+		} as OrderableRow
+		expect(classifyRow(counted, ctx({}))).toBe("held-unpriced")
+		expect(reads).toEqual({ pub: 2, priv: 2 })
+	})
+})

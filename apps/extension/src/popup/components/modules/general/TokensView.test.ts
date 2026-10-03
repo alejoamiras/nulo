@@ -7,7 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
-import { nextTick } from "vue"
+import { effect, nextTick, stop } from "vue"
 import { createAppStoreHarness } from "../../../../../tests/helpers/app-store-harness"
 import { installChromeStorage } from "../../../../../tests/helpers/chrome-storage-mock"
 import { TESTNET_TOKENS } from "@/wallet/services/token/default-tokens"
@@ -18,6 +18,7 @@ const H = vi.hoisted(() => {
 		return {
 			add: (fn: (x?: unknown) => void) => handlers.add(fn),
 			remove: (fn: (x?: unknown) => void) => handlers.delete(fn),
+			clear: () => handlers.clear(),
 			emit: (x?: unknown) => {
 				for (const fn of [...handlers]) fn(x)
 			},
@@ -705,5 +706,266 @@ describe("TokensView — loading, placeholders and the empty state", () => {
 		pending.resolve([])
 		await flushPromises()
 		expect(emptyState(wrapper)).toBe(true)
+	})
+})
+
+describe("TokensView — the balance snapshot's fences", () => {
+	const OTHER = "0xother"
+	const emptyState = (w: ReturnType<typeof mount>) => w.find('[data-testid="tokens-empty-import-link"]').exists()
+	const calls = () => H.getTokenBalances.mock.calls.length
+	function held<T>() {
+		let resolve!: (v: T) => void
+		let reject!: (e: unknown) => void
+		const promise = new Promise<T>((res, rej) => {
+			resolve = res
+			reject = rej
+		})
+		return { promise, resolve, reject }
+	}
+	/** A refetch on demand: the first connect is the mount's own, so later ones refetch. */
+	let connects = 0
+	const reconnect = () => {
+		if (connects++ === 0) H.balanceConnected.emit()
+		H.balanceConnected.emit()
+	}
+	let wrapper: ReturnType<typeof mount> | undefined
+
+	beforeEach(() => {
+		resetHarness()
+		// Views mounted by earlier cases are never unmounted and still hold handlers on these events.
+		for (const ev of [H.balanceConnected, H.balanceAdded, H.balanceUpdated, H.balanceDeleted, H.taskConnected]) ev.clear()
+		// The harness copies its defaults shallowly: own objects keep in-place edits inside this case.
+		H.store.current.network = { id: "net-1", chainId: 1 }
+		H.store.current.account = { address: "0xacct" }
+		connects = 0
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+	})
+	afterEach(() => {
+		wrapper?.unmount()
+		wrapper = undefined
+		vi.useRealTimers()
+	})
+	async function mountView() {
+		wrapper = mount(TokensView, { shallow: true })
+		await flushPromises()
+		return wrapper
+	}
+
+	test("account A's snapshot answered during B's task wait never renders under B", async () => {
+		const aFetch = held<unknown[]>()
+		H.getTokenBalances.mockReturnValueOnce(aFetch.promise)
+		const w = await mountView()
+		expect(H.getTokenBalances).toHaveBeenLastCalledWith(undefined, "0xacct")
+
+		const bTasks = held<unknown[]>()
+		H.getTasks.mockReturnValueOnce(bTasks.promise)
+		H.store.current.account = { address: "0xB" }
+		await flushPromises()
+		aFetch.resolve([namedRow(1, "AONLY")])
+		await flushPromises()
+		expect(cardSymbols(w)).toEqual([])
+
+		H.getTokenBalances.mockResolvedValueOnce([{ ...namedRow(2, "BONLY"), account: "0xB" }])
+		bTasks.resolve([])
+		await flushPromises()
+		expect(H.getTokenBalances).toHaveBeenCalledTimes(2)
+		expect(H.getTokenBalances).toHaveBeenLastCalledWith(undefined, "0xB")
+		expect(cardSymbols(w)).toEqual(["BONLY"])
+	})
+
+	test("A's snapshot rejected during B's task wait arms no retry", async () => {
+		const aFetch = held<unknown[]>()
+		H.getTokenBalances.mockReturnValueOnce(aFetch.promise)
+		await mountView()
+		H.getTasks.mockReturnValueOnce(held<unknown[]>().promise)
+		H.store.current.account = { address: "0xB" }
+		await flushPromises()
+		aFetch.reject(new Error("port closed"))
+		await flushPromises()
+		await vi.advanceTimersByTimeAsync(2_100)
+		expect(calls()).toBe(1)
+	})
+
+	test("a retry armed in A fires during B's task wait and asks for B", async () => {
+		H.getTokenBalances.mockRejectedValueOnce(new Error("port closed"))
+		await mountView()
+		H.getTasks.mockReturnValueOnce(held<unknown[]>().promise)
+		H.store.current.account = { address: "0xB" }
+		await flushPromises()
+		expect(calls()).toBe(1)
+		await vi.advanceTimersByTimeAsync(2_000)
+		expect(calls()).toBe(2)
+		expect(H.getTokenBalances).toHaveBeenLastCalledWith(undefined, "0xB")
+	})
+
+	test("an older run in the same scope answering last never overwrites the newer one", async () => {
+		const run1 = held<unknown[]>()
+		H.getTokenBalances.mockReturnValueOnce(run1.promise)
+		const w = await mountView()
+		const run2 = held<unknown[]>()
+		H.getTokenBalances.mockReturnValueOnce(run2.promise)
+		reconnect()
+		run2.resolve([namedRow(2, "NEW")])
+		await flushPromises()
+		run1.resolve([namedRow(1, "OLD")])
+		await flushPromises()
+		expect(cardSymbols(w)).toEqual(["NEW"])
+	})
+
+	test("with no account there is no request, and the list may say it is empty", async () => {
+		H.store.current.account = null
+		const w = await mountView()
+		expect(H.getTokenBalances).not.toHaveBeenCalled()
+		expect(emptyState(w)).toBe(true)
+	})
+
+	test("a rejected snapshot is retried once, and the retry's own rejection arms none", async () => {
+		H.getTokenBalances.mockRejectedValue(new Error("port closed"))
+		await mountView()
+		expect(calls()).toBe(1)
+		await vi.advanceTimersByTimeAsync(2_000)
+		expect(calls()).toBe(2)
+		await vi.advanceTimersByTimeAsync(4_100)
+		expect(calls()).toBe(2)
+	})
+
+	test("a run started before the timed retry cancels it", async () => {
+		H.getTokenBalances.mockRejectedValueOnce(new Error("port closed"))
+		await mountView()
+		await vi.advanceTimersByTimeAsync(1_000)
+		reconnect()
+		await flushPromises()
+		expect(calls()).toBe(2)
+		await vi.advanceTimersByTimeAsync(1_100)
+		expect(calls()).toBe(2)
+	})
+
+	test("only an in-scope update marks a run in flight stale, displayed or not", async () => {
+		await mountView()
+		const quiet = held<unknown[]>()
+		H.getTokenBalances.mockReturnValueOnce(quiet.promise)
+		reconnect()
+		H.balanceUpdated.emit(namedRow(50, "FOREIGN_CHAIN", { chainId: 2 }))
+		H.balanceUpdated.emit({ ...namedRow(51, "FOREIGN_ACCOUNT"), account: OTHER })
+		quiet.resolve([balanceRow()])
+		await flushPromises()
+		expect(calls()).toBe(2)
+
+		const shown = held<unknown[]>()
+		H.getTokenBalances.mockReturnValueOnce(shown.promise)
+		reconnect()
+		H.balanceUpdated.emit(balanceRow())
+		shown.resolve([balanceRow()])
+		await flushPromises()
+		expect(calls()).toBe(4)
+
+		const unseen = held<unknown[]>()
+		H.getTokenBalances.mockReturnValueOnce(unseen.promise)
+		reconnect()
+		H.balanceUpdated.emit(namedRow(99, "UNSEEN"))
+		unseen.resolve([balanceRow()])
+		await flushPromises()
+		expect(calls()).toBe(6)
+	})
+
+	test("an update for a shown id replaces the row whatever account it now carries", async () => {
+		const w = await mountView()
+		H.balanceUpdated.emit({ ...balanceRow(), account: OTHER, token: { ...balanceRow().token, symbol: "MOVED" } })
+		await nextTick()
+		expect(cardSymbols(w)).toEqual(["MOVED"])
+	})
+
+	test("an account replaced by an equal-address object (a rename) clears the rows and refetches", async () => {
+		const w = await mountView()
+		const pending = held<unknown[]>()
+		H.getTokenBalances.mockReturnValueOnce(pending.promise)
+		H.store.current.account = { address: "0xacct", name: "renamed" }
+		await flushPromises()
+		expect(calls()).toBe(2)
+		expect(cardSymbols(w)).toEqual([])
+		pending.resolve([balanceRow()])
+		await flushPromises()
+	})
+
+	test("an in-place chain id change is not a scope change; the run lands on the chain it started on", async () => {
+		const w = await mountView()
+		const pending = held<unknown[]>()
+		H.getTokenBalances.mockReturnValueOnce(pending.promise)
+		reconnect()
+		;(H.store.current.network as { chainId: number }).chainId = 2
+		await flushPromises()
+		expect(calls()).toBe(2)
+		expect(H.getTokenBalances).toHaveBeenLastCalledWith(undefined, "0xacct")
+		pending.resolve([namedRow(1, "STARTCHAIN"), namedRow(2, "NEWCHAIN", { chainId: 2 })])
+		await flushPromises()
+		expect(cardSymbols(w)).toEqual(["STARTCHAIN"])
+	})
+
+	test("an in-place network id change is a scope change", async () => {
+		await mountView()
+		;(H.store.current.network as { id: string }).id = "net-renamed"
+		await flushPromises()
+		expect(calls()).toBe(2)
+	})
+
+	test("after unmount neither the armed retry nor a reconnect asks again", async () => {
+		H.getTokenBalances.mockRejectedValueOnce(new Error("port closed"))
+		const w = await mountView()
+		w.unmount()
+		wrapper = undefined
+		await vi.advanceTimersByTimeAsync(2_100)
+		H.balanceConnected.emit()
+		H.balanceConnected.emit()
+		await flushPromises()
+		expect(calls()).toBe(1)
+	})
+
+	test("a live add on the active chain from another account is ignored", async () => {
+		const w = await mountView()
+		H.balanceAdded.emit({ ...namedRow(5, "OTHER"), account: OTHER })
+		await nextTick()
+		expect(cardSymbols(w)).toEqual(["TKA"])
+	})
+
+	test("an add for a row already shown still marks the run in flight stale", async () => {
+		await mountView()
+		const pending = held<unknown[]>()
+		H.getTokenBalances.mockReturnValueOnce(pending.promise)
+		reconnect()
+		H.balanceAdded.emit(balanceRow())
+		pending.resolve([balanceRow()])
+		await flushPromises()
+		expect(calls()).toBe(3)
+	})
+
+	test("a snapshot whose request already answered lands one microtask later, ahead of a later event", async () => {
+		await mountView()
+		H.getTokenBalances.mockReturnValueOnce(Promise.resolve([balanceRow()]))
+		reconnect()
+		await Promise.resolve()
+		H.balanceUpdated.emit(balanceRow())
+		await flushPromises()
+		expect(calls()).toBe(2)
+	})
+
+	test("the scope check reads the network only once the account matches", async () => {
+		await mountView()
+		let runs = 0
+		const foreign = effect(() => {
+			runs++
+			H.balanceUpdated.emit({ ...namedRow(77, "X"), account: OTHER })
+		})
+		;(H.store.current.network as { chainId: number }).chainId = 9
+		expect(runs).toBe(1)
+		stop(foreign)
+
+		let ownRuns = 0
+		const own = effect(() => {
+			ownRuns++
+			H.balanceUpdated.emit(namedRow(78, "Y"))
+		})
+		;(H.store.current.network as { chainId: number }).chainId = 10
+		expect(ownRuns).toBe(2)
+		stop(own)
 	})
 })

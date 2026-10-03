@@ -35,3 +35,32 @@ describe("aggregateFiat", () => {
 		expect(aggregateFiat([row("A"), row("B")], fiatBy({}))).toEqual({ micro: 0n, priced: 0, holdings: 0, partial: false })
 	})
 })
+
+describe("aggregateFiat — row reads", () => {
+	test("a row without a token but with a parseable balance is a holding with no price", () => {
+		const tokenless = { publicBalance: "3", privateBalance: "0" } as unknown as Row
+		expect(aggregateFiat([row("A", "10"), tokenless], fiatBy({ A: 100n }))).toEqual({
+			micro: 100n,
+			priced: 1,
+			holdings: 2,
+			partial: true,
+		})
+	})
+
+	test("each balance property is read once per row", () => {
+		const reads = { pub: 0, priv: 0 }
+		const counted = {
+			get publicBalance() {
+				reads.pub++
+				return "5"
+			},
+			get privateBalance() {
+				reads.priv++
+				return "0"
+			},
+			token: { symbol: "C", decimals: 6 },
+		}
+		aggregateFiat([counted], () => 1n)
+		expect(reads).toEqual({ pub: 1, priv: 1 })
+	})
+})
