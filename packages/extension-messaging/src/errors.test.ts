@@ -116,56 +116,6 @@ describe("walletErrorFromPayload", () => {
 		expect(rebuilt.message).toBe("A profile with this recovery phrase already exists")
 		expect((rebuilt.details as { existingProfileName?: string })?.existingProfileName).toBe("Main Profile")
 	})
-
-	test("PxeStaleAnchorError round-trips as its subclass with code + constant message; details ride the payload", () => {
-		const err = new PxeStaleAnchorError("proveTx: stale chain anchor persisted after a resync", {
-			op: "proveTx",
-			phase: "op",
-			cause: "Block hash 0xab not found when resolving query",
-		})
-		const rebuilt = walletErrorFromPayload(err.toPayload())
-		expect(rebuilt).toBeInstanceOf(PxeStaleAnchorError)
-		expect(rebuilt.code).toBe("PXE_STALE_ANCHOR")
-		expect(rebuilt.message).toBe("proveTx: stale chain anchor persisted after a resync")
-		expect(rebuilt.details).toMatchObject({ op: "proveTx", phase: "op" })
-	})
-
-	test("ContractNotRegisteredError round-trips as its subclass with the site-frozen message intact", () => {
-		const rebuilt = walletErrorFromPayload(new ContractNotRegisteredError("Contract artifact not found for class 0x0a").toPayload())
-		expect(rebuilt).toBeInstanceOf(ContractNotRegisteredError)
-		expect(rebuilt.code).toBe("CONTRACT_NOT_REGISTERED")
-		expect(rebuilt.message).toBe("Contract artifact not found for class 0x0a")
-	})
-
-	test("SessionEndedError round-trips detail-free, and a message-only payload rebuilds the constant message", () => {
-		const rebuilt = walletErrorFromPayload(new SessionEndedError().toPayload())
-		expect(rebuilt).toBeInstanceOf(SessionEndedError)
-		expect(rebuilt.code).toBe("SESSION_ENDED")
-		expect(rebuilt.message).toBe(SessionEndedError.MESSAGE)
-		expect(rebuilt.details).toBeUndefined()
-		// The operation-result channel carries only the message; whatever text it holds, the rebuilt
-		// error says the constant, so nothing but the class crosses.
-		const fromMessageOnly = walletErrorFromPayload({ code: SessionEndedError.CODE, message: "profile p1 serial 7" })
-		expect(fromMessageOnly).toBeInstanceOf(SessionEndedError)
-		expect(fromMessageOnly.message).toBe(SessionEndedError.MESSAGE)
-	})
-
-	test("ScopeViolationError round-trips as its class with its message and no details", () => {
-		const message = "Scope violation: sendTx call not permitted by granted transaction scope"
-		const rebuilt = walletErrorFromPayload(new ScopeViolationError(message).toPayload())
-		expect(rebuilt).toBeInstanceOf(ScopeViolationError)
-		expect(rebuilt.code).toBe("SCOPE_VIOLATION")
-		expect(rebuilt.message).toBe(message)
-		expect(rebuilt.details).toBeUndefined()
-	})
-
-	test("unknown code → base WalletError, code + message preserved (default arm)", () => {
-		const rebuilt = walletErrorFromPayload({ code: "SOME_FUTURE_CODE", message: "hi", details: { x: 1 } })
-		expect(rebuilt).toBeInstanceOf(WalletError)
-		expect(rebuilt.constructor).toBe(WalletError) // base, not a subclass
-		expect(rebuilt.code).toBe("SOME_FUTURE_CODE")
-		expect(rebuilt.message).toBe("hi")
-	})
 })
 
 describe("every WalletError subclass: identity and wire shape", () => {
@@ -323,7 +273,6 @@ describe("every WalletError subclass: identity and wire shape", () => {
 		{ ctor: RecoveryModeError, make: () => new RecoveryModeError(), name: "RecoveryModeError", code: "RECOVERY_MODE", rebuild: pass },
 	]
 
-	/** What today's rebuild yields for one payload, by the row's rule. */
 	function expected(row: Row, payload: WalletErrorPayload): Expected {
 		const own = { ctor: row.ctor, name: row.name }
 		switch (row.rebuild.kind) {
@@ -377,6 +326,23 @@ describe("every WalletError subclass: identity and wire shape", () => {
 		expect(rebuilt.code).toBe(row.code)
 		expect(rebuilt.message).toBe(err.message)
 		expect(rebuilt.details).toStrictEqual(err.details)
+	})
+
+	test.each<[name: string, make: () => WalletError, message: string]>([
+		["UserRejectedError", () => new UserRejectedError(), "User rejected the request"],
+		[
+			"DuplicateInitializationError",
+			() => new DuplicateInitializationError(),
+			"Another first transaction initialized this account — wait for network sync, then retry.",
+		],
+		["InvalidPasswordError", () => new InvalidPasswordError(), "Invalid profile password"],
+		[
+			"ProfileIdConflictError",
+			() => new ProfileIdConflictError(),
+			"Profile id was claimed during WebAuthn prompt; retry with a new id.",
+		],
+	])("%s keeps its default message", (_name, make, message) => {
+		expect(make().message).toBe(message)
 	})
 
 	const foreignDetails = { jobId: "j", existingProfileName: "n", capabilityType: "accounts", k: 1 }
