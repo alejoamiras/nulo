@@ -20,6 +20,7 @@ const { openToast } = useToast()
 
 /** Components */
 import CollapsingHeroLayout from "@/components/composite/CollapsingHeroLayout.vue"
+import PasswordVisibilityToggle from "@/components/composite/PasswordVisibilityToggle.vue"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -127,19 +128,11 @@ onBeforeUnmount(() => {
 					data-testid="current-password-input"
 				>
 					<template #suffix>
-						<button
-							type="button"
-							@click="isPasswordType = !isPasswordType"
-							tabindex="-1"
-							:class="$style.visibility_btn"
-							:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
-						>
-							<MaterialIcon
-								:name="isPasswordType ? 'visibility' : 'visibility_off'"
-								:size="18"
-								color="secondary"
-							/>
-						</button>
+						<PasswordVisibilityToggle
+							:hidden="isPasswordType"
+							data-testid="current-password-input-visibility-toggle"
+							@toggle="isPasswordType = !isPasswordType"
+						/>
 					</template>
 				</Input>
 			</div>
@@ -169,19 +162,11 @@ onBeforeUnmount(() => {
 					data-testid="new-password-input"
 				>
 					<template #suffix>
-						<button
-							type="button"
-							@click="isPasswordType = !isPasswordType"
-							tabindex="-1"
-							:class="$style.visibility_btn"
-							:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
-						>
-							<MaterialIcon
-								:name="isPasswordType ? 'visibility' : 'visibility_off'"
-								:size="18"
-								color="secondary"
-							/>
-						</button>
+						<PasswordVisibilityToggle
+							:hidden="isPasswordType"
+							data-testid="new-password-input-visibility-toggle"
+							@toggle="isPasswordType = !isPasswordType"
+						/>
 					</template>
 					<template #bottom>
 						<Flex align="center" gap="6" :class="$style.hint_row">
@@ -263,16 +248,6 @@ onBeforeUnmount(() => {
 	color: var(--nulo-secondary);
 }
 
-.visibility_btn {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	background: transparent;
-	border: none;
-	cursor: pointer;
-	padding: 4px 0 4px 8px;
-}
-
 .hint_row {
 	margin-top: 4px;
 }
@@ -285,14 +260,7 @@ onBeforeUnmount(() => {
 	display: block;
 }
 
-@keyframes shakeInput {
-	0% { transform: translateX(0); }
-	20% { transform: translateX(-4px); }
-	40% { transform: translateX(4px); }
-	60% { transform: translateX(-3px); }
-	80% { transform: translateX(2px); }
-	100% { transform: translateX(0); }
+.shake {
+	composes: shake_password from "../../../../components/composite/shake.module.css";
 }
-
-.shake { animation: shakeInput 0.3s ease; }
 </style>

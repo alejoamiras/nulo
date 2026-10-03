@@ -1,4 +1,5 @@
 <script setup>
+import PasswordVisibilityToggle from "@/components/composite/PasswordVisibilityToggle.vue"
 import { newPasswordHint } from "@/utils/password"
 /**
  * Section labels carry the visual heading; individual Inputs run
@@ -41,18 +42,12 @@ const passwordHint = computed(() => newPasswordHint(password.value ?? "", repeat
 			autocomplete="off"
 		>
 			<template #suffix>
-				<button
-					type="button"
-					@click="hideCredentials = !hideCredentials"
-					tabindex="-1" :class="$style.visibility_btn"
-					:aria-label="hideCredentials ? 'Show recovery phrase' : 'Hide recovery phrase'"
-				>
-					<MaterialIcon
-						:name="hideCredentials ? 'visibility' : 'visibility_off'"
-						:size="18"
-						color="secondary"
-					/>
-				</button>
+				<PasswordVisibilityToggle
+					:hidden="hideCredentials"
+					subject="recovery phrase"
+					data-testid="import-seed-input-visibility-toggle"
+					@toggle="hideCredentials = !hideCredentials"
+				/>
 			</template>
 			<template v-if="seedPhrase?.split(' ').length === 24" #bottom>
 				<Flex align="center" gap="4" :class="$style.hint_row">
@@ -76,18 +71,11 @@ const passwordHint = computed(() => newPasswordHint(password.value ?? "", repeat
 				autocomplete="new-password"
 			>
 				<template #suffix>
-					<button
-						type="button"
-						@click="isPasswordType = !isPasswordType"
-						tabindex="-1" :class="$style.visibility_btn"
-						:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
-					>
-						<MaterialIcon
-							:name="isPasswordType ? 'visibility' : 'visibility_off'"
-							:size="18"
-							color="secondary"
-						/>
-					</button>
+					<PasswordVisibilityToggle
+						:hidden="isPasswordType"
+						data-testid="import-password-input-visibility-toggle"
+						@toggle="isPasswordType = !isPasswordType"
+					/>
 				</template>
 				<template #bottom>
 					<Flex align="center" gap="6" :class="$style.hint_row">
@@ -140,16 +128,6 @@ const passwordHint = computed(() => newPasswordHint(password.value ?? "", repeat
 	font-weight: 500;
 	line-height: 1.35;
 	color: var(--txt-tertiary);
-}
-
-.visibility_btn {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	background: transparent;
-	border: none;
-	cursor: pointer;
-	padding: 4px 0 4px 8px;
 }
 
 .hint_row {

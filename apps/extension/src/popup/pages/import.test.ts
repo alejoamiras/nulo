@@ -17,6 +17,7 @@ import { openSearchPanel } from "@codemirror/search"
 import { EditorView } from "@codemirror/view"
 import { Flex, Input, MaterialIcon, Text } from "@nulo/design"
 import { pressOn } from "../../../tests/helpers/press-key"
+import { enterOn, expectNativeAttrs, IGNORED_ENTERS, nativeInput, pasteInto, typeNow } from "../../../tests/helpers/credential-pins"
 import JsonViewer from "@/components/JsonViewer/JsonViewer.vue"
 import SubPageHeader from "@/components/ui/SubPageHeader.vue"
 import ImportPage from "./import.vue"
@@ -238,5 +239,77 @@ describe("popup import — full backup, finished with a network left to retry", 
 		expect(w.get('[data-testid="import-full-backup-warning"]').text()).toContain(
 			"Alpha V5 didn't answer in time, so what was saved for it may not be restored. You can retry or continue.",
 		)
+	})
+})
+
+describe("popup import — the profile-name field", () => {
+	const NAME = "import-name-input"
+	beforeEach(() => {
+		holder.flow.nameFieldState.value = "shown"
+		holder.flow.profileName.value = "Profile 2"
+	})
+
+	test("the field: testid root, placeholder, text type, no autofill hints, the prefill", async () => {
+		const w = await mountImport()
+		const input = nativeInput(w, NAME)
+		expect(input.placeholder).toBe("My Profile")
+		expect(input.type).toBe("text")
+		expect(input.value).toBe("Profile 2")
+		expectNativeAttrs(w, NAME, { autocomplete: null, autocapitalize: null, autocorrect: null })
+	})
+
+	test("typing is sanitized; a real paste is sanitized and capped at 32", async () => {
+		const w = await mountImport()
+		typeNow(nativeInput(w, NAME), "Bob<>!")
+		expect(holder.flow.profileName.value).toBe("Bob")
+		typeNow(nativeInput(w, NAME), "")
+		expect(pasteInto(nativeInput(w, NAME), `Ali<ce>!${"x".repeat(40)}`)).toBe(true)
+		expect(holder.flow.profileName.value).toBe(`Alice${"x".repeat(24)}`)
+	})
+
+	test("handleNameInput runs once per keystroke and already sees the typed name", async () => {
+		const seen: string[] = []
+		holder.flow.handleNameInput.mockImplementation(() => seen.push(holder.flow.profileName.value))
+		const w = await mountImport()
+		typeNow(nativeInput(w, NAME), "Carol")
+		typeNow(nativeInput(w, NAME), "Carol D")
+		expect(seen).toEqual(["Carol", "Carol D"])
+	})
+
+	test("an error shows the alert and aria-invalid; shakeName shakes the input's wrapper", async () => {
+		const w = await mountImport()
+		const shaker = () => w.get(`[data-testid="${NAME}"]`).element.parentElement as HTMLElement
+		expect(w.find('[role="alert"]').exists()).toBe(false)
+		expect(nativeInput(w, NAME).getAttribute("aria-invalid")).toBe("false")
+		expect(shaker().className).not.toMatch(/shake/)
+		holder.flow.nameError.value = "Profile name is required."
+		holder.flow.shakeName.value = true
+		await flushPromises()
+		const alert = shaker().parentElement?.querySelector('[role="alert"]')
+		expect(alert?.textContent?.trim()).toBe("Profile name is required.")
+		expect(nativeInput(w, NAME).getAttribute("aria-invalid")).toBe("true")
+		expect(shaker().className).toMatch(/shake/)
+	})
+
+	test("the flow's nameInputRef focuses the native input", async () => {
+		const w = await mountImport()
+		;(holder.flow.nameInputRef.value as unknown as { focus: () => void }).focus()
+		expect(document.activeElement).toBe(nativeInput(w, NAME))
+	})
+
+	test("a name typed then Enter in the same task restores once, with that name already set", async () => {
+		const seen: string[] = []
+		holder.flow.restoreBackup.mockImplementation(() => seen.push(holder.flow.profileName.value))
+		const w = await mountImport()
+		typeNow(nativeInput(w, NAME), "Dana")
+		enterOn(nativeInput(w, NAME))
+		expect(seen).toEqual(["Dana"])
+	})
+
+	test.each(IGNORED_ENTERS)("a %s Enter in the name field restores nothing", async (_name, press) => {
+		const w = await mountImport()
+		press(nativeInput(w, NAME))
+		await flushPromises()
+		expect(holder.flow.restoreBackup).not.toHaveBeenCalled()
 	})
 })

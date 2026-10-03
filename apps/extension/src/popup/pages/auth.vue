@@ -10,6 +10,7 @@
 /** Components */
 import AuthProfilePill from "@/popup/components/modules/auth/AuthProfilePill.vue"
 import PasskeyCeremonyDialog from "@/components/passkey/PasskeyCeremonyDialog.vue"
+import PasswordVisibilityToggle from "@/components/composite/PasswordVisibilityToggle.vue"
 
 /** Composables */
 import { awaitProfileActivation, BootstrapFailedError, UnlockTimeoutError } from "@/composables/unlockWait"
@@ -262,19 +263,11 @@ watch(
 							autocorrect="off"
 						>
 							<template #suffix>
-								<button
-									type="button"
-									tabindex="-1"
-									@click="isPasswordType = !isPasswordType"
-									:class="$style.visibility_btn"
-									:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
-								>
-									<MaterialIcon
-										:name="isPasswordType ? 'visibility' : 'visibility_off'"
-										:size="18"
-										color="secondary"
-									/>
-								</button>
+								<PasswordVisibilityToggle
+									:hidden="isPasswordType"
+									data-testid="auth-password-input-visibility-toggle"
+									@toggle="isPasswordType = !isPasswordType"
+								/>
 							</template>
 						</Input>
 					</div>
@@ -389,18 +382,6 @@ watch(
 	max-width: 320px;
 }
 
-.visibility_btn {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-
-	background: transparent;
-	border: none;
-	cursor: pointer;
-
-	padding: 4px 0 4px 8px;
-}
-
 .error_text {
 	font-family: var(--font-body);
 	font-size: 12px;
@@ -436,16 +417,7 @@ watch(
 	}
 }
 
-@keyframes shakeInput {
-	0% { transform: translateX(0); }
-	20% { transform: translateX(-4px); }
-	40% { transform: translateX(4px); }
-	60% { transform: translateX(-3px); }
-	80% { transform: translateX(2px); }
-	100% { transform: translateX(0); }
-}
-
 .shake {
-	animation: shakeInput 0.3s ease;
+	composes: shake_password from "../../components/composite/shake.module.css";
 }
 </style>

@@ -1,5 +1,7 @@
-import { mount } from "@vue/test-utils"
-import { describe, expect, it, vi } from "vitest"
+import { Flex, Icon, Input, MaterialIcon, Text } from "@nulo/design"
+import { mount, type VueWrapper } from "@vue/test-utils"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { expectMaskToggle, expectNativeAttrs, nativeInput, pasteInto } from "../../../../tests/helpers/credential-pins"
 import { COLLAPSING_HERO } from "../collapsing-hero"
 import ImportFullBackupForm from "./ImportFullBackupForm.vue"
 
@@ -170,5 +172,48 @@ describe("ImportFullBackupForm", () => {
 		} finally {
 			scroll.mockRestore()
 		}
+	})
+})
+
+describe("ImportFullBackupForm — credential controls, real Input", () => {
+	const mounted: VueWrapper[] = []
+	afterEach(() => {
+		for (const w of mounted.splice(0)) w.unmount()
+	})
+	const mountReal = (selectedBackup: Record<string, unknown>) => {
+		const w = mount(ImportFullBackupForm, {
+			props: baseProps({ selectedBackup }),
+			attachTo: document.body,
+			global: {
+				components: { Flex, Icon, Input, MaterialIcon, Text },
+				stubs: { ItemsContainer: stubs.ItemsContainer, SettingItem: stubs.SettingItem, Transition: stubs.Transition },
+			},
+		})
+		mounted.push(w)
+		return w
+	}
+	const ENCRYPTED = { name: "b.txt", type: "encrypted", profileType: null }
+	const PASSWORD = { name: "b.json", type: "plain", profileType: "password" }
+	const DECRYPT = "import-full-backup-decrypt-password-input"
+	const PAIR = ["import-full-backup-password-input", "import-full-backup-password-confirm-input"]
+
+	it("the decrypt field: its own toggle, focused on mount, no autocomplete", async () => {
+		const w = mountReal(ENCRYPTED)
+		expect(document.activeElement).toBe(nativeInput(w, DECRYPT))
+		expectNativeAttrs(w, DECRYPT, { autocomplete: null, autocapitalize: null, autocorrect: null })
+		await expectMaskToggle(w, {
+			toggle: "import-full-backup-decrypt-password-input-visibility-toggle",
+			field: DECRYPT,
+			drives: [DECRYPT],
+		})
+	})
+
+	it("the new-password pair: one toggle for both, nothing focused, no autocomplete, paste capped at 128", async () => {
+		const w = mountReal(PASSWORD)
+		expect(document.activeElement).toBe(document.body)
+		for (const id of PAIR) expectNativeAttrs(w, id, { autocomplete: null, autocapitalize: null, autocorrect: null })
+		expect(pasteInto(nativeInput(w, PAIR[1]), "z".repeat(130))).toBe(true)
+		expect(w.emitted("update:repeatedPassword")?.at(-1)).toEqual(["z".repeat(128)])
+		await expectMaskToggle(w, { toggle: "import-full-backup-password-input-visibility-toggle", field: PAIR[0], drives: PAIR })
 	})
 })

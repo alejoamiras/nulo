@@ -58,6 +58,7 @@ vi.mock("@/composables/useProfileImportFlow", async (importOriginal) => {
 
 import { BrutalistTitle, Flex, Input, Text } from "@nulo/design"
 import { useToast } from "@/composables/toast"
+import { enterOn, nativeInput } from "../../../tests/helpers/credential-pins"
 import OnboardingProfileNameField from "../components/OnboardingProfileNameField.vue"
 import Import from "./import.vue"
 
@@ -193,5 +194,28 @@ describe("onboarding import", () => {
 
 		expect(bootstrap.bootstrapActiveProfile).toHaveBeenCalledWith({ id: "p9", name: "Imported", type: "password" })
 		expect(router.push).toHaveBeenCalledWith("/onboarding/learn")
+	})
+})
+
+describe("onboarding import — no Enter shortcut", () => {
+	test("Enter in the full-backup password fields, with a restore ready, starts nothing", async () => {
+		const w = await mountImport()
+		const flow = importFlow.api!
+		flow.selectedImportOption.value = "full_backup"
+		flow.selectedBackup.value = {
+			name: "b.json",
+			type: "plain",
+			profileType: "password",
+			backup: { data: { profile: { type: "password" } } },
+		}
+		flow.password.value = "password123"
+		flow.repeatedPassword.value = "password123"
+		await flushPromises()
+		for (const id of ["import-full-backup-password-input", "import-full-backup-password-confirm-input"]) {
+			const ev = enterOn(nativeInput(w, id))
+			expect(ev.defaultPrevented).toBe(false)
+		}
+		await flushPromises()
+		expect(backupImport.api!.restoreStatus.value).toBe("")
 	})
 })

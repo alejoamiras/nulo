@@ -1,6 +1,8 @@
 import { Input } from "@nulo/design"
 import { mount } from "@vue/test-utils"
 import { afterEach, describe, expect, test } from "vitest"
+import { defineComponent, ref } from "vue"
+import { expectNativeAttrs, nativeInput, pasteInto, typeNow } from "../../../tests/helpers/credential-pins"
 import OnboardingProfileNameField from "./OnboardingProfileNameField.vue"
 
 const stubs = {
@@ -71,5 +73,31 @@ describe("OnboardingProfileNameField", () => {
 		const w = mountField()
 		;(w.vm as unknown as { focus: () => void }).focus()
 		expect(document.activeElement).toBe(w.find("input").element)
+	})
+})
+
+describe("OnboardingProfileNameField — value timing and paste", () => {
+	test("the parent's model already holds the typed value when its input handler runs", () => {
+		const seen: string[] = []
+		const Parent = defineComponent({
+			components: { OnboardingProfileNameField },
+			setup() {
+				const name = ref("")
+				return { name, onInput: () => seen.push(name.value) }
+			},
+			template: `<OnboardingProfileNameField v-model="name" @input="onInput" />`,
+		})
+		const w = mount(Parent, { attachTo: document.body, global: { stubs, components: { Input } } })
+		mounted.push(w)
+		typeNow(nativeInput(w, "onboarding-name-input"), "Alice")
+		typeNow(nativeInput(w, "onboarding-name-input"), "Alice B")
+		expect(seen).toEqual(["Alice", "Alice B"])
+	})
+
+	test("a real paste is sanitized and capped at 32; no native maxlength", () => {
+		const w = mountField({ modelValue: "" })
+		expectNativeAttrs(w, "onboarding-name-input", { autocomplete: null, autocapitalize: null, autocorrect: null })
+		expect(pasteInto(nativeInput(w, "onboarding-name-input"), `Ali<ce>!${"x".repeat(40)}`)).toBe(true)
+		expect(w.emitted("update:modelValue")?.at(-1)).toEqual([`Alice${"x".repeat(24)}`])
 	})
 })

@@ -1,4 +1,5 @@
 <script setup>
+import PasswordVisibilityToggle from "@/components/composite/PasswordVisibilityToggle.vue"
 import { newPasswordHint } from "@/utils/password"
 import { COLLAPSING_HERO } from "../collapsing-hero"
 import { restoreWarningText } from "./restore-warning"
@@ -111,18 +112,11 @@ watch(
 			data-testid="import-full-backup-decrypt-password-input"
 		>
 			<template #suffix>
-				<button
-					type="button"
-					@click="isDecryptionPasswordType = !isDecryptionPasswordType"
-					tabindex="-1" :class="$style.visibility_btn"
-					:aria-label="isDecryptionPasswordType ? 'Show password' : 'Hide password'"
-				>
-					<MaterialIcon
-						:name="isDecryptionPasswordType ? 'visibility' : 'visibility_off'"
-						:size="18"
-						color="secondary"
-					/>
-				</button>
+				<PasswordVisibilityToggle
+					:hidden="isDecryptionPasswordType"
+					data-testid="import-full-backup-decrypt-password-input-visibility-toggle"
+					@toggle="isDecryptionPasswordType = !isDecryptionPasswordType"
+				/>
 			</template>
 		</Input>
 	</div>
@@ -139,18 +133,11 @@ watch(
 				data-testid="import-full-backup-password-input"
 			>
 				<template #suffix>
-					<button
-						type="button"
-						@click="isPasswordType = !isPasswordType"
-						tabindex="-1" :class="$style.visibility_btn"
-						:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
-					>
-						<MaterialIcon
-							:name="isPasswordType ? 'visibility' : 'visibility_off'"
-							:size="18"
-							color="secondary"
-						/>
-					</button>
+					<PasswordVisibilityToggle
+						:hidden="isPasswordType"
+						data-testid="import-full-backup-password-input-visibility-toggle"
+						@toggle="isPasswordType = !isPasswordType"
+					/>
 				</template>
 				<template #bottom>
 					<Flex align="center" gap="6" :class="$style.hint_row">
@@ -184,16 +171,6 @@ watch(
 
 .section_label {
 	composes: section_label from "./import-shared.module.css";
-}
-
-.visibility_btn {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	background: transparent;
-	border: none;
-	cursor: pointer;
-	padding: 4px 0 4px 8px;
 }
 
 .hint_row {
