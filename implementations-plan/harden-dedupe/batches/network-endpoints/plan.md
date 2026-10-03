@@ -68,7 +68,7 @@ Today (`network/service.ts:732-765`), the two methods differ in three ways:
 | local carve-out | the seeded-URL check only, inside `_probeChainIdentity` (`:1015`) | `network.kind === "local"` or the seeded URL (`:759`) |
 | order | probe, then carve-out | probe, then carve-out |
 
-Both validate their params, call `ensureInitialized`, require the active profile and an owned row, return `Inactive` without a primary or on any throw, and compare against `network.chainId`.
+Both validate their params, call `ensureInitialized`, require the active profile and an owned row, return `Inactive` without a primary, and compare against `network.chainId`. Only the probe and the comparison sit inside the `try`: a schema, initialization, profile or ownership failure rejects the call, as today.
 
 **What changes:**
 
@@ -83,17 +83,18 @@ Both validate their params, call `ensureInitialized`, require the active profile
   ): Promise<NodeStatus>
   ```
 
-  Its body: active profile, owned row, `findPrimaryEndpoint` (none → `Inactive`), then `try { chainIdAt(primary.rpcUrl, localKind === "applied" ? network.kind : undefined) }`. Equal → `Active`, different → `InvalidChain`, a throw → `Inactive`.
+  Its body: active profile, owned row, `findPrimaryEndpoint` (none → `Inactive`), all outside the `try` so their rejections propagate as today; then `try { chainIdAt(primary.rpcUrl, localKind === "applied" ? network.kind : undefined) }`. Equal → `Active`, different → `InvalidChain`, a throw from the probe → `Inactive`.
 - `getNodeStatus` keeps `validateParams` and `ensureInitialized`, then calls `primaryEndpointStatus(networkId, (url, hint) => this._getChainId(url, hint), "ignored")`. `"ignored"` is B-09, kept.
 - `probeNodeStatus` does the same with an async probe: `await this.nodeFactory.probeChainId(url, timeoutMs)` first, then `isLocalNetworkTarget(url, hint) ? 0 : probed`. So `"applied"` is today's behaviour, and a dead local node is still `Inactive`.
 - The alignment arc's B-09 commit is one token: `"ignored"` → `"applied"` in `getNodeStatus`.
-- **Why an explicit argument and not a default:** it puts the knob where B-09 lives. Today's behaviour is the value each caller passes (see Asks).
+- **Required at both callers, no default** (panel's call): it puts the knob where B-09 lives. Today's behaviour is the value each caller passes.
 
 ### (c) Endpoint identity guard
 
 - `addEndpoint` (`:609-621`) and `updateEndpoint` (`:656-667`) throw the same two `ENDPOINT_CHAIN_MISMATCH` messages, composite first, then L1. A module function `assertSameChainIdentity(probed, network)` holds both checks and the existing XOR-collision comment, called at the same point: inside the lock, after the locked re-read. In `updateEndpoint` it still runs before the endpoint-id lookup (`:668-669`), so the existing precedence test at `network/service.test.ts:990-998` holds.
 - `label?.trim() || undefined` at `:629`, `:676` and `:971` becomes `trimmedLabel(label)`.
 - **What stays:** the peek-and-probe preambles (`:602-606`, `:647-653`). They are two lines each whose comments carry site-specific reasoning, and merging them adds an await hop for nothing.
+- **Comments in these lines:** the probe comment at `:651-652` becomes "Probe outside the lock even for an unchanged URL: the node's chain identity may have drifted."; `_getChainId`'s history paragraph (`:994-1001`) shrinks to the live constraint (a caller that knows the network is local skips the URL comparison). The XOR/L1, IPv6-bracket and userinfo constraints stay. `NewEndpointPopup.test.ts:3`'s `(Q-14)` tag goes in Phase 1.
 
 ### (d) Transport allowlist: a wallet-core leaf, each site's wrapper kept
 
@@ -142,13 +143,14 @@ After the change, both columns must stay identical, row for row. Phase 1 pins th
 | **`https://[2001:db8::1]:8443`**, **`https://exämple.com`**, `http://ⓛocalhost:8080` | ok | ok | IDNA maps `ⓛ` to `l` |
 | **`https://rpc.example.com:65536`**, **`""`** | refuse | refuse (`not a valid URL: …`) | |
 | **`" https://rpc.example.com"`** | ok | ok | both strip C0 and space |
-| **`"https://rpc.example.com "`** | ok | refuse (`not a valid URL`) | zod trims Unicode space before the refine; WHATWG does not |
+| **`"https://rpc.example.com "`**, **`" https://rpc.example.com"`** | ok | refuse (`not a valid URL`) | zod trims Unicode space before the refine; WHATWG does not |
+| **`"https://rpc.example.com/path "`**, **`"https://rpc.example.com/?q=x "`** | ok | ok | zod trims; the adapter reads the NBSP as path or query data |
 | **`https:rpc.example.com`** | ok | ok | zod 4 requires `://` only under its http-protocol option |
 | **`ws://localhost:8080`**, **`javascript:alert(1)`**, **`file:///etc/passwd`**, `data:…`, `chrome://extensions`, `blob:https://…` | refuse | refuse (`scheme "<s>:" not in allowlist …`) | |
 | **`localhost:8080`** | refuse | refuse (`scheme "localhost:"`) | |
 | **`http://localhost\@evil.com`** | ok | ok | backslash is a path separator, so the host is `localhost` |
 
-The service (`addEndpoint` and the rest) passes the raw string, not zod's trimmed copy, to `normalizeRpcUrl` and the probe. A NBSP-padded URL therefore passes the schema, is refused by the adapter, and reads "RPC didn't respond". That stays (see Drift).
+The service (`addEndpoint` and the rest) passes the raw string, not zod's trimmed copy, to `normalizeRpcUrl` and the probe. A leading NBSP, or one right after the host, therefore passes the schema, is refused by the adapter, and reads "RPC didn't respond". A trailing NBSP after a path or query passes both gates, and the adapter dials the same host with the NBSP as URL data. No transport is bypassed either way; it stays (see Drift).
 
 ### (e) Popup error ladders
 
@@ -214,10 +216,9 @@ Nothing touched is in `scripts/complexity-baseline/manifest.json`. Every new fun
 - The acceptance table holds on Chrome and Firefox as on Bun for every bolded row: those rows exercise spec-defined WHATWG behaviour. Equivalence after the change does not depend on engine, since both before and after read the same `URL` object.
 - The extra microtask hop through `primaryEndpointStatus` is unobservable: both methods are popup RPCs or awaited reads, and no span depends on their timing.
 
-**Asks** (for the panel):
+**Asks:** none open. The panel answered both (see Decisions).
 
-1. **B-09 knob shape.** The program asks for "today's behaviour as the default of a parameter". This plan uses a required `localKind: "applied" | "ignored"` that both callers spell out, rather than a defaulted parameter, so the B-09 value is visible at `getNodeStatus`. Confirm, or ask for a default of `"ignored"`.
-2. **Screenshot states.** The wrong-chain and duplicate states need a live node answering for a chosen chain. Reaching them would put the Testnet key-bearing URL into a published picture, or need a fake JSON-RPC node. The plan proves their copy byte-exactly in component tests, and their pixels through the same `FieldWarning` path as the two states it does shoot. Confirm that this is enough.
+**Engine error text.** A moved expression keeps its local names, or stays inline, wherever malformed stored data could reach it. `findPrimaryEndpoint`'s parameter is named `network`, so a `TypeError` raised at `network.endpoints.find` reads the same on Bun, Chrome and Firefox at every site whose variable is `network`. The two sites with other names (`active` at `:340`, a freshly built seed; `networkToEdit.value` in the popup, a wire-validated row) cannot see a missing array. `network.endpoints[0]` at `:415` stays inline. Phase 2 records a three-engine probe of the `network`-named shape.
 
 ## Phases
 
@@ -264,6 +265,13 @@ Every expected value is a literal, never derived from production code.
   | `Invalid params for addEndpoint: …` | `Something went wrong.` |
 
 - **New `EditEndpointPopup.test.ts`:** the same table through `updateEndpoint`, with Edit's duplicate copy. It uses `vi.stubGlobal` for the real `useFormState` and `usePopupEntity`, and makes the form dirty before submit.
+- **The lazy chain-id read, in both popup files:** the request is held, the network leaves the store, then the request rejects.
+  - A non-mismatch rejection reads no chain id: both popups set their duplicate copy, and nothing reaches the app error handler.
+  - A mismatch rejection: New shows `Wrong chain. This network is chain undefined.`; Edit's handler throws a `TypeError` into the app error handler and sets no copy.
+  - Either way the submit latch clears (`finally`).
+
+  An eager getter, a `?.` in Edit or a `.` in New turns a row red.
+- **`NewEndpointPopup.test.ts:3`** loses its `(Q-14)` tag.
 - **New `EditNetworkPopup.test.ts`:** one row. Opening the popup on a network with a dangling primary runs the default fill without error and fills the name.
 
 The phase is green against the unchanged code, in its own commit, so the test files freeze before Phase 2.
@@ -282,6 +290,7 @@ The phase is green against the unchanged code, in its own commit, so the test fi
 | userinfo moves into the leaf, or out of the schema | the userinfo rows |
 | one reason string is reworded | the adapter table |
 | the ladder's order is swapped, `===` becomes `includes`, or Edit gets New's copy | the popup tables |
+| the chain id is read eagerly, or New and Edit swap `?.` and `.` | the lazy-read rows |
 | `getReceiptFee` falls back to `getNode` | its row |
 
 ### Phase 2: the refactor
@@ -292,19 +301,27 @@ Make the edits in (a) through (e) with every Phase 1 file untouched. The only te
 
 Run the local screenshot harness (outside the repo) as batch `network-endpoints`, base `<parent>` and head `<head>`, on Chrome and Firefox, dark and light, at 360×600@2x on the real build. A `--stability` pass must be clean too.
 
-- **Surfaces.** Each one is reached from Settings → Networks, with no Aztec sandbox and no port stub. Endpoint surfaces use the seeded Local Network: its detail id comes from its `nulo:core:networks@*` row, and its URL carries no provider key.
+- **A fake local node, no proxy evidence.** A loopback HTTP fixture answers the SDK's batched `aztec_getNodeInfo` with a schema-valid `NodeInfo` whose `l1ChainId` and `rollupVersion` come from the request path (`/l1/<n>/rv/<n>`). It drives the real popup, client, service and adapter: `http://127.0.0.1:<port>` already passes the unchanged allowlist.
+  - **The port:** claimed in the host registry under its atomic lock, bound to loopback only, never 8080, and held for the whole base, head and stability session, since the URL shows in the shots.
+  - **The process:** started detached in its own process group, with its pid and pgid recorded. On completion, failure or a signal the wrapper kills that pgid only, reaps it, and releases the registry row.
+  - **The harness:** the fixture, its wrapper and `surfaces/network-endpoints.ts` are new files beside the shared harness. Nothing shared is edited.
+- **Data.** Every shown URL is credential-free and local; the Testnet URL never appears. The surfaces work on the seeded Local Network (chain 0, L1 31337, kind `local`), found by its `nulo:core:networks@*` row. Before any shot they add two fixture endpoints that answer L1 31337, A and B, through the New endpoint popup, if they are not already there.
 
   | surface | how | copy asserted before the shot |
   |---|---|---|
-  | `edit-network` | Testnet detail → `network-detail-rename` | none; the popup's title is shown |
+  | `edit-network` | Local detail → `network-detail-rename` | none; the name field holds `Local Network` |
   | `new-endpoint` | Local detail → `endpoint-add-btn` | none; the form is empty |
-  | `new-endpoint-invalid` | type `http://example.com` into `endpoint-rpc-input` → `add-endpoint-submit` (refused popup-side, no RPC) | `Something went wrong.` |
+  | `new-endpoint-invalid` | `http://example.com` → submit (refused popup-side, no RPC) | `Something went wrong.` |
   | `new-endpoint-unreachable` | `http://localhost:1` → submit (a refused probe, as `tests/e2e/endpoints.test.ts:162` does) | `RPC didn't respond. Check the URL.` |
-  | `edit-endpoint` | Local detail → `endpoint-edit-btn` | none; prefilled `http://localhost:8080` |
-  | `edit-endpoint-invalid`, `edit-endpoint-unreachable` | the same two URLs → `edit-endpoint-submit` | the same two strings |
+  | `new-endpoint-wrong-chain` | fixture `/l1/1/rv/1` → submit (the composite is forced to 0 on a local network, so the L1 check fires) | `Wrong chain. This network is chain 0.` |
+  | `new-endpoint-duplicate` | fixture A again → submit | `This URL is already an endpoint of this network.` |
+  | `edit-endpoint` | Local detail → B's `endpoint-edit-btn` | none; prefilled with B |
+  | `edit-endpoint-invalid`, `-unreachable`, `-wrong-chain` | B edited to the same three URLs → submit | the same three strings |
+  | `edit-endpoint-duplicate` | B edited to A → submit (a different endpoint) | `Another endpoint of this network uses that URL.` |
 
-- **Leave and theme loop.** Each surface closes its popup on `leave`. Nothing is persisted, because every submit fails, so the theme loop repeats cleanly.
+- **Leave and theme loop.** Each surface closes its popup on `leave`. Only the A and B seed persists, and it happens before the first shot, so both themes and both builds see the same rows.
 - **Text assertions.** The surface file asserts each error string before the shot, so a wrong state cannot pass as identical.
+- **If the fixture proves infeasible,** all of (e) is deferred, not only its error states, and the lessons file records why.
 
 **Validation gate (after each phase):**
 
@@ -335,7 +352,7 @@ Run the local screenshot harness (outside the repo) as batch `network-endpoints`
 
 ## Delivery
 
-One arc, `hd/09-network-endpoints`, stacked on `harden-dedupe` above the arcs open at delivery (the driver sets the parent). It must land before estimate-reuse. Code review: off.
+One arc, `hd/09-network-endpoints`, stacked on `harden-dedupe` above the arcs open at delivery (the driver sets the parent). It must land before arc 11, estimate-reuse, which adopts `findPrimaryEndpoint` at the execution sites. Code review: off.
 
 ## UI impact
 
@@ -350,10 +367,24 @@ None by design.
 - **B-09 (owner call 1):** `getNodeStatus` ignores `network.kind`, so an edited Local Network endpoint reads `InvalidChain` on the header badge and is left out of backups (`account-state/service.ts:221`). The fix is the one-token `localKind` flip above. Its evidence covers the badge and a restored backup's contents.
 - **Userinfo:** the schema refuses it and the adapter accepts it. This is the program's "kept as today, no call" policy, excluded from the safer-fix route.
 - **Duplicate-URL wording** differs per popup: kept as a parameter, no call.
-- **Zod trims, the service does not:** a URL padded with Unicode space (NBSP and the like) passes the schema, then fails the adapter as "RPC didn't respond". Never accepted, so not a security gap; a robustness follow-up.
+- **Zod trims, the service does not:** a leading NBSP, or one right after the host, passes the schema, then fails the adapter as "RPC didn't respond". A trailing NBSP after a path or query passes both, and the stored URL carries it as path or query data. No transport is bypassed; a robustness and URL-consistency follow-up.
 - **Follow-ups, not drift:**
   - `EditNetworkPopup`'s vestigial URL field (`:36-42`, `:61`), dead state with a comment saying so;
   - the unused `NetworkInfoSchema` export (`spec.ts:199-205`);
   - `tests/e2e/endpoints.test.ts:169-171`'s claim that unit tests assert the copy, which becomes true here.
 
 ## Decisions (delegated)
+
+### Plan audit (Codex round 1, GPT-6 Astra xhigh: REVISE; independent Opus panelist: REVISE), 2026-10-03
+
+Codex verified against `bb014f77`: an in-memory `rpcTransportVerdict` candidate matched the schema's outputs and errors and the adapter's exact result objects on 8,777 inputs. Userinfo stays schema-only and the three reasons are verbatim. All 11 primary-lookup policies hold, the identity order and lock boundaries are right, and the popup ladder with its lazy getters is right as proposed.
+
+All adopted:
+
+1. **Ask 2: build a fake local node.** No proxy evidence: the wrong-chain and duplicate states are shot in both popups, on both browsers and themes, base against head, with a stability pass. The fixture answers `aztec_getNodeInfo` (not `node_getNodeInfo`) in the SDK's batch format, on a registry-claimed loopback port that one session keeps throughout. Its process group is owned and torn down by pgid. All shown data is credential-free and local, the rename shot included. If it proves infeasible, all of (e) is deferred (§ Phase 3).
+2. **Ask 1: `localKind` required at both callers, no default.** `"ignored"` for `getNodeStatus` keeps B-09; `"applied"` for `probeNodeStatus`. The wording now puts initialization, the profile and ownership checks and the primary lookup outside the probe's `catch`, where today's rejections come from (§ (b)).
+3. **Pin the lazy chain-id read before extracting:** deferred-rejection rows with the network gone, mutation-checked against an eager getter and a `?.`/`.` swap (§ Phase 1).
+4. **NBSP wording qualified,** with the path and query rows that pass both gates added as characterization. It is a robustness follow-up with no transport bypass (§ (d), Drift).
+5. **Engine error text:** local names kept, or the expression left inline, wherever malformed stored data could reach it, plus a three-engine probe (§ Assumptions).
+6. **Comments:** the `(Q-14)` test tag, the probe comment at `network/service.ts:651-652` and the history paragraph at `:994-1001` are compressed. The XOR/L1, IPv6-bracket and userinfo constraints stay (§ (c)).
+7. **Arc 9 lands before arc 11** (§ Delivery).
