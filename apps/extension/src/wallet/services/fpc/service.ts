@@ -4,6 +4,7 @@ import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { ProfileService } from "@/wallet/services/profile/service"
+import { profileDeletedError } from "@/wallet/services/profile/profile-deletion-state"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
@@ -234,7 +235,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		await this.storage.set(id, fpc)
 		if (!deletion.isCurrent(fence.profileId, fence.epoch)) {
 			await this.storage.delete(id)
-			throw new Error(`profile ${fence.profileId} deleted`)
+			throw profileDeletedError(fence.profileId)
 		}
 		return fpc
 	}
@@ -298,7 +299,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 			// The set awaits — compensate before the row becomes observable.
 			if (!deletion.isCurrent(fence.profileId, fence.epoch)) {
 				await this.storage.delete(id)
-				throw new Error(`profile ${fence.profileId} deleted`)
+				throw profileDeletedError(fence.profileId)
 			}
 			const decorated = this.decorate(fpc, protocols)
 			this.emit("onFpcAdded", decorated)

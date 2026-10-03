@@ -230,7 +230,10 @@ describe("TransactionService.restore — deletion fence (N-14, threaded profileI
 	})
 
 	test("fails closed when the created-profile id is missing", async () => {
-		await expect(service.restore([mkTx("0xh1")], undefined as never)).rejects.toThrow(/profile id/)
+		for (const bad of ["", undefined, 5]) {
+			await expect(service.restore([mkTx("0xh1")], bad as never)).rejects.toThrow(/^restore requires the created profile id$/)
+		}
+		await expect(service.getTransaction("0xh1")).rejects.toThrow()
 	})
 
 	test("positive control: no deletion → both rows land", async () => {

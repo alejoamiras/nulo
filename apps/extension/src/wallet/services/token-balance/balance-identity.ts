@@ -17,6 +17,13 @@ export function rowMatchesToken(row: RowIdentity, token: TokenIdentity): boolean
 	return row.token === token.id && row.profileId === token.profileId && row.chainId === token.chainId && row.contract === token.contract
 }
 
+/** `rowMatchesToken` against the row's own FK in `tokens`; `false` when the FK is absent. A strict
+ *  boolean: the job queue tests `isRowEmittable(row) === false`. */
+export function rowMatchesItsToken(row: RowIdentity, tokens: ReadonlyMap<number, TokenIdentity>): boolean {
+	const token = tokens.get(row.token)
+	return token !== undefined && rowMatchesToken(row, token)
+}
+
 /**
  * Exact pre-identity (legacy) balance shape: the complete old codec, all three identity
  * fields absent, and the canonical numeric storage key equal to the embedded id. Anything

@@ -1,5 +1,6 @@
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
-import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
+import { assertRestoreEpoch, captureRestoreEpochs, restoreRowProfileId } from "@/wallet/services/restore-fence"
+import { profileDeletedError } from "@/wallet/services/profile/profile-deletion-state"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { deriveAccountSeed, deriveSigningKeyFromSeed } from "@nulo/wallet-crypto"
 import { LogLevel, type ILogger } from "@/wallet/logger"
@@ -41,7 +42,9 @@ import {
 	accountRowId,
 	accountRowIdOf,
 	parseAccountRowId,
+	rowMatchesKey,
 	type Account,
+	type AccountScope,
 	type Events,
 	type Methods,
 } from "./spec"
@@ -150,11 +153,13 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		const accounts = (await this.liveRows()).filter((x) => x.profileId === profileId && x.chainId === chainId)
 		await purgeRows(
 			accounts,
-			async (account) => {
-				await this.storage.delete(accountRowIdOf(account))
-				// An imported account's key row shares the account's chain scope — purge it too.
-				if (account.type === AccountType.Imported) await this.importedKeys.delete(profileId, chainId, account.address)
-			},
+			// Under the row's lock, so a rename parked on its read cannot write the row back.
+			(account) =>
+				this.tupleLocks.withLock(accountRowIdOf(account), async () => {
+					await this.storage.delete(accountRowIdOf(account))
+					// An imported account's key row shares the account's chain scope — purge it too.
+					if (account.type === AccountType.Imported) await this.importedKeys.delete(profileId, chainId, account.address)
+				}),
 			(account) => this.emit("onAccountDeleted", account),
 		)
 	}
@@ -177,7 +182,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	public async getAccount(profileId: string, chainId: number, address: string): Promise<Account | undefined> {
 		await this.ensureInitialized()
 		const account = await this.storage.get(accountRowId(profileId, chainId, address))
-		return account?.profileId === profileId && account.chainId === chainId && account.address === address ? account : undefined
+		return rowMatchesKey(account, profileId, chainId, address) ? account : undefined
 	}
 
 	public async createAccount(profileId: string, chainId: number, type: AccountType, name: string): Promise<Account> {
@@ -293,8 +298,8 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	 * inside their `getValues → compute index → set` sequence, producing
 	 * duplicate accounts at indices 0 and 1.
 	 */
-	// maxHoldMs: null — the prior hand-rolled promise chain had no watchdog; keep
-	// it that way so this stays byte-for-byte equivalent (Q-08 audit).
+	// maxHoldMs: null — no watchdog: a held tuple lock is never force-released.
+	// Under a row lock, await storage only; chain purges can already hold the network lock.
 	private readonly tupleLocks = new KeyedLock({ maxHoldMs: null })
 	private serializePerTuple<T>(profileId: string, chainId: number, type: AccountType, op: () => Promise<T>): Promise<T> {
 		return this.tupleLocks.withLock(`${profileId}:${chainId}:${type}`, op)
@@ -319,7 +324,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	): Promise<Account | undefined> {
 		return this.tupleLocks.withLock(accountRowId(profileId, chainId, address), async () => {
 			const account = await this.storage.get(accountRowId(profileId, chainId, address))
-			if (account?.profileId !== profileId || account.chainId !== chainId) {
+			if (!rowMatchesKey(account, profileId, chainId, address)) {
 				return undefined
 			}
 			if (account[field] !== value) {
@@ -334,9 +339,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	public async getAccountContract(profileId: string, chainId: number, address: string): Promise<IAccountContract> {
 		await this.ensureInitialized()
 		const account = await this.storage.get(accountRowId(profileId, chainId, address))
-		// The row body must agree with the key on every identity field, not only profile/chain:
-		// a row transplanted under another address's key must not redirect signing.
-		if (account?.profileId !== profileId || account.chainId !== chainId || account.address !== address) {
+		if (!rowMatchesKey(account, profileId, chainId, address)) {
 			throw new Error("unknown account address")
 		}
 		if (account.type === AccountType.Imported) {
@@ -406,7 +409,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	public async exportAccount(profileId: string, chainId: number, address: string, password: string, encrypt: boolean): Promise<string> {
 		await this.ensureInitialized()
 		const account = await this.storage.get(accountRowId(profileId, chainId, address))
-		if (account?.profileId !== profileId || account.chainId !== chainId || account.address !== address) {
+		if (!rowMatchesKey(account, profileId, chainId, address)) {
 			throw new Error("unknown account address")
 		}
 		// Service-side authentication: unseal via the profile password (throws on wrong password).
@@ -419,8 +422,8 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		if (account.type === AccountType.Imported) {
 			const keyRow = await this.importedKeys.get(profileId, chainId, address)
 			if (!keyRow) throw new ImportedAccountUnusableError(address, "signing key missing")
-			// Fresh-auth posture preserved (audit LOW-2): the DEK unseals under the SUPPLIED
-			// password directly — session-independent, deletion-guarded — never via SessionManager.
+			// Fresh auth: the DEK unseals under the SUPPLIED password directly —
+			// session-independent, deletion-guarded — never via SessionManager.
 			const dek = await this.profileService.exportImportedKeysDek(profileId, password)
 			let skBytes: Uint8Array<ArrayBuffer> | undefined
 			let skCopy: Buffer | undefined
@@ -464,6 +467,9 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		name?: string,
 	): Promise<Account> {
 		await this.ensureInitialized()
+		// Fenced like createAccount: captured before the DEK read, which a deletion can interleave.
+		const deletion = this.profileService.getDeletionState()
+		const epoch = deletion.capture(profileId)
 		// Session-gated DEK for sealing the key at rest (the credential-rooted isolation boundary
 		// — never the master). A degraded session cannot ACCEPT new imported material: fail loud.
 		const dek = await this.profileService.getProfileDek(profileId)
@@ -496,6 +502,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 				}
 				// KEY ROW FIRST, then the Account row — with compensation. A crash between the two
 				// leaves an orphan key (swept on init) rather than an Account that cannot sign.
+				deletion.assertCurrent(profileId, epoch)
 				await this.importedKeys.set({ profileId, chainId, address: recomputed, encryptedSigningKey: sealed })
 				const account: Account = {
 					profileId,
@@ -510,7 +517,13 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 					visible: true,
 				}
 				try {
+					deletion.assertCurrent(profileId, epoch)
 					await this.storage.set(accountRowIdOf(account), account)
+					if (!deletion.isCurrent(profileId, epoch)) {
+						// Under the row's lock: a rename that read the row must not write it back.
+						await this.tupleLocks.withLock(accountRowIdOf(account), () => this.storage.delete(accountRowIdOf(account)))
+						throw profileDeletedError(profileId)
+					}
 				} catch (rowErr) {
 					await this.importedKeys.delete(profileId, chainId, recomputed).catch(() => {})
 					throw rowErr
@@ -613,10 +626,9 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		return [...out]
 	}
 
-	/** Awaited profile-scoped account purge, called by the deletion coordinator.
-	 *  (Relocated from the removed fire-and-forget `onProfileDeleted` subscriber so
-	 *  deletion is awaited end-to-end — finding D.) Idempotent: delete-of-gone is a
-	 *  no-op, so a resumed/re-run coordinator converges. */
+	/** Awaited profile-scoped account purge, called by the deletion coordinator so deletion is
+	 *  awaited end-to-end. Idempotent: delete-of-gone is a no-op, so a resumed/re-run
+	 *  coordinator converges. */
 	public async purgeForProfile(profileId: string): Promise<void> {
 		await this.ensureInitialized()
 		this.logDebug(`purgeForProfile ${profileId}: remove related accounts`)
@@ -630,7 +642,8 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		// their emit; only the profile-wide purge goes silent.
 		await purgeRows(
 			accounts,
-			(account) => this.storage.delete(accountRowIdOf(account)),
+			// Under the row's lock, so a rename parked on its read cannot write the row back.
+			(account) => this.tupleLocks.withLock(accountRowIdOf(account), () => this.storage.delete(accountRowIdOf(account))),
 			() => {},
 		)
 		// Purge this profile's imported-account signing keys alongside its account rows.
@@ -671,10 +684,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		// Deletion fence captured at entry (see restore-fence.ts): rows written
 		// after a mid-restore deleteProfile must reject, not orphan.
 		const deletion = this.profileService.getDeletionState()
-		const epochs = captureRestoreEpochs(
-			deletion,
-			accounts.map((a) => (a as { profileId?: unknown } | null)?.profileId),
-		)
+		const epochs = captureRestoreEpochs(deletion, accounts.map(restoreRowProfileId))
 
 		// Serialise the whole restore: the intersection check + the writes must be
 		// atomic w.r.t. a concurrent restore, or two imports of the same address
@@ -763,10 +773,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		// Deletion fence captured at entry (see restore-fence.ts) — the rewrap
 		// awaits are long enough for a rollback deleteProfile to complete.
 		const deletion = this.profileService.getDeletionState()
-		const epochs = captureRestoreEpochs(
-			deletion,
-			rows.map((r) => (r as { profileId?: unknown } | null)?.profileId),
-		)
+		const epochs = captureRestoreEpochs(deletion, rows.map(restoreRowProfileId))
 		return await this.restoreLock.withLock(async () => {
 			// One context per restore (normalizeAllIds remapped every row to the new profile id).
 			const profileIds = [...new Set(rows.map((r) => (typeof r?.profileId === "string" ? r.profileId : "")))].filter(Boolean)
@@ -807,17 +814,13 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		})
 	}
 
-	private readonly accountPurgeSubscribers: Array<
-		(profileId: string, scopes: ReadonlyArray<{ chainId: number; address: string }>) => Promise<void>
-	> = []
+	private readonly accountPurgeSubscribers: Array<(profileId: string, scopes: ReadonlyArray<AccountScope>) => Promise<void>> = []
 
 	/** Register an awaited cleanup for account-scope removals. Peer services call this
 	 *  from their `init()`. `reconcileImportedAccounts` awaits every subscriber BEFORE
 	 *  deleting the Account rows; a subscriber throw aborts the removal with every row
 	 *  still in place — dependents die first, never the other way around. */
-	public registerAccountPurgeSubscriber(
-		fn: (profileId: string, scopes: ReadonlyArray<{ chainId: number; address: string }>) => Promise<void>,
-	): void {
+	public registerAccountPurgeSubscriber(fn: (profileId: string, scopes: ReadonlyArray<AccountScope>) => Promise<void>): void {
 		this.accountPurgeSubscribers.push(fn)
 	}
 
@@ -834,7 +837,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	 * scopes actually deleted: the delete pass re-checks key absence per row, so an account
 	 * whose key appeared during the awaited purge is kept and not reported.
 	 */
-	public async reconcileImportedAccounts(profileId: string): Promise<{ chainId: number; address: string }[]> {
+	public async reconcileImportedAccounts(profileId: string): Promise<AccountScope[]> {
 		await this.ensureInitialized()
 		const imported = (await this.liveRows()).filter((a) => a.profileId === profileId && a.type === AccountType.Imported)
 		const keyless: Account[] = []
@@ -846,7 +849,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		for (const subscriber of this.accountPurgeSubscribers) {
 			await subscriber(profileId, scopes)
 		}
-		const dropped: { chainId: number; address: string }[] = []
+		const dropped: AccountScope[] = []
 		for (const account of keyless) {
 			if (await this.importedKeys.get(profileId, account.chainId, account.address)) continue
 			await this.storage.delete(accountRowIdOf(account))

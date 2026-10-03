@@ -315,7 +315,9 @@ describe("TokenBalanceService.restore — hostile-row validation (P1)", () => {
 	})
 
 	test("(N-14) fails closed when the created-profile id is missing", async () => {
-		await expect(service.restore([balance(1, 1)], undefined as never)).rejects.toThrow(/profile id/)
+		for (const bad of ["", undefined, 5]) {
+			await expect(service.restore([balance(1, 1)], bad as never)).rejects.toThrow(/^restore requires the created profile id$/)
+		}
 		expect(await seedRepo.getAll()).toEqual([])
 	})
 
@@ -1205,6 +1207,89 @@ describe("TokenBalanceService reconcile — identity hardening (P2)", () => {
 		})
 		expect((await service.getTokenBalances()).map((b) => b.id)).toEqual([1])
 		expect((await repo.getAll()).map((r) => r.id).sort()).toEqual([1, 2])
+	})
+
+	test("the queue's emit gate answers a strict false for a row whose token is absent from the map", async () => {
+		const { service } = await startWorld({ rows: [], tokens: [liveToken] })
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to the queue's callbacks
+		const gate = (service as any).queue.callbacks.isRowEmittable as (row: TokenBalanceRaw) => unknown
+		expect(gate(balance(1, 100, { contract: "0xtok100" }))).toBe(true)
+		expect(gate(balance(2, 100, { contract: "0xdead" }))).toBe(false)
+		expect(gate(balance(3, 999, { contract: "0xtok999" }))).toBe(false)
+	})
+})
+
+describe("TokenBalanceService row↔token checks — every entry point serves only a row matching its own token", () => {
+	const liveToken = { id: 100, profileId: "A", chainId: 1, contract: "0xtok100", name: "T", symbol: "T", decimals: 18 }
+	const good = balance(1, 100, { account: "0xa", contract: "0xtok100" })
+	const dead = balance(2, 100, { account: "0xa", contract: "0xdead" })
+	const absent = balance(3, 999, { account: "0xa", contract: "0xtok999" })
+
+	async function world() {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const repo = new BalanceRepository(api)
+		for (const row of [good, dead, absent]) await repo.set(row)
+		const service = new TokenBalanceService(new LoggerStore(new ConfigStore()), api)
+		const enqueued: number[] = []
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-ins replacing what init would wire
+		const internals = service as any
+		internals.initialized = true
+		internals.tokens.set(100, liveToken)
+		internals.queue = {
+			enqueue: (row: TokenBalanceRaw) => enqueued.push(row.id),
+			hasPendingTask: () => false,
+			getPendingTaskId: () => "t1",
+		}
+		internals.profileService = { getActiveProfile: async () => ({ id: "A", name: "A", type: "password" }) }
+		internals.tokenService = { getTokensRaw: async () => [liveToken] }
+		const emitted: number[] = []
+		service.onTokenBalanceDeleted.add((b) => {
+			emitted.push(b.id)
+		})
+		return { service, internals, enqueued, emitted, repo }
+	}
+
+	test("reads and refreshes", async () => {
+		const { service, enqueued } = await world()
+		expect((await service.getTokenBalance(1)).id).toBe(1)
+		for (const id of [2, 3]) {
+			await expect(service.getTokenBalance(id)).rejects.toThrow(/^unknown token balance id$/)
+			await expect(service.refreshTokenBalance(id)).rejects.toThrow(/^unknown token balance id$/)
+		}
+		expect((await service.getTokenBalances()).map((b) => b.id)).toEqual([1])
+		await service.refreshTokenBalance(1)
+		await service.refreshAccountBalances("0xa")
+		expect(await service.requestBalanceRefresh(100, "0xa")).toEqual({ taskId: "t1" })
+		expect(await service.requestBalanceRefresh(999, "0xa")).toEqual({ missing: true })
+		expect(enqueued).toEqual([1, 1, 1])
+	})
+
+	test("the narrowed tx refresh and the backup export", async () => {
+		const { service, internals, enqueued } = await world()
+		await internals.enqueueNarrowedBalances(new Set(["0xa"]), new Set([100, 999]))
+		expect(enqueued).toEqual([1])
+		expect((await service.backup()).map((b) => b.id)).toEqual([1])
+	})
+
+	test("pair occupancy: a dead incarnation does not hold the pair's slot", async () => {
+		const { internals } = await world()
+		const pair = [{ token: liveToken, account: { address: "0xa" } }]
+		await internals.lock.withLock(async () => {
+			expect(await internals.ensurePairsHoldingLock(pair, internals.profileGeneration, [good])).toBe(0)
+			expect(await internals.ensurePairsHoldingLock(pair, internals.profileGeneration, [dead])).toBe(1)
+		})
+	})
+
+	test("both purges delete every scoped row but emit only for the row matching its token", async () => {
+		const a = await world()
+		await a.service.purgeForTokens([100, 999], "A")
+		expect(a.emitted).toEqual([1])
+		expect(await a.repo.getAll()).toEqual([])
+		const b = await world()
+		await b.service.purgeForAccounts([{ chainId: 1, address: "0xa" }], "A")
+		expect(b.emitted).toEqual([1])
+		expect(await b.repo.getAll()).toEqual([])
 	})
 })
 

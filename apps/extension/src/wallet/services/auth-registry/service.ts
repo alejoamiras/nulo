@@ -1,6 +1,6 @@
 // Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 import type { ILogger } from "@/wallet/logger"
-import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
+import { assertRestoreEpoch, captureRestoreEpochs, requireRestoreProfileId } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
@@ -11,6 +11,7 @@ import { requireActiveProfile } from "@/wallet/services/profile/require-active-p
 import { NetworkService } from "@/wallet/services/network/service"
 import { type Network, primaryEndpointUrl } from "@/wallet/services/network/spec"
 import { AccountService } from "@/wallet/services/account/service"
+import { type AccountScope, accountScopeKey } from "@/wallet/services/account/spec"
 import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
 import type { WrappedTask } from "@/wallet/services/task/wrapped-task"
 import { TaskService, RevokeAuthwitsContent, StepContent } from "@/wallet/services/task/service"
@@ -314,7 +315,6 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		} catch (error) {
 			// Convert the internal sentinel to the structured RPC-boundary
 			// error so the popup's `classifyCancellableRejection` works.
-			// Same conversion done by `executeTransfer`.
 			maybeRethrowAsRpcCancel(error, task)
 			task.fail(error)
 			throw error
@@ -368,7 +368,6 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		} catch (error) {
 			// Convert the internal sentinel to the structured RPC-boundary
 			// error so the popup's `classifyCancellableRejection` works.
-			// Same conversion done by `executeTransfer`.
 			maybeRethrowAsRpcCancel(error, task)
 			task.fail(error)
 			throw error
@@ -509,71 +508,65 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	 *  Scope is the full tuple: a bare-address match would destroy a sibling profile's rows (shared
 	 *  addresses are a supported state), and an address+profile match would destroy this profile's
 	 *  rows on ANOTHER chain. Idempotent. */
-	public async purgeForAccounts(scopes: ReadonlyArray<{ chainId: number; address: string }>, profileId: string): Promise<void> {
+	public async purgeForAccounts(scopes: ReadonlyArray<AccountScope>, profileId: string): Promise<void> {
 		await this.ensureInitialized()
 		if (scopes.length === 0) return
-		const keys = new Set(scopes.map((s) => `${s.chainId}:${s.address}`))
-		await this.lock.withLock(async () => {
-			const authwits = (await this.authwits.getValues()).filter(
-				(a) => a.profileId === profileId && keys.has(`${a.chainId}:${a.account}`),
-			)
-			await purgeRows(
-				authwits,
-				(authwit) => this.authwits.delete(`${authwit.id}`),
-				(authwit) => this.emit("onAuthwitDeleted", authwit),
-			)
-			// F-B23: raw second pass — a validation-failed row for a purged scope
-			// is invisible to getValues() and would otherwise survive forever.
-			await purgeMalformedRows(
-				this.authwits,
-				(raw) =>
+		const keys = new Set(scopes.map((s) => accountScopeKey(s.chainId, s.address)))
+		// A plain arrow, never async: an async wrapper delays the lock release by a tick.
+		await this.lock.withLock(() =>
+			this.purgeMatchingLocked({
+				row: (a) => a.profileId === profileId && keys.has(accountScopeKey(a.chainId, a.account)),
+				raw: (raw) =>
 					raw.profileId === profileId &&
 					typeof raw.chainId === "number" &&
 					typeof raw.account === "string" &&
-					keys.has(`${raw.chainId}:${raw.account}`),
-				(id) => this.logDebug(`purged malformed authwit row ${id}`),
-			)
-			await this.purgeStatuses((s) => s.profileId === profileId && keys.has(`${s.chainId}:${s.account}`))
-		})
+					keys.has(accountScopeKey(raw.chainId, raw.account)),
+				status: (s) => s.profileId === profileId && keys.has(accountScopeKey(s.chainId, s.account)),
+			}),
+		)
 	}
 
 	/** Awaited authwit + status purge for one whole profile (profile-delete cascade). */
 	public async purgeForProfile(profileId: string): Promise<void> {
 		await this.ensureInitialized()
-		await this.lock.withLock(async () => {
-			const authwits = (await this.authwits.getValues()).filter((a) => a.profileId === profileId)
-			await purgeRows(
-				authwits,
-				(authwit) => this.authwits.delete(`${authwit.id}`),
-				(authwit) => this.emit("onAuthwitDeleted", authwit),
-			)
-			await purgeMalformedRows(
-				this.authwits,
-				(raw) => raw.profileId === profileId,
-				(id) => this.logDebug(`purged malformed authwit row ${id}`),
-			)
-			await this.purgeStatuses((s) => s.profileId === profileId)
-		})
+		await this.lock.withLock(() =>
+			this.purgeMatchingLocked({
+				row: (a) => a.profileId === profileId,
+				raw: (raw) => raw.profileId === profileId,
+				status: (s) => s.profileId === profileId,
+			}),
+		)
 	}
 
 	/** Awaited authwit + status purge for one `(profileId, chainId)` — the chain-purge subscriber
 	 *  (deleteNetwork and the profile-delete network cascade both reach it). */
 	public async purgeChain(profileId: string, chainId: number): Promise<void> {
 		await this.ensureInitialized()
-		await this.lock.withLock(async () => {
-			const authwits = (await this.authwits.getValues()).filter((a) => a.profileId === profileId && a.chainId === chainId)
-			await purgeRows(
-				authwits,
-				(authwit) => this.authwits.delete(`${authwit.id}`),
-				(authwit) => this.emit("onAuthwitDeleted", authwit),
-			)
-			await purgeMalformedRows(
-				this.authwits,
-				(raw) => raw.profileId === profileId && raw.chainId === chainId,
-				(id) => this.logDebug(`purged malformed authwit row ${id}`),
-			)
-			await this.purgeStatuses((s) => s.profileId === profileId && s.chainId === chainId)
-		})
+		await this.lock.withLock(() =>
+			this.purgeMatchingLocked({
+				row: (a) => a.profileId === profileId && a.chainId === chainId,
+				raw: (raw) => raw.profileId === profileId && raw.chainId === chainId,
+				status: (s) => s.profileId === profileId && s.chainId === chainId,
+			}),
+		)
+	}
+
+	/** Under `this.lock`: delete-then-emit each matching authwit, then the matching rows that fail
+	 *  validation (invisible to `getValues()`, so they would otherwise survive forever), then the
+	 *  matching status rows. */
+	private async purgeMatchingLocked(match: {
+		row: (authwit: Authwit) => boolean
+		raw: (raw: Record<string, unknown>) => boolean
+		status: (scope: { profileId: string; chainId: number; account: string }) => boolean
+	}): Promise<void> {
+		const authwits = (await this.authwits.getValues()).filter(match.row)
+		await purgeRows(
+			authwits,
+			(authwit) => this.authwits.delete(`${authwit.id}`),
+			(authwit) => this.emit("onAuthwitDeleted", authwit),
+		)
+		await purgeMalformedRows(this.authwits, match.raw, (id) => this.logDebug(`purged malformed authwit row ${id}`))
+		await this.purgeStatuses(match.status)
 	}
 
 	/** Delete every registry-enabled row whose canonical tuple key matches `keep`. Attribution is
@@ -588,11 +581,8 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 
 	public async restore(authwits: Authwit[], profileId: string): Promise<Restored<Authwit>[]> {
 		await this.ensureInitialized()
-		// Deletion fence keyed on the composable's authoritative created-profile id. Fail closed:
-		// dispatch has no schema validation.
-		if (typeof profileId !== "string" || profileId.length === 0) {
-			throw new Error("restore requires the created profile id")
-		}
+		// Deletion fence keyed on the composable's authoritative created-profile id.
+		requireRestoreProfileId(profileId)
 		const deletion = this.profileService.getDeletionState()
 		const epochs = captureRestoreEpochs(deletion, [profileId])
 

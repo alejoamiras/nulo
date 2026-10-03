@@ -8,11 +8,11 @@ import { NetworkService, networkInfoFrom } from "@/wallet/services/network/servi
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import type { OperationContext, OperationOrigin } from "@/wallet/services/operation-journal/spec"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
-import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
+import { type ExecutionFence, profileDeletedError } from "@/wallet/services/profile/profile-deletion-state"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
 import { nextNumericId } from "@/wallet/services/id-allocators"
-import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
+import { assertRestoreEpoch, captureRestoreEpochs, restoreRowProfileId } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { AccountService } from "@/wallet/services/account/service"
 import { DEFAULT_SHALLOW_PXE_CLIENT_FACTORY, type ShallowPxeClient, type ShallowPxeClientFactory } from "@/wallet/services/pxe/shallow-port"
@@ -418,7 +418,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 					// compensating the just-written row if authority moved during it.
 					if (!this.profiles.getDeletionState().isCurrent(fence.profileId, fence.epoch)) {
 						await this.tokens.delete(`${token.id}`)
-						throw new Error(`profile ${fence.profileId} deleted`)
+						throw profileDeletedError(fence.profileId)
 					}
 					// Network leg of the same compensate: the sweep runs WITHOUT the
 					// token lock (deadlock avoidance — see clearChainState), so a
@@ -459,7 +459,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	private async assertCurrentBeforeEmit(fence: ExecutionFence, tokenId: number, ownsLock: () => boolean): Promise<void> {
 		if (this.profiles.getDeletionState().isCurrent(fence.profileId, fence.epoch)) return
 		if (ownsLock()) await this.tokens.delete(`${tokenId}`)
-		throw new Error(`profile ${fence.profileId} deleted`)
+		throw profileDeletedError(fence.profileId)
 	}
 
 	/** Test/SW-internal trigger for a seed pass (also driven by the unlock and
@@ -855,10 +855,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		// Deletion fence captured at entry (see restore-fence.ts): rows written
 		// after a mid-restore deleteProfile must reject, not orphan.
 		const deletion = this.profiles.getDeletionState()
-		const epochs = captureRestoreEpochs(
-			deletion,
-			tokens.map((t) => (t as { profileId?: unknown } | null)?.profileId),
-		)
+		const epochs = captureRestoreEpochs(deletion, tokens.map(restoreRowProfileId))
 
 		return await this.lock.withLock(async () => {
 			return await restoreRows(tokens, async (token) => {

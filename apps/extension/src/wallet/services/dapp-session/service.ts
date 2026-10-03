@@ -4,7 +4,7 @@ import { CapabilityNotGrantedError, ValidationError } from "@nulo/extension-mess
 import { coversAnyContract, readConsent } from "@nulo/wallet-bridge"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService } from "@/wallet/services/profile/service"
-import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
+import { type ExecutionFence, profileDeletedError } from "@/wallet/services/profile/profile-deletion-state"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { nextRandomId } from "@/wallet/services/id-allocators"
@@ -206,7 +206,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 			// The set awaits — compensate before the grant becomes observable.
 			if (!deletion.isCurrent(fence.profileId, fence.epoch)) {
 				await this.storage.delete(session.id)
-				throw new Error(`profile ${fence.profileId} deleted`)
+				throw profileDeletedError(fence.profileId)
 			}
 			this.emit("onDappSessionAdded", session)
 

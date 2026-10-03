@@ -15,6 +15,7 @@ import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion
 import { LoggerStore } from "@/wallet/logger"
 import { ConfigStore } from "@/wallet/config"
 import { PROFILE_SERVICE_NAME, type ProfileInfo } from "@/wallet/services/profile/spec"
+import { recordWrites } from "../storage-write-log"
 import { ContactService } from "./service"
 
 /**
@@ -328,6 +329,11 @@ describe("ContactService (port-migrated)", () => {
 			{ id: "c2", profileId: profileA.id, name: "Bob", address: "0xb", abbr: "BO" },
 		] as Parameters<typeof contactService.restore>[0]
 
+		test("null, primitive and empty rows are per-row restoreErrors; the valid row still lands", async () => {
+			const restored = await contactService.restore([null, 5, {}, rows[0]] as never)
+			expect(restored.map((r) => typeof r.restoreError)).toEqual(["string", "string", "string", "undefined"])
+		})
+
 		test("a deleteProfile beginning DURING the restore rejects every later row write", async () => {
 			// The first row's awaited storage.set is the interleave point: the
 			// deletion begins while it is in flight, so row 2's pre-write assert
@@ -442,32 +448,31 @@ describe("ContactService (port-migrated)", () => {
 				return realGet(key as never)
 			}) as typeof api.storage.local.get
 
+			const writes = recordWrites(api.storage.local, "nulo:core:contacts@")
 			const run = contactService.addContact("Ghost", "0xdead")
 			await new Promise((r) => setTimeout(r, 0))
 			profile.getDeletionState().beginDeletion(profileA.id)
 			profile.getDeletionState().release(profileA.id)
 			;(parked as (() => void) | null)?.()
 
-			await expect(run).rejects.toThrow(/deleted|not current/i)
+			await expect(run).rejects.toThrow(new RegExp(`^profile ${profileA.id} is being deleted — write rejected \\(epoch 0 → 1\\)$`))
 			api.storage.local.get = realGet as typeof api.storage.local.get
+			writes.restore()
+			expect(writes.log).toEqual([])
 			expect(await contactRowCount()).toBe(0)
 		})
 
 		test("a deletion landing DURING the row write is compensated away before any emit", async () => {
 			const emitted: unknown[] = []
 			contactService.onContactAdded.add((c) => emitted.push(c))
-			const realSet = api.storage.local.set.bind(api.storage.local)
-			let fired = false
-			api.storage.local.set = (async (items: Record<string, unknown>) => {
-				await realSet(items)
-				if (!fired && Object.keys(items).some((k) => k.startsWith("nulo:core:contacts@"))) {
-					fired = true
-					profile.getDeletionState().beginDeletion(profileA.id)
-				}
-			}) as typeof api.storage.local.set
+			const writes = recordWrites(api.storage.local, "nulo:core:contacts@", () => {
+				profile.getDeletionState().beginDeletion(profileA.id)
+			})
 
-			await expect(contactService.addContact("Ghost", "0xdead")).rejects.toThrow(/deleted/)
-			api.storage.local.set = realSet as typeof api.storage.local.set
+			await expect(contactService.addContact("Ghost", "0xdead")).rejects.toThrow(new RegExp(`^profile ${profileA.id} deleted$`))
+			writes.restore()
+			expect(writes.log).toHaveLength(2)
+			expect(writes.log[1]).toBe(writes.log[0]?.replace(/^set:/, "remove:"))
 			expect(await contactRowCount()).toBe(0)
 			expect(emitted).toHaveLength(0)
 		})

@@ -3,6 +3,7 @@ import type { Fr } from "@aztec-labs/foundation/curves/bn254"
 import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
+import { profileDeletedError } from "@/wallet/services/profile/profile-deletion-state"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { validateParams } from "@nulo/extension-messaging/zod"
@@ -346,7 +347,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		await this.storage.set(network.id, network)
 		if (!deletion.isCurrent(fence.profileId, fence.epoch)) {
 			await this.storage.delete(network.id)
-			throw new Error(`profile ${fence.profileId} deleted`)
+			throw profileDeletedError(fence.profileId)
 		}
 		return network
 	}
@@ -515,7 +516,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			// The set awaits — compensate before the row becomes observable.
 			if (!deletion.isCurrent(fence.profileId, fence.epoch)) {
 				await this.storage.delete(network.id)
-				throw new Error(`profile ${fence.profileId} deleted`)
+				throw profileDeletedError(fence.profileId)
 			}
 			this.emit("onNetworkAdded", network)
 			return network

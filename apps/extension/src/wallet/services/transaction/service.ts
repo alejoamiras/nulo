@@ -1,5 +1,5 @@
 import { TxHash } from "@aztec-labs/stdlib/tx"
-import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
+import { assertRestoreEpoch, captureRestoreEpochs, requireRestoreProfileId } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
@@ -530,10 +530,8 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		await this.ensureInitialized()
 		// Deletion fence keyed on the composable's authoritative created-profile
 		// id — tx rows' own profileId is optional AND backup-controlled, so it
-		// cannot anchor the fence. Fail closed: dispatch has no schema validation.
-		if (typeof profileId !== "string" || profileId.length === 0) {
-			throw new Error("restore requires the created profile id")
-		}
+		// cannot anchor the fence.
+		requireRestoreProfileId(profileId)
 		const deletion = this.deletionState
 		const epochs = captureRestoreEpochs(deletion, [profileId])
 

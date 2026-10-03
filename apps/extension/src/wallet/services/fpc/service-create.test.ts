@@ -13,6 +13,7 @@ import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion
 import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/spec"
 import { NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
 import { svc } from "../composition-harness"
+import { recordWrites } from "../storage-write-log"
 
 vi.mock("@/wallet/services/execution/contract-resolver", () => ({
 	ensureRegistered: async () => {},
@@ -98,13 +99,16 @@ describe("FPC creation fences", () => {
 			}),
 		}
 
+		const writes = recordWrites(h.api.storage.local, "nulo:core:fpcs@")
 		const run = h.service.addFpc("n1", FpcType.DefaultSponsoredFpc, `0x${"11".repeat(32)}`, "New")
 		await new Promise((r) => setTimeout(r, 0))
 		h.deletionState.beginDeletion("p1")
 		h.deletionState.release("p1")
 		gate.resolve(SPONSOR_ARTIFACT)
 
-		await expect(run).rejects.toThrow(/deleted|not current/i)
+		await expect(run).rejects.toThrow(/^profile p1 is being deleted — write rejected \(epoch 0 → 1\)$/)
+		writes.restore()
+		expect(writes.log).toEqual([])
 		expect(await fpcRowCount(h.api)).toBe(0)
 	})
 
@@ -127,6 +131,50 @@ describe("FPC creation fences", () => {
 
 		await run
 		expect(await fpcRowCount(h.api)).toBe(0)
+	})
+
+	test("getFpcs discovery: a deletion landing DURING a protocol row write compensates it; the logged refusal is exact", async () => {
+		const h = await makeHarness()
+		;(h.service as unknown as { pxeService: unknown }).pxeService = {
+			getPXE: () => ({ registerContract: async () => {} }),
+		}
+		const logError = vi.spyOn(h.service as unknown as { logError: (m: string, e: unknown) => void }, "logError")
+		let fired = false
+		const writes = recordWrites(h.api.storage.local, "nulo:core:fpcs@", () => {
+			if (fired) return
+			fired = true
+			h.deletionState.beginDeletion("p1")
+		})
+
+		await h.service.getFpcs(1)
+		writes.restore()
+		expect(writes.log).toHaveLength(2)
+		expect(writes.log[1]).toBe(writes.log[0]?.replace(/^set:/, "remove:"))
+		expect(fired).toBe(true)
+		const errors = logError.mock.calls.map(([, e]) => (e as Error).message)
+		expect(errors[0]).toBe("profile p1 deleted")
+		expect(await fpcRowCount(h.api)).toBe(0)
+	})
+
+	test("addFpc: a deletion landing DURING the row write is compensated away before any emit", async () => {
+		const h = await makeHarness()
+		;(h.service as unknown as { pxeService: unknown }).pxeService = {
+			getPXE: () => ({
+				getContractInstance: async () => ({ currentContractClassId: "c1" }),
+				getContractArtifact: async () => SPONSOR_ARTIFACT,
+			}),
+		}
+		const emitted: unknown[] = []
+		h.service.onFpcAdded.add((f) => emitted.push(f))
+		const writes = recordWrites(h.api.storage.local, "nulo:core:fpcs@", () => h.deletionState.beginDeletion("p1"))
+
+		await expect(h.service.addFpc("n1", FpcType.DefaultSponsoredFpc, `0x${"11".repeat(32)}`, "New")).rejects.toThrow(
+			/^profile p1 deleted$/,
+		)
+		writes.restore()
+		expect(writes.log).toHaveLength(2)
+		expect(writes.log[1]).toBe(writes.log[0]?.replace(/^set:/, "remove:"))
+		expect(emitted).toHaveLength(0)
 	})
 })
 

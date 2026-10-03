@@ -10,7 +10,8 @@
  * mined→confirm / dropped→remove transitions, the per-scope ceiling, the tuple scoping).
  */
 import { beforeEach, describe, expect, test, vi } from "vitest"
-import { SessionEndedError, TermsAcceptanceRequiredError } from "@nulo/extension-messaging/errors"
+import { JobCancelledError, SessionEndedError, TermsAcceptanceRequiredError } from "@nulo/extension-messaging/errors"
+import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { ServiceCollection } from "@/wallet/base"
@@ -23,10 +24,12 @@ import { NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
 import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/spec"
 import { type ExecutionFence, ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { TASK_SERVICE_NAME } from "@/wallet/services/task/spec"
-import { TRANSACTION_SERVICE_NAME, TxExecutionResult, TxStatus } from "@/wallet/services/transaction/spec"
+import { OriginType, TRANSACTION_SERVICE_NAME, TxExecutionResult, TxStatus } from "@/wallet/services/transaction/spec"
+import { getAuthRegistryAddress } from "@/wallet/utils/auth-registry"
 import { svc } from "../composition-harness"
+import { recordWrites } from "../storage-write-log"
 import { AuthRegistryService, MAX_TRACKED_AUTHWITS_PER_ACCOUNT } from "./service"
-import type { Authwit } from "./spec"
+import { type Authwit, authwitStatusRowId } from "./spec"
 
 const noopLogger = { log: () => {} }
 const A = "0xowner"
@@ -238,6 +241,201 @@ describe("AuthRegistryService sends run under the session the user acted in", ()
 		expect(h.captureExecutionFence).toHaveBeenCalledTimes(1)
 		expect(h.executeSendTransaction).toHaveBeenCalledTimes(1)
 		expect(h.executeSendTransaction.mock.calls[0]?.[4]).toMatchObject({ session: 1 })
+	})
+})
+
+describe("AuthRegistryService purges — each method's scope, survivors and order", () => {
+	const ROOT = "nulo:core:auth-registry@"
+	const STATUS_ROOT = "nulo:core:auth-registry-enabled@"
+	const B = "0xother"
+	const typed = {
+		in: { id: 1, profileId: "p1", chainId: 1, account: A },
+		sibling: { id: 2, profileId: "p2", chainId: 1, account: A },
+		otherChain: { id: 3, profileId: "p1", chainId: 2, account: A },
+		otherAddress: { id: 4, profileId: "p1", chainId: 1, account: B },
+	}
+	const malformed = {
+		in: { id: 90, profileId: "p1", chainId: 1, account: A, hash: 5, content },
+		out: { id: 91, profileId: "p2", chainId: 1, account: A, hash: 5, content },
+	}
+	const statusKeys = {
+		in: `${STATUS_ROOT}${authwitStatusRowId("p1", 1, A)}`,
+		sibling: `${STATUS_ROOT}${authwitStatusRowId("p2", 1, A)}`,
+		otherChain: `${STATUS_ROOT}${authwitStatusRowId("p1", 2, A)}`,
+		otherAddress: `${STATUS_ROOT}${authwitStatusRowId("p1", 1, B)}`,
+	}
+
+	async function seeded() {
+		const h = await makeHarness()
+		const entries: Record<string, string> = {}
+		for (const row of Object.values(typed)) entries[`${ROOT}${row.id}`] = JSON.stringify({ ...row, hash: `0x${row.id}`, content })
+		for (const row of Object.values(malformed)) entries[`${ROOT}${row.id}`] = JSON.stringify(row)
+		for (const key of Object.values(statusKeys)) entries[key] = JSON.stringify(true)
+		await h.api.storage.local.set(entries)
+		const writes = recordWrites(h.api.storage.local, "nulo:core:auth-registry")
+		h.service.onAuthwitDeleted.add((a) => {
+			writes.log.push(`emit:${a.id}`)
+		})
+		const survivors = async () =>
+			Object.keys((await h.api.storage.local.get(null)) as Record<string, unknown>)
+				.filter((k) => k.startsWith("nulo:core:auth-registry"))
+				.sort()
+		return { h, writes, survivors }
+	}
+
+	const removed = (id: number) => [`remove:${ROOT}${id}`, `emit:${id}`]
+
+	test("purgeForAccounts removes only the (profile, chain, address) tuple", async () => {
+		const { h, writes, survivors } = await seeded()
+		await h.service.purgeForAccounts([{ chainId: 1, address: A }], "p1")
+		writes.restore()
+		expect(writes.log).toEqual([...removed(1), `remove:${ROOT}90`, `remove:${statusKeys.in}`])
+		expect(await survivors()).toEqual(
+			[`${ROOT}2`, `${ROOT}3`, `${ROOT}4`, `${ROOT}91`, statusKeys.sibling, statusKeys.otherChain, statusKeys.otherAddress].sort(),
+		)
+	})
+
+	test("purgeForProfile removes the profile's rows on every chain and address", async () => {
+		const { h, writes, survivors } = await seeded()
+		await h.service.purgeForProfile("p1")
+		writes.restore()
+		expect(writes.log).toEqual([
+			...removed(1),
+			...removed(3),
+			...removed(4),
+			`remove:${ROOT}90`,
+			`remove:${statusKeys.in}`,
+			`remove:${statusKeys.otherChain}`,
+			`remove:${statusKeys.otherAddress}`,
+		])
+		expect(await survivors()).toEqual([`${ROOT}2`, `${ROOT}91`, statusKeys.sibling].sort())
+	})
+
+	test("purgeChain removes the profile's rows on that chain only", async () => {
+		const { h, writes, survivors } = await seeded()
+		await h.service.purgeChain("p1", 1)
+		writes.restore()
+		expect(writes.log).toEqual([
+			...removed(1),
+			...removed(4),
+			`remove:${ROOT}90`,
+			`remove:${statusKeys.in}`,
+			`remove:${statusKeys.otherAddress}`,
+		])
+		expect(await survivors()).toEqual([`${ROOT}2`, `${ROOT}3`, `${ROOT}91`, statusKeys.sibling, statusKeys.otherChain].sort())
+	})
+})
+
+describe("AuthRegistryService revoke and registry toggle — refusals, settlement order, cancel", () => {
+	const FEE = { paymentMethod: { kind: "fj" } } as never
+
+	function instrument(h: Awaited<ReturnType<typeof makeHarness>>) {
+		const log: string[] = []
+		const internals = h.service as unknown as Record<string, unknown> & {
+			taskService: { startNewTask: (content: unknown) => unknown }
+			transactionService: Record<string, unknown>
+		}
+		internals.taskService.startNewTask = (taskContent: unknown) => {
+			log.push(`task:${(taskContent as { constructor: { name: string } }).constructor.name}`)
+			return { complete: () => log.push("complete"), fail: () => log.push("fail"), cancel: () => log.push("cancel") }
+		}
+		internals.transactionService.waitForTx = async (txHash: string) => {
+			log.push(`waitForTx:${txHash}`)
+		}
+		internals.nodeFor = async () => {
+			log.push("nodeFor")
+			return {}
+		}
+		internals.waitForTxProven = async (_node: unknown, txHash: string) => {
+			log.push(`proven:${txHash}`)
+		}
+		internals.syncAuthwits = async (_node: unknown, scope: unknown, _task: unknown, rows?: Authwit[]) => {
+			log.push(`syncAuthwits:${JSON.stringify(scope)}:${rows?.map((r) => r.id).join(",")}`)
+		}
+		internals.syncStatus = async (_node: unknown, scope: unknown) => {
+			log.push(`syncStatus:${JSON.stringify(scope)}`)
+		}
+		h.executeSendTransaction.mockImplementation(async (...args: unknown[]) => {
+			log.push(`send:${JSON.stringify(args[0])}:${JSON.stringify(args[1])}:${args[3]}:${JSON.stringify(args[4])}`)
+			return "0xtx"
+		})
+		return log
+	}
+
+	test("the cap and each ownership check refuse before any task or send", async () => {
+		const h = await makeHarness()
+		await h.service.recordPendingAuthwits(P1, [{ hash: "0xh1", content }], "0xtx1")
+		await h.service.recordPendingAuthwits({ ...P1, profileId: "p2" }, [{ hash: "0xh2", content }], "0xtx2")
+		await h.service.recordPendingAuthwits({ ...P1, chainId: 2 }, [{ hash: "0xh3", content }], "0xtx3")
+		await h.service.recordPendingAuthwits({ ...P1, account: "0xother" }, [{ hash: "0xh4", content }], "0xtx4")
+		const log = instrument(h)
+		const tooMany = Array.from({ length: 29 }, (_, i) => i)
+		await expect(h.service.revokeAuthwits("net-1", A, tooMany, FEE)).rejects.toThrow(
+			/^Cannot revoke more than 28 authwits per single tx$/,
+		)
+		for (const id of [2, 3, 4, 99]) {
+			await expect(h.service.revokeAuthwits("net-1", A, [id], FEE)).rejects.toThrow(new RegExp(`^Authwit #${id} doesn't exist$`))
+		}
+		expect(log).toEqual([])
+		expect(h.executeSendTransaction).not.toHaveBeenCalled()
+	})
+
+	test("a revoke settles in order: task, send under the captured fence, tx, proven, sync, complete", async () => {
+		const h = await makeHarness()
+		await h.service.recordPendingAuthwits(P1, [{ hash: "0xh1", content }], "0xtx1")
+		const log = instrument(h)
+		await h.service.revokeAuthwits("net-1", A, [1], FEE)
+		const fence = JSON.stringify(await h.captureExecutionFence.mock.results.at(-1)?.value)
+		const request = {
+			kind: "send_transaction",
+			networkId: "net-1",
+			accountAddress: A,
+			feeSettings: FEE,
+			actions: [{ kind: "call", contract: getAuthRegistryAddress().toString(), method: "set_authorized", args: ["0xh1", false] }],
+		}
+		expect(log).toEqual([
+			"task:RevokeAuthwitsContent",
+			`send:${JSON.stringify(request)}:${JSON.stringify({ type: OriginType.UI })}:undefined:${fence}`,
+			"waitForTx:0xtx",
+			"nodeFor",
+			"proven:0xtx",
+			`syncAuthwits:${JSON.stringify(P1)}:1`,
+			"complete",
+		])
+	})
+
+	test("a registry toggle settles in the same order with its own action and sync", async () => {
+		const h = await makeHarness()
+		const log = instrument(h)
+		await h.service.setRegistryEnabled("net-1", A, false, FEE)
+		const fence = JSON.stringify(await h.captureExecutionFence.mock.results.at(-1)?.value)
+		const request = {
+			kind: "send_transaction",
+			networkId: "net-1",
+			accountAddress: A,
+			feeSettings: FEE,
+			actions: [{ kind: "call", contract: getAuthRegistryAddress().toString(), method: "set_reject_all", args: [true] }],
+		}
+		expect(log).toEqual([
+			"task:StepContent",
+			`send:${JSON.stringify(request)}:${JSON.stringify({ type: OriginType.UI })}:undefined:${fence}`,
+			"waitForTx:0xtx",
+			"nodeFor",
+			"proven:0xtx",
+			`syncStatus:${JSON.stringify(P1)}`,
+			"complete",
+		])
+	})
+
+	test("a send failure fails the task; a cancellation cancels it and surfaces JobCancelledError", async () => {
+		const h = await makeHarness()
+		await h.service.recordPendingAuthwits(P1, [{ hash: "0xh1", content }], "0xtx1")
+		const log = instrument(h)
+		const boom = new Error("boom")
+		h.executeSendTransaction.mockRejectedValueOnce(boom).mockRejectedValueOnce(new JobCancelledSentinel("job-1"))
+		await expect(h.service.revokeAuthwits("net-1", A, [1], FEE)).rejects.toBe(boom)
+		await expect(h.service.setRegistryEnabled("net-1", A, false, FEE)).rejects.toBeInstanceOf(JobCancelledError)
+		expect(log).toEqual(["task:RevokeAuthwitsContent", "fail", "task:StepContent", "cancel"])
 	})
 })
 
@@ -563,7 +761,9 @@ describe("AuthRegistryService.restore — deletion fence (threaded profileId)", 
 
 	test("fails closed when the created-profile id is missing", async () => {
 		const h = await makeHarness()
-		await expect(h.service.restore(rows, undefined as never)).rejects.toThrow(/profile id/)
+		for (const bad of ["", undefined, 5]) {
+			await expect(h.service.restore(rows, bad as never)).rejects.toThrow(/^restore requires the created profile id$/)
+		}
 		expect(await h.service.getAuthwits(1, "0xacc")).toHaveLength(0)
 	})
 

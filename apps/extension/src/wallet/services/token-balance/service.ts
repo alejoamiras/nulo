@@ -1,13 +1,14 @@
 import type { ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
+import { assertRestoreEpoch, captureRestoreEpochs, requireRestoreProfileId } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { getTokenInfo } from "@/wallet/services/token/utils"
 import { EventHandler, Lock } from "@nulo/wallet-core/utils"
 import { reconcilePlan } from "./reconcile-pairs"
-import { isLegacyBalanceRow, rowMatchesToken } from "./balance-identity"
+import { isLegacyBalanceRow, rowMatchesItsToken, rowMatchesToken } from "./balance-identity"
 import { AccountService, type Account } from "@/wallet/services/account/service"
+import { type AccountScope, accountScopeKey } from "@/wallet/services/account/spec"
 import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
@@ -131,10 +132,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 					this.emit("onTokenBalanceUpdated", this.getTokenBalanceInfo(balance))
 				},
 				isBalanceInvalidated: (id) => this.invalidatedBalanceIds.has(id),
-				isRowEmittable: (row) => {
-					const token = this.tokens.get(row.token)
-					return token !== undefined && rowMatchesToken(row, token)
-				},
+				isRowEmittable: (row) => rowMatchesItsToken(row, this.tokens),
 				getGeneration: () => this.profileGeneration,
 			},
 			this.logger,
@@ -181,8 +179,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		const balance = await this.repo.get(id)
 		// Identity-mismatched rows answer exactly like absent ones — a foreign or
 		// dead-incarnation row must not be decorated with the id-holder's token.
-		const token = balance && this.tokens.get(balance.token)
-		if (!balance || !token || !rowMatchesToken(balance, token)) {
+		if (!balance || !rowMatchesItsToken(balance, this.tokens)) {
 			throw new Error("unknown token balance id")
 		}
 		return this.getTokenBalanceInfo(balance)
@@ -197,18 +194,14 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 				// Fail-closed row↔token identity: a foreign-profile balance, a dead
 				// incarnation at a reused token id, or a codec-hidden token row must not
 				// render (or throw and white-screen the list).
-				.filter((x) => {
-					const token = this.tokens.get(x.token)
-					return token !== undefined && rowMatchesToken(x, token)
-				})
+				.filter((x) => rowMatchesItsToken(x, this.tokens))
 				.map((x) => this.getTokenBalanceInfo(x), this)
 		)
 	}
 
 	public async refreshTokenBalance(id: number): Promise<void> {
 		const balance = await this.repo.get(id)
-		const token = balance && this.tokens.get(balance.token)
-		if (!balance || !token || !rowMatchesToken(balance, token)) {
+		if (!balance || !rowMatchesItsToken(balance, this.tokens)) {
 			throw new Error("unknown token balance id")
 		}
 		this.queue.enqueue(balance)
@@ -237,8 +230,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		// bare pair-find could pick the stale one and false-report `missing`.
 		const balance = (await this.repo.getAll()).find((x) => {
 			if (x.token !== tokenId || x.account !== accountAddress) return false
-			const token = this.tokens.get(x.token)
-			return token !== undefined && rowMatchesToken(x, token)
+			return rowMatchesItsToken(x, this.tokens)
 		})
 		if (!balance) {
 			return { missing: true }
@@ -252,8 +244,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 	public async refreshAccountBalances(account: string): Promise<void> {
 		for (const balance of (await this.repo.getAll()).filter((x) => x.account === account)) {
-			const token = this.tokens.get(balance.token)
-			if (!token || !rowMatchesToken(balance, token)) continue
+			if (!rowMatchesItsToken(balance, this.tokens)) continue
 			this.queue.enqueue(balance)
 		}
 	}
@@ -325,14 +316,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		// Occupancy requires full identity: a dead incarnation's row at a reused
 		// token id must NOT hold the slot, or the canonical pair is never created.
 		const pairTokens = new Map(pairs.map((p) => [p.token.id, p.token]))
-		const have = new Set(
-			rows
-				.filter((r) => {
-					const token = pairTokens.get(r.token)
-					return token !== undefined && rowMatchesToken(r, token)
-				})
-				.map((r) => `${r.token}:${r.account}`),
-		)
+		const have = new Set(rows.filter((r) => rowMatchesItsToken(r, pairTokens)).map((r) => `${r.token}:${r.account}`))
 		let created = 0
 		for (const { token, account } of pairs) {
 			if (gen !== this.profileGeneration) return created
@@ -548,8 +532,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 				await this.invalidateAndDelete(tb.id)
 				// Delete-before-emit (the repo-wide purge invariant); decorate only
 				// with the row's OWN token, never a reused id's successor.
-				const live = this.tokens.get(tb.token)
-				if (live && rowMatchesToken(tb, live)) this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb))
+				if (rowMatchesItsToken(tb, this.tokens)) this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb))
 			}
 			// F-B23: raw second pass — a validation-failed balance row for a purged
 			// token is invisible to getAll() and would otherwise survive forever.
@@ -571,21 +554,20 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	 *  sibling profile's rows (shared addresses are a supported state), and an
 	 *  address+profile match would destroy this profile's rows on ANOTHER chain.
 	 *  Idempotent. */
-	public async purgeForAccounts(scopes: ReadonlyArray<{ chainId: number; address: string }>, profileId: string): Promise<void> {
+	public async purgeForAccounts(scopes: ReadonlyArray<AccountScope>, profileId: string): Promise<void> {
 		await this.ensureInitialized()
 		if (scopes.length === 0) return
-		const keys = new Set(scopes.map((s) => `${s.chainId}:${s.address}`))
+		const keys = new Set(scopes.map((s) => accountScopeKey(s.chainId, s.address)))
 		// One hold with the creators, fence before every delete — mirrors purgeForTokens.
 		await this.lock.withLock(async () => {
 			for (const tb of (await this.repo.getAll()).filter(
-				(row) => row.profileId === profileId && keys.has(`${row.chainId}:${row.account}`),
+				(row) => row.profileId === profileId && keys.has(accountScopeKey(row.chainId, row.account)),
 			)) {
 				await this.invalidateAndDelete(tb.id)
 				// Delete-before-emit (the repo-wide purge invariant). The scope's profile
 				// is typically NOT active here (restore finalize) — emit only when the map
 				// holds the row's OWN token, never a reused id's successor.
-				const live = this.tokens.get(tb.token)
-				if (live && rowMatchesToken(tb, live)) this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb))
+				if (rowMatchesItsToken(tb, this.tokens)) this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb))
 			}
 			// Raw second pass: a validation-failed new-shape row in scope must not
 			// survive as hidden debris. Old-shape rows carry no profileId/chainId —
@@ -595,7 +577,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 					raw.profileId === profileId &&
 					typeof raw.chainId === "number" &&
 					typeof raw.account === "string" &&
-					keys.has(`${raw.chainId}:${raw.account}`),
+					keys.has(accountScopeKey(raw.chainId, raw.account)),
 				(id) => this.logDebug(`purged malformed balance row ${id}`),
 			)
 		})
@@ -655,8 +637,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		const balances = await this.repo.getAll()
 		for (const tb of balances) {
 			if (!addresses.has(tb.account) || !tokenIds.has(tb.token)) continue
-			const t = this.tokens.get(tb.token)
-			if (t && rowMatchesToken(tb, t)) this.queue.enqueue(tb)
+			if (rowMatchesItsToken(tb, this.tokens)) this.queue.enqueue(tb)
 		}
 	}
 
@@ -667,20 +648,15 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		// → would export nothing). `row.profileId` alone would export a dead
 		// incarnation's debris; the identity join cannot.
 		const owned = new Map((await this.tokenService.getTokensRaw(profile.id)).map((t) => [t.id, t]))
-		return (await this.repo.getAll()).filter((b) => {
-			const token = owned.get(b.token)
-			return token !== undefined && rowMatchesToken(b, token)
-		})
+		return (await this.repo.getAll()).filter((b) => rowMatchesItsToken(b, owned))
 	}
 
 	public async restore(tokenBalances: TokenBalanceRaw[], profileId: string): Promise<Restored<TokenBalanceRaw>[]> {
 		await this.ensureInitialized()
 		// Deletion fence keyed on the composable's authoritative created-profile id —
 		// blob-carried identity fields are overridden below, so only the threaded id
-		// may anchor it. Fail closed: dispatch has no schema validation.
-		if (typeof profileId !== "string" || profileId.length === 0) {
-			throw new Error("restore requires the created profile id")
-		}
+		// may anchor it.
+		requireRestoreProfileId(profileId)
 		const deletion = this.profileService.getDeletionState()
 		const epochs = captureRestoreEpochs(deletion, [profileId])
 		// ONE hold for the whole batch — restore allocates from the same key space

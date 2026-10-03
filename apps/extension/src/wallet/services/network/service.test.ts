@@ -18,6 +18,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { recordWrites } from "../storage-write-log"
 import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import { CHAIN_IDS, LOCAL_L1_CHAIN_ID } from "@/utils/chain-ids"
 import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
@@ -106,7 +107,7 @@ describe("NetworkService — addNetwork creation fence", () => {
 		h.deletionState.release("p1")
 		release({ l1ChainId: 5, rollupVersion: 1 })
 
-		await expect(run).rejects.toThrow(/deleted|not current/i)
+		await expect(run).rejects.toThrow(/^profile p1 is being deleted — write rejected \(epoch 0 → 1\)$/)
 		const raw = await h.browserApi.storage.local.get(null)
 		expect(Object.keys(raw as Record<string, unknown>).some((k) => k.startsWith("nulo:core:networks@"))).toBe(false)
 	})
@@ -118,18 +119,36 @@ describe("NetworkService — addNetwork creation fence", () => {
 		const h = harness({})
 		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
 		;(h.service as any).initialized = true
-		const realSet = h.browserApi.storage.local.set.bind(h.browserApi.storage.local)
+		const logError = vi.spyOn(h.service as unknown as { logError: (m: string, e: unknown) => void }, "logError")
 		let fired = false
-		h.browserApi.storage.local.set = (async (items: Record<string, unknown>) => {
-			await realSet(items)
-			if (!fired && Object.keys(items).some((k) => k.startsWith("nulo:core:networks@"))) {
-				fired = true
-				h.deletionState.beginDeletion("p1")
-				h.deletionState.release("p1")
-			}
-		}) as typeof h.browserApi.storage.local.set
+		const writes = recordWrites(h.browserApi.storage.local, "nulo:core:networks@", () => {
+			if (fired) return
+			fired = true
+			h.deletionState.beginDeletion("p1")
+			h.deletionState.release("p1")
+		})
 
-		await expect(h.service.getOrInitNetworks()).rejects.toThrow(/deleted|not current/i)
+		await expect(h.service.getOrInitNetworks()).rejects.toThrow(/^profile p1 is being deleted — write rejected \(epoch 0 → 1\)$/)
+		writes.restore()
+		// The first seed's write is compensated; every later seed is refused before writing.
+		expect(writes.log).toHaveLength(2)
+		expect(writes.log[1]).toBe(writes.log[0]?.replace(/^set:/, "remove:"))
+		expect((logError.mock.calls[0]?.[1] as Error | undefined)?.message).toBe("profile p1 deleted")
+	})
+
+	test("a deletion landing DURING the row write is compensated away before any emit", async () => {
+		const h = harness({ "https://new.example/": { l1ChainId: 5, rollupVersion: 1 } })
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;(h.service as any).initialized = true
+		const emitted: unknown[] = []
+		h.service.onNetworkAdded.add((n) => emitted.push(n))
+		const writes = recordWrites(h.browserApi.storage.local, "nulo:core:networks@", () => h.deletionState.beginDeletion("p1"))
+
+		await expect(h.service.addNetwork("Custom", "https://new.example/")).rejects.toThrow(/^profile p1 deleted$/)
+		writes.restore()
+		expect(writes.log).toHaveLength(2)
+		expect(writes.log[1]).toBe(writes.log[0]?.replace(/^set:/, "remove:"))
+		expect(emitted).toHaveLength(0)
 	})
 })
 
@@ -196,17 +215,21 @@ describe("NetworkService — seedDefaultsForProfile (full-backup import reseeds 
 
 	test("a deletion landing mid-seed rejects and leaves no orphan rows", async () => {
 		const h = withProfiles(harness({}), ["p2"])
-		const realSet = h.browserApi.storage.local.set.bind(h.browserApi.storage.local)
+		const logError = vi.spyOn(h.service as unknown as { logError: (m: string, e: unknown) => void }, "logError")
 		let fired = false
-		h.browserApi.storage.local.set = (async (items: Record<string, unknown>) => {
-			await realSet(items)
-			if (!fired && Object.keys(items).some((k) => k.startsWith("nulo:core:networks@"))) {
-				fired = true
-				h.deletionState.beginDeletion("p2")
-				h.deletionState.release("p2")
-			}
-		}) as typeof h.browserApi.storage.local.set
-		await expect(h.service.seedDefaultsForProfile("p2")).rejects.toThrow(/deleted|not current/i)
+		const writes = recordWrites(h.browserApi.storage.local, "nulo:core:networks@", () => {
+			if (fired) return
+			fired = true
+			h.deletionState.beginDeletion("p2")
+			h.deletionState.release("p2")
+		})
+		await expect(h.service.seedDefaultsForProfile("p2")).rejects.toThrow(
+			/^profile p2 is being deleted — write rejected \(epoch 0 → 1\)$/,
+		)
+		writes.restore()
+		expect(writes.log).toHaveLength(2)
+		expect(writes.log[1]).toBe(writes.log[0]?.replace(/^set:/, "remove:"))
+		expect((logError.mock.calls[0]?.[1] as Error | undefined)?.message).toBe("profile p2 deleted")
 		expect(await rowsOf(h, "p2")).toEqual([])
 	})
 })
