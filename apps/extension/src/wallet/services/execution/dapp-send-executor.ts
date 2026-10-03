@@ -37,7 +37,7 @@ import { type JobError, type JobProgress, JobCancelledSentinel } from "@nulo/wal
 import { markFailedUnlessCancelled } from "./mark-failed-unless-cancelled"
 import { formatFeeJuice } from "@/utils/fee-estimation"
 import { pickPrimaryMethod } from "@/utils/primary-method"
-import { primaryEndpointUrl } from "@/wallet/services/network/spec"
+import { findPrimaryEndpoint, primaryEndpointUrl } from "@/wallet/services/network/spec"
 import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
 import type { WrappedTask } from "@/wallet/services/task/service"
 import type { LocalTxOrigin, TransactionService } from "@/wallet/services/transaction/service"
@@ -47,13 +47,13 @@ import type { FpcInfo } from "@/wallet/services/fpc/spec"
 import type { PublicStorageReader } from "@/wallet/utils/fee-juice-balance"
 import type { DiscoveryAwareEstimator } from "./discovery-aware-estimator"
 import { type ExecutionCoordinator, type ProveAndSendContext, fenceChecks } from "./execution-coordinator"
+import { fingerprintBaseFee } from "./estimate-reuse-shared"
 import type { ExecutionMutexRelease } from "./execution-mutex"
 import type { OperationEstimateReuse, OperationEstimateReuseEntry } from "./operation-estimate-reuse"
 import { fingerprintNoFromInputs, fingerprintOperation, type OperationFingerprintInput } from "./operation-fingerprint"
 import { PREVIEW_FOREIGN_MESSAGE, type PreviewLookup, type PreviewSnapshots, assertWithinPreview } from "./preview-snapshots"
 import { decodeAuthwitEffects } from "./decode-authwit-effects"
 import { probeSponsorFunding } from "./sponsor-funding"
-import { fingerprintBaseFee } from "./transfer-estimate-reuse"
 import { applyEmbeddedFpcGasCap } from "./fee/embedded-fpc-cap"
 import { type FeeEstimate, finalizeGasLimits, suggestGasLimits } from "./fee/fee-strategy"
 import type { OperationPlanner } from "./operation-planner"
@@ -466,7 +466,7 @@ export class DappSendExecutor {
 		try {
 			const fingerprint = fingerprintOperation(identity)
 			if (fingerprint === null) return undefined
-			const primary = built.network.endpoints.find((e) => e.id === built.network.primaryEndpointId)
+			const primary = findPrimaryEndpoint(built.network)
 			if (!primary) return undefined
 			const profile = await this.deps.getActiveProfile()
 			if (!profile) return undefined
@@ -563,7 +563,7 @@ export class DappSendExecutor {
 			throw new Error("send_transaction: feeSettings is required")
 		}
 
-		// B-02: take the shared execution slot + journal scaffold (runInSlot) like
+		// Take the shared execution slot + journal scaffold (runInSlot) like
 		// the other two dApp-send pipelines. Without it, two concurrent
 		// send_transaction ops (e.g. a dApp calling grantPublicAuthwit twice, or one
 		// racing an in-flight aztec_sendTx on the same account) run simulateTx/proveTx

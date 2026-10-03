@@ -58,12 +58,8 @@ import type { OperationEstimateReuse } from "./operation-estimate-reuse"
 import { fingerprintOperation } from "./operation-fingerprint"
 import type { OperationPlanner } from "./operation-planner"
 import type { PreviewSnapshots } from "./preview-snapshots"
-import {
-	fingerprintBaseFee,
-	fingerprintFeeSettings,
-	type TransferEstimateReuse,
-	type TransferEstimateReuseEntry,
-} from "./transfer-estimate-reuse"
+import { fingerprintBaseFee } from "./estimate-reuse-shared"
+import { fingerprintFeeSettings, type TransferEstimateReuse, type TransferEstimateReuseEntry } from "./transfer-estimate-reuse"
 import { ExecutionService } from "./service"
 import type { FeeSettings } from "./models"
 

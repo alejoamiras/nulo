@@ -25,7 +25,7 @@ import { JournaledRejection, OperationNotRecordedError, SessionEndedError, Walle
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import { formatFeeJuice } from "@/utils/fee-estimation"
 import type { Network } from "@/wallet/services/network/service"
-import { primaryEndpointUrl } from "@/wallet/services/network/spec"
+import { findPrimaryEndpoint, primaryEndpointUrl } from "@/wallet/services/network/spec"
 import type { NewOperationInput, OperationRecord } from "@/wallet/services/operation-journal/spec"
 import type { ProfileInfo } from "@/wallet/services/profile/service"
 import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
@@ -36,12 +36,13 @@ import type { IPXE } from "@/wallet/services/pxe/client"
 import type { PublicStorageReader } from "@/wallet/utils/fee-juice-balance"
 import { type ExecutionCoordinator, fenceChecks } from "./execution-coordinator"
 import type { FeeEstimate } from "./fee/fee-strategy"
+import { fingerprintBaseFee } from "./estimate-reuse-shared"
 import { failureKind } from "./mark-failed-unless-cancelled"
 import type { OperationPlanner, TransferRequest } from "./operation-planner"
 import { maybeRethrowAsRpcCancel } from "./rpc-cancel"
 import type { Action, FeeOptions, FeeSettings, TransferFeeEstimate } from "./spec"
 import { probeSponsorFunding } from "./sponsor-funding"
-import { fingerprintBaseFee, fingerprintFeeSettings, type TransferEstimateReuse } from "./transfer-estimate-reuse"
+import { fingerprintFeeSettings, type TransferEstimateReuse } from "./transfer-estimate-reuse"
 import { getEstimatedFee, getGasDetails } from "./tx-fee-details"
 
 /** The resolved inputs the prove-and-send tail consumes, produced by either
@@ -374,7 +375,7 @@ export class TransferExecutor {
 		let estimateId: string | undefined
 		if (reuseEligible) {
 			try {
-				const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
+				const primary = findPrimaryEndpoint(network)
 				if (primary) {
 					// Fingerprint the EXACT fee the txRequest was built with —
 					// not a fresh fetch after the fact. Both FJ and FPC strategies finalize

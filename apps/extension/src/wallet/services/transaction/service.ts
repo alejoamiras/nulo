@@ -169,10 +169,10 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		 *  address on one chain are indistinguishable in history. */
 		networkId?: string,
 	): Promise<Tx> {
-		// Under the tx lock (codex blocker): serialize the dup-check + write against
-		// restore's create-only check + the coordinator's purge (finding D).
+		// Under the tx lock: serialize the dup-check + write against restore's
+		// create-only check + the coordinator's purge.
 		return await this.lock.withLock(async () => {
-			// D13: an execution captured {profileId, epoch} when it was authorized.
+			// An execution captured {profileId, epoch} when it was authorized.
 			// If a deletion of that profile has since begun (epoch advanced) OR the
 			// owning account row is already purged/re-owned, reject — a completing
 			// prove must not recreate a pending tx after its profile was deleted.

@@ -18,40 +18,31 @@
  */
 
 import { GasFees } from "@aztec-labs/stdlib/gas"
-import type { TxExecutionRequest } from "@aztec-labs/stdlib/tx"
-import type { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import { type MinFeeNode, predictedWorstMinFees } from "@nulo/aztec-runtime/fee-juice"
-import { PRIORITY_MULTIPLIERS } from "@nulo/wallet-bridge"
 import { SessionEndedError } from "@nulo/extension-messaging/errors"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import type { TransferType } from "@/wallet/services/transaction/spec"
 import type { Network } from "@/wallet/services/network/service"
-import { DEFAULT_FEE_MULTIPLIER } from "./fee/fee-strategy"
-import { pendingHashesChanged, SingleShotTtlCache } from "./estimate-reuse-shared"
+import { findPrimaryEndpoint } from "@/wallet/services/network/spec"
+import {
+	ESTIMATE_REUSE_TTL_MS,
+	fingerprintBaseFee,
+	pendingHashesChanged,
+	primaryEndpointMoved,
+	type ReuseEntryBase,
+	reuseFeeMultiplier,
+	SingleShotTtlCache,
+} from "./estimate-reuse-shared"
 import type { TransferRequest } from "./operation-planner"
 import type { FeeSettings } from "./spec"
-
-// 120 s, owner-set (plan decision #16): the retention bound on signed tx
-// requests held in SW memory. Staleness itself is guarded by the consume
-// ladder, not this TTL — past ~2 min entries mostly miss on base-fee drift
-// anyway, so the shorter window costs almost no hit rate.
-export const ESTIMATE_REUSE_TTL_MS = 120_000
-
-/** Stable fingerprint for a fee basis so we can compare the snapshot
- *  taken at estimate time against the value at confirm.
- *  FORMAT IS BYTE-STABLE — cached entries depend on it. */
-export function fingerprintBaseFee(min: { feePerDaGas: bigint; feePerL2Gas: bigint }): string {
-	return `${min.feePerDaGas.toString()}:${min.feePerL2Gas.toString()}`
-}
 
 /** Stable fingerprint for fee settings. Explicit per-variant — the
  *  previous JSON.stringify-with-key-array form silently dropped nested
  *  paymentMethod fields (the keys array is read as a recursive filter,
  *  so nested keys not in `Object.keys(fs)` got stripped). That made
  *  `{kind: "fj"}` and `{kind: "fpc", fpcId}` collide and could allow
- *  reuse to serve a TxRequest built for a different payment method.
- *  Codex audit BLOCKING #1. */
+ *  reuse to serve a TxRequest built for a different payment method. */
 export function fingerprintFeeSettings(fs: FeeSettings): string {
 	const pm = fs.paymentMethod
 	let pmHash: string
@@ -76,7 +67,7 @@ export function fingerprintFeeSettings(fs: FeeSettings): string {
  *  validate that nothing relevant has drifted between estimate and confirm
  *  before reusing the prebuilt TxRequest. Each field is something the
  *  rebuilt request would have differed on. */
-export type TransferEstimateReuseEntry = {
+export type TransferEstimateReuseEntry = ReuseEntryBase & {
 	/** Inputs identifying the transfer (rebuilt for cache-hit verification). */
 	readonly networkId: string
 	readonly accountAddress: string
@@ -85,34 +76,12 @@ export type TransferEstimateReuseEntry = {
 	readonly recipientAddress: string
 	readonly amount: bigint
 	readonly feeSettingsHash: string
-	/** Profile id at estimate time; consume refuses any other fence. */
-	readonly profileId: string
-	/** Validation snapshot — what was true at estimate time. */
-	readonly baseFeeFingerprint: string
-	readonly primaryEndpointId: string
-	readonly primaryEndpointUrl: string
-	/** Pending-tx snapshot for the active account. If new pending txs
-	 *  appear between estimate and confirm, the reused TxRequest may
-	 *  conflict on private notes (private transfers select notes at
-	 *  build time; concurrent in-flight txs can consume them). Reject
-	 *  reuse in that case (codex audit SHOULD-FIX #2 partial). */
-	readonly pendingHashes: readonly string[]
-	/** Built downstream state — reused on confirm. */
-	readonly txRequest: TxExecutionRequest
-	/** Provenance travels WITH the cached request: the entry retains the
-	 *  exact build, so the confirm leg classifies an existing-nullifier
-	 *  rejection with the same fidelity as a fresh build. */
-	readonly initializesAccount: boolean
-	readonly nonce: { toString(): string }
-	readonly feePaymentMethod: AccountFeePaymentMethodOptions
 	/** Inputs for the activity-feed record. We persist a transfer-only
 	 *  call shape (no FPC fee payload) so the card title stays the token
 	 *  symbol regardless of payment method. */
 	readonly token: { contract: string; name: string; symbol: string; decimals: number }
 	readonly fnName: string
 	readonly args: readonly unknown[]
-	/** Cache lifecycle. */
-	readonly builtAt: number
 }
 
 /** Lazy dependency lookups — injected so the rejection ladder's laziness
@@ -178,11 +147,11 @@ export class TransferEstimateReuse {
 
 		// Endpoint identity: the primary can change at runtime.
 		const network = await this.deps.getNetwork(inputs.networkId)
-		const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
+		const primary = findPrimaryEndpoint(network)
 		if (!primary) {
 			return this.reject(estimateId, "no primary endpoint")
 		}
-		if (primary.id !== entry.primaryEndpointId || primary.rpcUrl !== entry.primaryEndpointUrl) {
+		if (primaryEndpointMoved(primary, entry)) {
 			return this.reject(estimateId, "primary endpoint changed")
 		}
 
@@ -191,13 +160,10 @@ export class TransferEstimateReuse {
 		// `predictedWorstMinFees * multiplier` — that's what a fresh build
 		// would have finalized (same basis + same GasFees.mul as
 		// `finalizeGasLimits`). If the basis hasn't drifted, they match.
-		// (codex audit SHOULD-FIX #3)
 		const node = await this.deps.getNode(network.chainId)
 		try {
 			const basis = await predictedWorstMinFees(node)
-			const multiplier = inputs.feeSettings.priorityLevel
-				? PRIORITY_MULTIPLIERS[inputs.feeSettings.priorityLevel]
-				: DEFAULT_FEE_MULTIPLIER
+			const multiplier = reuseFeeMultiplier(inputs.feeSettings.priorityLevel)
 			// Re-wrap before multiplying: the basis components may arrive as a bare
 			// `{feePerDaGas, feePerL2Gas}` from a minimal node, and the fingerprint
 			// must reproduce the exact `GasFees.mul` product the build finalized.

@@ -4,7 +4,7 @@
  * "dApp paths carve out" from the original reuse rollout.
  *
  * Same one-shot/TTL/fail-closed philosophy as the transfer cache; the
- * differences are exactly the audit-pinned ones (plan architecture §2):
+ * differences:
  *
  * - **Input identity** is the canonical operation fingerprint
  *   (`fingerprintOperation` — post-planner/pre-discovery/pre-payload actions,
@@ -12,7 +12,7 @@
  *   non-fingerprintable op is never stashed in the first place.
  * - **Chain identity is re-asserted at consume** (the reused request skips
  *   `buildStandard`'s live-chain assert, so the ladder must supply it): the
- *   injected `assertChainIdentity` throws on drifted endpoints ⇒ miss.
+ *   injected `getLiveChainIdentity` throws on drifted endpoints ⇒ miss.
  * - **Resolved FPC identity is bound**: for `fpc`-kind settings the entry
  *   snapshots `{id, type, address, chainId, isProtocol}`; an in-place row
  *   edit between estimate and confirm ⇒ miss, never a signed call to the
@@ -25,18 +25,22 @@
  *   that.
  */
 
-import type { TxExecutionRequest } from "@aztec-labs/stdlib/tx"
-import type { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import { type MinFeeNode, predictedWorstMinFees } from "@nulo/aztec-runtime/fee-juice"
-import { PRIORITY_MULTIPLIERS } from "@nulo/wallet-bridge"
 import { SessionEndedError } from "@nulo/extension-messaging/errors"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { Network } from "@/wallet/services/network/service"
+import { findPrimaryEndpoint } from "@/wallet/services/network/spec"
 import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import type { FpcInfo } from "@/wallet/services/fpc/spec"
-import { DEFAULT_FEE_MULTIPLIER } from "./fee/fee-strategy"
-import { pendingHashesChanged, SingleShotTtlCache } from "./estimate-reuse-shared"
-import { ESTIMATE_REUSE_TTL_MS, fingerprintBaseFee } from "./transfer-estimate-reuse"
+import {
+	ESTIMATE_REUSE_TTL_MS,
+	fingerprintBaseFee,
+	pendingHashesChanged,
+	primaryEndpointMoved,
+	type ReuseEntryBase,
+	reuseFeeMultiplier,
+	SingleShotTtlCache,
+} from "./estimate-reuse-shared"
 import { fingerprintOperation, type OperationFingerprintInput } from "./operation-fingerprint"
 import type { BuiltStandardTx } from "./tx-request-builder"
 import type { FeeSettings } from "./spec"
@@ -52,38 +56,22 @@ export type FpcIdentitySnapshot = {
 	readonly isProtocol: boolean
 }
 
-export type OperationEstimateReuseEntry = {
+export type OperationEstimateReuseEntry = ReuseEntryBase & {
 	/** Canonical operation identity (input-match gate). */
 	readonly fingerprint: string
 	readonly accountAddress: string
 	readonly networkId: string
 	readonly feeSettings: FeeSettings
-	/** Validation snapshot — what was true at estimate time. */
-	readonly profileId: string
-	readonly baseFeeFingerprint: string
-	readonly primaryEndpointId: string
-	readonly primaryEndpointUrl: string
-	readonly pendingHashes: readonly string[]
 	/** EXACT live chain identity at estimate time. The network row's stored
 	 *  chainId is an XOR composite — `(1,4)` and `(2,7)` collide — so consume
 	 *  must compare the raw pair, not the composite. */
 	readonly chainIdentity: { readonly l1ChainId: number; readonly rollupVersion: number }
 	readonly fpcIdentity?: FpcIdentitySnapshot
-	/** Built downstream state — reused on confirm. Live handles excluded. */
-	readonly txRequest: TxExecutionRequest
-	/** Provenance travels WITH the cached request: the entry retains the
-	 *  exact build, so the confirm leg classifies an existing-nullifier
-	 *  rejection with the same fidelity as a fresh build. */
-	readonly initializesAccount: boolean
-	readonly nonce: { toString(): string }
-	readonly feePaymentMethod: AccountFeePaymentMethodOptions
 	readonly txCalls: BuiltStandardTx["txCalls"]
 	readonly pendingPublicAuthwits: BuiltStandardTx["pendingPublicAuthwits"]
 	/** Message hashes of the private authwits discovery signed into `txRequest` —
 	 *  what a reuse hit would sign, checked against the preview at confirm. */
 	readonly discoveredHashes: readonly string[]
-	/** Cache lifecycle. */
-	readonly builtAt: number
 }
 
 export interface OperationEstimateReuseDeps {
@@ -138,8 +126,8 @@ export class OperationEstimateReuse {
 		}
 		if (entry.profileId !== fence.profileId) throw new SessionEndedError()
 		const network = await this.deps.getNetwork(entry.networkId)
-		const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
-		if (!primary || primary.id !== entry.primaryEndpointId || primary.rpcUrl !== entry.primaryEndpointUrl) {
+		const primary = findPrimaryEndpoint(network)
+		if (primaryEndpointMoved(primary, entry)) {
 			return this.reject("primary endpoint changed")
 		}
 		const pendingNow = this.deps.getPendingForAccount(entry.accountAddress).map((tx) => tx.hash)
@@ -157,7 +145,7 @@ export class OperationEstimateReuse {
 		const fpcDrift = entry.fpcIdentity ? await this.fpcIdentityDrift(entry.fpcIdentity) : undefined
 		if (fpcDrift) return this.reject(fpcDrift)
 		const node = await this.deps.getNode(network.chainId)
-		const multiplier = entry.feeSettings.priorityLevel ? PRIORITY_MULTIPLIERS[entry.feeSettings.priorityLevel] : DEFAULT_FEE_MULTIPLIER
+		const multiplier = reuseFeeMultiplier(entry.feeSettings.priorityLevel)
 		const current = (await predictedWorstMinFees(node)).mul(multiplier)
 		if (fingerprintBaseFee(current) !== entry.baseFeeFingerprint) {
 			return this.reject("base fee drift")

@@ -62,9 +62,9 @@ export function maybeRethrowAsRpcCancel(error: unknown, task: Pick<CancellableTa
  * `OperationResult` variant and calls the appropriate task lifecycle method.
  *
  * `cancelled` → `task.cancel()`. `failed` → `task.fail(error)`. Symmetry
- * between task state and operation-result state is load-bearing — codex's
- * v2 audit caught that mismatched (failed task + cancelled result, or
- * cancelled task + failed result) leaves the UX inconsistent.
+ * between task state and operation-result state is load-bearing: a mismatch
+ * (failed task + cancelled result, or cancelled task + failed result) leaves
+ * the UX inconsistent.
  *
  * Returns the OperationResult variant for the caller to push into its
  * results array. The caller still owns logging.

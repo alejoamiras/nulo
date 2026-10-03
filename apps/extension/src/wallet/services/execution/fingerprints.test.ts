@@ -11,7 +11,8 @@
 
 import { describe, expect, test } from "vitest"
 import type { FeeSettings } from "./spec"
-import { fingerprintBaseFee, fingerprintFeeSettings } from "./transfer-estimate-reuse"
+import { fingerprintBaseFee } from "./estimate-reuse-shared"
+import { fingerprintFeeSettings } from "./transfer-estimate-reuse"
 
 describe("fingerprintFeeSettings", () => {
 	test("distinguishes fj from fpc with same priorityLevel", () => {

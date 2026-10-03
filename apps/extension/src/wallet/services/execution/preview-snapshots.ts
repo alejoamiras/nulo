@@ -11,8 +11,7 @@
  * pops its entry before a miss, which is why it cannot be the baseline.
  */
 
-import { ESTIMATE_REUSE_TTL_MS } from "./transfer-estimate-reuse"
-import { SingleShotTtlCache } from "./estimate-reuse-shared"
+import { ESTIMATE_REUSE_TTL_MS, SingleShotTtlCache } from "./estimate-reuse-shared"
 
 export type PreviewIdentity = {
 	readonly interactionId: string

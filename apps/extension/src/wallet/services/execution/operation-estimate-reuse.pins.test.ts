@@ -12,7 +12,7 @@ import type { Action } from "@nulo/wallet-bridge"
 import { OperationEstimateReuse, type OperationEstimateReuseDeps, type OperationEstimateReuseEntry } from "./operation-estimate-reuse"
 import { fingerprintOperation, type OperationFingerprintInput } from "./operation-fingerprint"
 import type { FeeSettings } from "./spec"
-import { ESTIMATE_REUSE_TTL_MS } from "./transfer-estimate-reuse"
+import { ESTIMATE_REUSE_TTL_MS } from "./estimate-reuse-shared"
 
 const calls = vi.hoisted(() => [] as string[])
 

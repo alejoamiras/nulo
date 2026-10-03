@@ -11,8 +11,8 @@ import { PRIORITY_MULTIPLIERS } from "@nulo/wallet-bridge"
 import { TransferType } from "@/wallet/services/transaction/spec"
 import type { TransferRequest } from "./operation-planner"
 import type { FeeSettings } from "./spec"
+import { ESTIMATE_REUSE_TTL_MS } from "./estimate-reuse-shared"
 import {
-	ESTIMATE_REUSE_TTL_MS,
 	TransferEstimateReuse,
 	type TransferEstimateReuseDeps,
 	type TransferEstimateReuseEntry,
