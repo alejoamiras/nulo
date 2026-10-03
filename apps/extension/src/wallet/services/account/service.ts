@@ -1,5 +1,6 @@
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { assertRestoreEpoch, captureRestoreEpochs, restoreRowProfileId } from "@/wallet/services/restore-fence"
+import { profileDeletedError } from "@/wallet/services/profile/profile-deletion-state"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { deriveAccountSeed, deriveSigningKeyFromSeed } from "@nulo/wallet-crypto"
 import { LogLevel, type ILogger } from "@/wallet/logger"
@@ -465,6 +466,9 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		name?: string,
 	): Promise<Account> {
 		await this.ensureInitialized()
+		// Fenced like createAccount: captured before the DEK read, which a deletion can interleave.
+		const deletion = this.profileService.getDeletionState()
+		const epoch = deletion.capture(profileId)
 		// Session-gated DEK for sealing the key at rest (the credential-rooted isolation boundary
 		// — never the master). A degraded session cannot ACCEPT new imported material: fail loud.
 		const dek = await this.profileService.getProfileDek(profileId)
@@ -497,6 +501,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 				}
 				// KEY ROW FIRST, then the Account row — with compensation. A crash between the two
 				// leaves an orphan key (swept on init) rather than an Account that cannot sign.
+				deletion.assertCurrent(profileId, epoch)
 				await this.importedKeys.set({ profileId, chainId, address: recomputed, encryptedSigningKey: sealed })
 				const account: Account = {
 					profileId,
@@ -511,7 +516,12 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 					visible: true,
 				}
 				try {
+					deletion.assertCurrent(profileId, epoch)
 					await this.storage.set(accountRowIdOf(account), account)
+					if (!deletion.isCurrent(profileId, epoch)) {
+						await this.storage.delete(accountRowIdOf(account))
+						throw profileDeletedError(profileId)
+					}
 				} catch (rowErr) {
 					await this.importedKeys.delete(profileId, chainId, recomputed).catch(() => {})
 					throw rowErr

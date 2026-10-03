@@ -499,6 +499,123 @@ describe("AccountService — same-row field editors serialize", () => {
 	})
 })
 
+describe("AccountService.importAccount — deletion fence", () => {
+	const accountKey = `nulo:core:accounts@${accountRowId("p1", 1, "0xI")}`
+	const keyRowKey = `nulo:core:imported-account-keys@${accountRowId("p1", 1, "0xI")}`
+	const staleText = /^profile p1 is being deleted — write rejected \(epoch 0 → 1\)$/
+
+	async function makeHarness(over: { dekGate?: Promise<void>; l1Gate?: Promise<void>; afterSet?: (key: string) => void } = {}) {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const deletion = new ProfileDeletionState()
+		const deks: Uint8Array[] = []
+		const services = new ServiceCollection()
+		services.add(
+			svc(PROFILE_SERVICE_NAME, {
+				onProfileDeleted: new EventHandler(),
+				getDeletionState: () => deletion,
+				getProfileDek: async () => {
+					if (over.dekGate) await over.dekGate
+					const dek = new Uint8Array(32).fill(1)
+					deks.push(dek)
+					return dek
+				},
+			}),
+		)
+		services.add(
+			svc(NETWORK_SERVICE_NAME, {
+				registerChainPurgeSubscriber: () => {},
+				getL1ChainIdStored: async () => {
+					if (over.l1Gate) await over.l1Gate
+					return 1
+				},
+			}),
+		)
+		const service = new AccountService(new LoggerStore(new ConfigStore()), api)
+		services.add(service)
+		await services.start()
+		vi.spyOn(service as unknown as { decodeAccountExport: () => Promise<unknown> }, "decodeAccountExport").mockResolvedValue({
+			signingKey: { toBuffer: () => new Uint8Array(32).fill(5) },
+			address: "0xI",
+		})
+		const emit = vi.spyOn(service as unknown as { emit: (e: string, p: unknown) => void }, "emit")
+		const { log } = recordWrites(api.storage.local, "nulo:core:", (key) => over.afterSet?.(key))
+		const run = () => service.importAccount("p1", 1, "body", "0xI", "pw", "I")
+		const keysLeft = async () => Object.keys(await api.storage.local.get(null)).filter((k) => k === accountKey || k === keyRowKey)
+		const dekWiped = () => deks.length === 1 && deks[0]!.every((b) => b === 0)
+		return { deletion, emit, log, run, keysLeft, dekWiped }
+	}
+
+	function gate() {
+		let open!: () => void
+		const promise = new Promise<void>((r) => {
+			open = r
+		})
+		return { promise, open }
+	}
+
+	const added = (emit: { mock: { calls: unknown[][] } }) => emit.mock.calls.filter(([e]) => e === "onAccountAdded")
+
+	test("(i) a deletion beginning while the L1 lookup is parked: refused before any write", async () => {
+		const l1 = gate()
+		const h = await makeHarness({ l1Gate: l1.promise })
+		const run = h.run()
+		await new Promise((r) => setTimeout(r, 0))
+		h.deletion.beginDeletion("p1")
+		l1.open()
+		await expect(run).rejects.toThrow(staleText)
+		expect(h.log).toEqual([])
+		expect(await h.keysLeft()).toEqual([])
+		expect(h.dekWiped()).toBe(true)
+	})
+
+	test("(ii) a deletion beginning during the key-row write: key row rolled back, no account row", async () => {
+		const h = await makeHarness({ afterSet: (key) => key === keyRowKey && h.deletion.beginDeletion("p1") })
+		await expect(h.run()).rejects.toThrow(staleText)
+		expect(h.log).toEqual([`set:${keyRowKey}`, `remove:${keyRowKey}`])
+		expect(await h.keysLeft()).toEqual([])
+		expect(added(h.emit)).toEqual([])
+		expect(h.dekWiped()).toBe(true)
+	})
+
+	test("(iv) a deletion beginning and releasing during the account-row write: both rows gone, no emit", async () => {
+		const h = await makeHarness({
+			afterSet: (key) => {
+				if (key !== accountKey) return
+				h.deletion.beginDeletion("p1")
+				h.deletion.release("p1")
+			},
+		})
+		await expect(h.run()).rejects.toThrow(/^profile p1 deleted$/)
+		expect(h.log).toEqual([`set:${keyRowKey}`, `set:${accountKey}`, `remove:${accountKey}`, `remove:${keyRowKey}`])
+		expect(await h.keysLeft()).toEqual([])
+		expect(added(h.emit)).toEqual([])
+		expect(h.dekWiped()).toBe(true)
+	})
+
+	test("(iii) a deletion beginning and releasing while the DEK read is parked is still refused", async () => {
+		const dek = gate()
+		const h = await makeHarness({ dekGate: dek.promise })
+		const run = h.run()
+		await new Promise((r) => setTimeout(r, 0))
+		h.deletion.beginDeletion("p1")
+		h.deletion.release("p1")
+		dek.open()
+		await expect(run).rejects.toThrow(staleText)
+		expect(h.log).toEqual([])
+		expect(h.dekWiped()).toBe(true)
+	})
+
+	test("control: with no deletion both rows land and the account is announced", async () => {
+		const h = await makeHarness()
+		expect(await h.run()).toMatchObject({ profileId: "p1", chainId: 1, address: "0xI", type: 1, name: "I" })
+		expect(h.log).toEqual([`set:${keyRowKey}`, `set:${accountKey}`])
+		expect((await h.keysLeft()).sort()).toEqual([accountKey, keyRowKey].sort())
+		expect(added(h.emit)).toHaveLength(1)
+		expect(h.dekWiped()).toBe(true)
+	})
+})
+
 describe("AccountService purges wait for a rename holding the same row", () => {
 	const rowKey = `nulo:core:accounts@${accountRowId("p1", 1, "0xaa")}`
 	const keyRowKey = `nulo:core:imported-account-keys@${accountRowId("p1", 1, "0xaa")}`
