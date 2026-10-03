@@ -8,6 +8,7 @@ import {
 	CapabilityNotGrantedError,
 	CLIENT_DISCONNECTED_MESSAGE,
 	ContractNotRegisteredError,
+	DuplicateInitializationError,
 	InvalidPasswordError,
 	isClientDisconnectRejection,
 	isReceiverGoneRejection,
@@ -18,16 +19,21 @@ import {
 	PxeStaleAnchorError,
 	PxeStoreKeyMissingError,
 	remoteErrorFromResponseContent,
+	RpcConnectError,
 	RpcDisconnectedError,
 	RpcTimeoutError,
 	ScopeViolationError,
 	SessionEndedError,
+	TermsAcceptanceRequiredError,
 	TooManyPendingError,
+	UnsupportedMethodError,
 	UserRejectedError,
 	ValidationError,
 	WalletError,
+	type WalletErrorPayload,
 	walletErrorFromPayload,
 } from "./errors"
+import * as errorsModule from "./errors"
 
 describe("walletErrorFromPayload", () => {
 	test("JobCancelledError round-trips with code + jobId preserved", () => {
@@ -49,12 +55,6 @@ describe("walletErrorFromPayload", () => {
 	test("JobCancelledError default message is used when no message supplied", () => {
 		const err = new JobCancelledError()
 		expect(err.message).toBe("Transaction cancelled by user")
-	})
-
-	test("UserRejectedError still round-trips (regression — symmetric class neighbor)", () => {
-		const original = new UserRejectedError()
-		const rebuilt = walletErrorFromPayload(original.toPayload())
-		expect(rebuilt).toBeInstanceOf(UserRejectedError)
 	})
 
 	test("AccountAddressInconsistencyError round-trips with code + details preserved", () => {
@@ -137,15 +137,6 @@ describe("walletErrorFromPayload", () => {
 		expect(rebuilt.message).toBe("Contract artifact not found for class 0x0a")
 	})
 
-	test("both new classes rebuild from a message-only payload (no details) — the operation-result channel shape", () => {
-		const stale = walletErrorFromPayload({ code: PxeStaleAnchorError.CODE, message: "m" })
-		expect(stale).toBeInstanceOf(PxeStaleAnchorError)
-		expect(stale.details).toBeUndefined()
-		const unregistered = walletErrorFromPayload({ code: ContractNotRegisteredError.CODE, message: "Contract not found" })
-		expect(unregistered).toBeInstanceOf(ContractNotRegisteredError)
-		expect(unregistered.details).toBeUndefined()
-	})
-
 	test("SessionEndedError round-trips detail-free, and a message-only payload rebuilds the constant message", () => {
 		const rebuilt = walletErrorFromPayload(new SessionEndedError().toPayload())
 		expect(rebuilt).toBeInstanceOf(SessionEndedError)
@@ -177,95 +168,274 @@ describe("walletErrorFromPayload", () => {
 	})
 })
 
-describe("constructor identity ritual (owned by the WalletError base)", () => {
-	// Every subclass ctor is a pure `super(...)` call: the base assigns the frozen
-	// literal name (passed as the 4th argument — never `new.target.name`, the
-	// production minifier mangles class names) and restores `new.target.prototype`.
-	// The sweep proves the base-owned ritual covers every subclass; a future
-	// subclass that forgets the name argument degrades cosmetically to
-	// "WalletError", while `instanceof` breakage is structurally impossible.
-	const instances: Array<{ err: WalletError; ctor: new (...args: never[]) => WalletError; name: string; code: string }> = [
-		{ err: new RpcTimeoutError("t"), ctor: RpcTimeoutError, name: "RpcTimeoutError", code: RpcTimeoutError.CODE },
-		{ err: new RpcDisconnectedError("d"), ctor: RpcDisconnectedError, name: "RpcDisconnectedError", code: RpcDisconnectedError.CODE },
-		{ err: new UserRejectedError(), ctor: UserRejectedError, name: "UserRejectedError", code: UserRejectedError.CODE },
-		{ err: new JobCancelledError(), ctor: JobCancelledError, name: "JobCancelledError", code: JobCancelledError.CODE },
+describe("every WalletError subclass: identity and wire shape", () => {
+	// The base assigns the literal name passed as `super`'s 4th argument (never `new.target.name`:
+	// the production minifier mangles class names) and restores `new.target.prototype`. Every
+	// expected value below is written out, never read off the classes or the rebuild path.
+	type Rebuild =
+		| { kind: "pass" } // message and details as sent
+		| { kind: "drop-details" } // message as sent, no details
+		| { kind: "constant"; message: string } // neither: the class's own sentence
+		| { kind: "capability" } // see the capabilityType table
+		| { kind: "base" } // not rebuilt: a plain WalletError keeps code, message and details
+	type Ctor = new (...args: never[]) => WalletError
+	type Row = { ctor: Ctor; make: () => WalletError; name: string; code: string; rebuild: Rebuild }
+	type Expected = { ctor: Ctor; name: string; message: string; details: unknown }
+
+	const pass: Rebuild = { kind: "pass" }
+	const base: Rebuild = { kind: "base" }
+	const rows: Row[] = [
+		{ ctor: RpcTimeoutError, make: () => new RpcTimeoutError("t"), name: "RpcTimeoutError", code: "RPC_TIMEOUT", rebuild: pass },
 		{
-			err: new CapabilityNotGrantedError("accounts"),
+			ctor: RpcDisconnectedError,
+			make: () => new RpcDisconnectedError("d"),
+			name: "RpcDisconnectedError",
+			code: "RPC_DISCONNECTED",
+			rebuild: pass,
+		},
+		// Client-local: never crosses the wire.
+		{
+			ctor: RpcConnectError,
+			make: () => new RpcConnectError("svc", new Error("gone")),
+			name: "RpcConnectError",
+			code: "RPC_CONNECT_FAILED",
+			rebuild: base,
+		},
+		{ ctor: UserRejectedError, make: () => new UserRejectedError(), name: "UserRejectedError", code: "USER_REJECTED", rebuild: pass },
+		{ ctor: JobCancelledError, make: () => new JobCancelledError(), name: "JobCancelledError", code: "JOB_CANCELLED", rebuild: pass },
+		{
 			ctor: CapabilityNotGrantedError,
+			make: () => new CapabilityNotGrantedError("accounts"),
 			name: "CapabilityNotGrantedError",
-			code: CapabilityNotGrantedError.CODE,
-		},
-		{ err: new TooManyPendingError(), ctor: TooManyPendingError, name: "TooManyPendingError", code: TooManyPendingError.CODE },
-		{ err: new ValidationError("v"), ctor: ValidationError, name: "ValidationError", code: ValidationError.CODE },
-		{ err: new InvalidPasswordError(), ctor: InvalidPasswordError, name: "InvalidPasswordError", code: InvalidPasswordError.CODE },
-		{
-			err: new AccountAddressInconsistencyError(),
-			ctor: AccountAddressInconsistencyError,
-			name: "AccountAddressInconsistencyError",
-			code: AccountAddressInconsistencyError.CODE,
-		},
-		{ err: new RestoreTornError(), ctor: RestoreTornError, name: "RestoreTornError", code: RestoreTornError.CODE },
-		{
-			err: new ProfileIdConflictError(),
-			ctor: ProfileIdConflictError,
-			name: "ProfileIdConflictError",
-			code: ProfileIdConflictError.CODE,
-		},
-		{ err: new PxeStaleAnchorError("s"), ctor: PxeStaleAnchorError, name: "PxeStaleAnchorError", code: PxeStaleAnchorError.CODE },
-		{
-			err: new PxeStoreKeyMissingError("PXE_STORE_KEY_MISSING: p1"),
-			ctor: PxeStoreKeyMissingError,
-			name: "PxeStoreKeyMissingError",
-			code: PxeStoreKeyMissingError.CODE,
+			code: "CAPABILITY_NOT_GRANTED",
+			rebuild: { kind: "capability" },
 		},
 		{
-			err: new ContractNotRegisteredError("Contract not found"),
+			ctor: ScopeViolationError,
+			make: () => new ScopeViolationError("s"),
+			name: "ScopeViolationError",
+			code: "SCOPE_VIOLATION",
+			rebuild: { kind: "drop-details" },
+		},
+		{
+			ctor: TooManyPendingError,
+			make: () => new TooManyPendingError(),
+			name: "TooManyPendingError",
+			code: "TOO_MANY_PENDING",
+			rebuild: base,
+		},
+		{
+			ctor: DuplicateInitializationError,
+			make: () => new DuplicateInitializationError(),
+			name: "DuplicateInitializationError",
+			code: "DUPLICATE_INITIALIZATION",
+			rebuild: pass,
+		},
+		{
+			ctor: UnsupportedMethodError,
+			make: () => UnsupportedMethodError.forMethod("m"),
+			name: "UnsupportedMethodError",
+			code: "UNSUPPORTED_METHOD",
+			rebuild: pass,
+		},
+		{
+			ctor: PxeStaleAnchorError,
+			make: () => new PxeStaleAnchorError("s"),
+			name: "PxeStaleAnchorError",
+			code: "PXE_STALE_ANCHOR",
+			rebuild: pass,
+		},
+		{
 			ctor: ContractNotRegisteredError,
+			make: () => new ContractNotRegisteredError("Contract not found"),
 			name: "ContractNotRegisteredError",
-			code: ContractNotRegisteredError.CODE,
-		},
-		{ err: new SessionEndedError(), ctor: SessionEndedError, name: "SessionEndedError", code: SessionEndedError.CODE },
-		{ err: new ScopeViolationError("s"), ctor: ScopeViolationError, name: "ScopeViolationError", code: ScopeViolationError.CODE },
-		{
-			err: new OperationNotRecordedError(),
-			ctor: OperationNotRecordedError,
-			name: "OperationNotRecordedError",
-			code: OperationNotRecordedError.CODE,
+			code: "CONTRACT_NOT_REGISTERED",
+			rebuild: pass,
 		},
 		{
-			err: new ChainNotSupportedError(),
 			ctor: ChainNotSupportedError,
+			make: () => new ChainNotSupportedError(),
 			name: "ChainNotSupportedError",
-			code: ChainNotSupportedError.CODE,
+			code: "CHAIN_NOT_SUPPORTED",
+			rebuild: {
+				kind: "constant",
+				message: "The wallet has no network for the requested chain. Switch the app to a network the wallet uses.",
+			},
 		},
+		{
+			ctor: PxeStoreKeyMissingError,
+			make: () => new PxeStoreKeyMissingError("PXE_STORE_KEY_MISSING: p1"),
+			name: "PxeStoreKeyMissingError",
+			code: "PXE_STORE_KEY_MISSING",
+			rebuild: pass,
+		},
+		{
+			ctor: TermsAcceptanceRequiredError,
+			make: () => new TermsAcceptanceRequiredError(),
+			name: "TermsAcceptanceRequiredError",
+			code: "TERMS_ACCEPTANCE_REQUIRED",
+			rebuild: { kind: "constant", message: "Open Nulo and accept the Terms to continue." },
+		},
+		{
+			ctor: SessionEndedError,
+			make: () => new SessionEndedError(),
+			name: "SessionEndedError",
+			code: "SESSION_ENDED",
+			rebuild: { kind: "constant", message: "The wallet session that approved this request has ended." },
+		},
+		{
+			ctor: OperationNotRecordedError,
+			make: () => new OperationNotRecordedError(),
+			name: "OperationNotRecordedError",
+			code: "OPERATION_NOT_RECORDED",
+			rebuild: { kind: "constant", message: "The operation could not be recorded, so it was not started." },
+		},
+		{ ctor: ValidationError, make: () => new ValidationError("v"), name: "ValidationError", code: "VALIDATION", rebuild: pass },
+		{
+			ctor: InvalidPasswordError,
+			make: () => new InvalidPasswordError(),
+			name: "InvalidPasswordError",
+			code: "INVALID_PASSWORD",
+			rebuild: pass,
+		},
+		{
+			ctor: AccountAddressInconsistencyError,
+			make: () => new AccountAddressInconsistencyError(),
+			name: "AccountAddressInconsistencyError",
+			code: "ACCOUNT_ADDRESS_INCONSISTENCY",
+			rebuild: pass,
+		},
+		{ ctor: RestoreTornError, make: () => new RestoreTornError(), name: "RestoreTornError", code: "RESTORE_TORN", rebuild: pass },
+		{
+			ctor: ProfileIdConflictError,
+			make: () => new ProfileIdConflictError(),
+			name: "ProfileIdConflictError",
+			code: "PROFILE_ID_CONFLICT",
+			rebuild: pass,
+		},
+		{
+			ctor: DuplicateWalletError,
+			make: () => new DuplicateWalletError(),
+			name: "DuplicateWalletError",
+			code: "DUPLICATE_WALLET",
+			rebuild: pass,
+		},
+		{ ctor: RecoveryModeError, make: () => new RecoveryModeError(), name: "RecoveryModeError", code: "RECOVERY_MODE", rebuild: pass },
 	]
 
-	test("all 18 subclasses: exact prototype, literal name, and code on direct construction", () => {
-		for (const { err, ctor, name, code } of instances) {
-			expect(Object.getPrototypeOf(err)).toBe(ctor.prototype)
-			expect(err).toBeInstanceOf(WalletError)
-			expect(err.name).toBe(name)
-			expect(err.code).toBe(code)
+	/** What today's rebuild yields for one payload, by the row's rule. */
+	function expected(row: Row, payload: WalletErrorPayload): Expected {
+		const own = { ctor: row.ctor, name: row.name }
+		switch (row.rebuild.kind) {
+			case "pass":
+				return { ...own, message: payload.message, details: payload.details }
+			case "drop-details":
+				return { ...own, message: payload.message, details: undefined }
+			case "constant":
+				return { ...own, message: row.rebuild.message, details: undefined }
+			case "capability":
+				throw new Error("capability rows have their own table")
+			case "base":
+				return { ctor: WalletError, name: "WalletError", message: payload.message, details: payload.details }
 		}
+	}
+
+	function expectRebuilt(payload: WalletErrorPayload, want: Expected): void {
+		const rebuilt = walletErrorFromPayload(payload)
+		expect(rebuilt.constructor).toBe(want.ctor)
+		expect(Object.getPrototypeOf(rebuilt)).toBe(want.ctor.prototype)
+		expect(rebuilt).toBeInstanceOf(WalletError)
+		expect(rebuilt.name).toBe(want.name)
+		expect(rebuilt.code).toBe(payload.code)
+		expect(rebuilt.message).toBe(want.message)
+		expect(rebuilt.details).toBe(want.details)
+	}
+
+	test("the table lists exactly the module's exported WalletError subclasses", () => {
+		const exported = Object.entries(errorsModule).filter(
+			([, value]) => typeof value === "function" && value.prototype instanceof WalletError,
+		)
+		expect(exported.map(([key]) => key).sort()).toEqual(rows.map((row) => row.name).sort())
+		for (const [key, value] of exported) expect(rows.find((row) => row.name === key)?.ctor).toBe(value)
 	})
 
-	test("the 17 switch-covered codes round-trip to the exact subclass with name intact", () => {
-		for (const { err, ctor, name } of instances) {
-			if (ctor === TooManyPendingError) continue // see BUG PIN below
-			const rebuilt = walletErrorFromPayload(err.toPayload())
-			expect(Object.getPrototypeOf(rebuilt)).toBe(ctor.prototype)
-			expect(rebuilt.name).toBe(name)
-			expect(rebuilt.code).toBe(err.code)
-			expect(rebuilt.message).toBe(err.message)
-		}
+	test.each(rows)("$name: exact prototype, literal name and literal code on construction", ({ ctor, make, name, code }) => {
+		const err = make()
+		expect(Object.getPrototypeOf(err)).toBe(ctor.prototype)
+		expect(err).toBeInstanceOf(WalletError)
+		expect(err).toBeInstanceOf(Error)
+		expect(err.name).toBe(name)
+		expect(err.code).toBe(code)
+	})
+
+	test.each(rows)("$name: its own payload rebuilds with class, name, code, message and details intact", (row) => {
+		const err = row.make()
+		const rebuilt = walletErrorFromPayload(err.toPayload())
+		const rebuiltAsBase = row.rebuild.kind === "base"
+		expect(rebuilt.constructor).toBe(rebuiltAsBase ? WalletError : row.ctor)
+		expect(rebuilt.name).toBe(rebuiltAsBase ? "WalletError" : row.name)
+		expect(rebuilt.code).toBe(row.code)
+		expect(rebuilt.message).toBe(err.message)
+		expect(rebuilt.details).toStrictEqual(err.details)
+	})
+
+	const foreignDetails = { jobId: "j", existingProfileName: "n", capabilityType: "accounts", k: 1 }
+	const payloadShapes: Array<[label: string, extra: { details?: unknown }]> = [
+		["foreign details", { details: foreignDetails }],
+		["message only (the operation-result channel)", {}],
+		["null details", { details: null }],
+	]
+	const nonCapabilityRows = rows.filter((row) => row.rebuild.kind !== "capability")
+
+	describe.each(payloadShapes)("a payload with %s", (_label, extra) => {
+		test.each(nonCapabilityRows)("$code rebuilds by its rule", (row) => {
+			const payload = { code: row.code, message: "wire text", ...extra } as WalletErrorPayload
+			expectRebuilt(payload, expected(row, payload))
+		})
+	})
+
+	// `capabilityType ?? "unknown"` into a fresh object: `??` keeps an empty or non-string value, and
+	// no other detail field survives.
+	test.each<[label: string, details: unknown, want: { capabilityType: unknown }]>([
+		["a string capabilityType beside another field", { capabilityType: "accounts", k: 1 }, { capabilityType: "accounts" }],
+		["an empty capabilityType", { capabilityType: "" }, { capabilityType: "" }],
+		["a non-string capabilityType beside another field", { capabilityType: 7, k: 1 }, { capabilityType: 7 }],
+		["no capabilityType", { k: 1 }, { capabilityType: "unknown" }],
+		["no details", undefined, { capabilityType: "unknown" }],
+		["null details", null, { capabilityType: "unknown" }],
+		["string details", "accounts", { capabilityType: "unknown" }],
+	])("CAPABILITY_NOT_GRANTED with %s", (_label, details, want) => {
+		const rebuilt = walletErrorFromPayload({ code: "CAPABILITY_NOT_GRANTED", message: "wire text", details })
+		expect(rebuilt.constructor).toBe(CapabilityNotGrantedError)
+		expect(rebuilt.name).toBe("CapabilityNotGrantedError")
+		expect(rebuilt.message).toBe("wire text")
+		expect(rebuilt.details).toStrictEqual(want)
+		expect(rebuilt.details).not.toBe(details)
+	})
+
+	test.each<[label: string, code: unknown]>([
+		["__proto__", "__proto__"],
+		["constructor", "constructor"],
+		["toString", "toString"],
+		["hasOwnProperty", "hasOwnProperty"],
+		["an unknown code", "SOME_FUTURE_CODE"],
+		["a number", 7],
+		["null", null],
+		["undefined", undefined],
+		["an object", {}],
+		["a boxed known code", Object("USER_REJECTED")],
+	])("a code that is %s rebuilds as the base WalletError with code, message and details kept", (_label, code) => {
+		const details = { k: 1 }
+		const rebuilt = walletErrorFromPayload({ code, message: "wire text", details } as WalletErrorPayload)
+		expect(rebuilt.constructor).toBe(WalletError)
+		expect(rebuilt.name).toBe("WalletError")
+		expect(rebuilt.code).toBe(code)
+		expect(rebuilt.message).toBe("wire text")
+		expect(rebuilt.details).toBe(details)
 	})
 
 	test("(BUG PIN) TOO_MANY_PENDING reconstructs as base WalletError, not TooManyPendingError", () => {
-		// `TooManyPendingError` is absent from `KnownWalletErrorPayload` and the
-		// `walletErrorFromPayload` switch, so it falls to the default arm — a
-		// client-side `instanceof TooManyPendingError` check would not survive the
-		// wire today. Preserved verbatim (adding the arm is a behavior change);
-		// tracked as an owner follow-up in the dedup-remediation report.
+		// Port consumers receive the base class today, so rebuilding this one would change their behaviour.
 		const rebuilt = walletErrorFromPayload(new TooManyPendingError().toPayload())
 		expect(rebuilt.constructor).toBe(WalletError)
 		expect(rebuilt).not.toBeInstanceOf(TooManyPendingError)
