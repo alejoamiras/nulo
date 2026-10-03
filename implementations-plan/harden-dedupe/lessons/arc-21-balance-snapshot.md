@@ -55,3 +55,11 @@
   - `!heroLoading` also matches the unknown dash, so the recovery surface would pass a hero that never recovered. It now requires `$10.00`.
   - Lesson: an assertion written as "no wrong value seen" passes when nothing was seen. Name the exact value expected, and prove each check with a negative probe on the wrong state.
 - **Evidence:** the two checks live in an import-free block of the surface file, and `scratchpad`'s `probe-r2.ts` runs them alone: 9 of 9 cases as expected (the four wrong port counts and three wrong heroes rejected, the right ones accepted). The three retry surfaces: 12 of 12 identical base vs head, and 12 of 12 under `--stability`.
+
+## Code review round 3: NOT CONVERGED
+
+- **The round-2 loophole lived on in every surface written before it.** `homeLoaded` and `home-empty` accepted the unknown dash, and `token-priced` accepted "0 USDC". Fixing only the named site invited a fourth round, so this one closed the class:
+  - every surface's check now pins the fixture's exact state: hero text, summary, row lists, malformed count, and no rows while loading or rejected;
+  - one row-set check (`holdings-fiat-off`) is left order-free, because the image compares that order.
+- **Probing the real predicates.** Surfaces register their predicate in an exported `wants` map. The probe loads a copy of the surface file with its four imports stubbed, then runs every surface's real check against the fixture's state and against the wrong states a loose check passes: 52 of 52 as expected. Testing a hand copy of a predicate proves the copy, not the check.
+- **Evidence:** all 16 surfaces, base vs head 64 of 64 identical and `--stability` 64 of 64. The exact checks passed on the first run, which also confirms the fixture values they name.

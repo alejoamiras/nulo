@@ -410,3 +410,18 @@ Round 1's findings 2 and 3 resolved. No production regression; `invalidate()` ke
 3. **Nit:** 16 surfaces, not 17.
 
 A negative probe runs the two new checks alone: they reject `[2]`, `[]`, `[2, 1]` and `[2, 2, 2]`, and a hero of `—`, `$0.00` or the skeleton; they accept `[2, 2]` and `$10.00`. The three retry surfaces, rerun base `1a08fa52` vs head `e4b5822d` on Chrome and Firefox in both themes: 12 of 12 identical, and 12 of 12 under `--stability`.
+
+### Code review round 3, Codex: NOT CONVERGED
+
+Round 2's findings resolved; all 24 retry pairs byte-identical; no production finding. One should-fix, adopted for the whole class:
+
+1. **Should-fix: other surfaces kept the round-2 loophole.** `homeLoaded` and `home-empty` accepted the unknown hero, and `token-priced` any digit. Every surface's check now pins the fixture's exact state. The hero must be exactly the expected text, with neither the skeleton nor the unknown dash (`heroIs`):
+   - Home: `$10.00` loaded, `$0.00` empty.
+   - Token page: `10 USDC` priced, `— USDC` malformed.
+   - Holdings: its exact summary, row list and malformed count.
+   - Picker: its exact row lists.
+   - Loading and rejected states: no row shown; past the cap, the dash itself.
+
+   Only `holdings-fiat-off` checks its rows as a set, since the image already compares their order.
+
+The probe now loads the surface file with its imports stubbed and runs each surface's real predicate: 52 of 52 cases as expected. Every surface's fixture state passes, and each wrong state is rejected: the unknown dash, `$0.00`, a mid-count figure, `0 USDC`, an unpriced order, a missing or unmarked row, and an incomplete call count. All 16 surfaces rerun base `1a08fa52` vs head `e4b5822d`: 64 of 64 identical, and 64 of 64 under `--stability`.
