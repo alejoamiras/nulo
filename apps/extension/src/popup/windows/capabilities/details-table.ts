@@ -4,6 +4,7 @@
  * names, so a retained grant is listed and a name never comes from the request.
  */
 import { fieldAddressKey } from "@nulo/wallet-bridge"
+import { isObjectLike } from "@nulo/wallet-core/utils"
 import { ANY_CONTRACT } from "./permission-rows"
 
 export type DetailsRow = {
@@ -31,7 +32,7 @@ type Collected = { listed: Map<string, DetailsRow>; anyContract: DetailsRow | nu
 
 export function buildDetailsTable(grants: readonly unknown[], knownContracts: readonly { address: string; name: string }[]): DetailsTable {
 	const into: Collected = { listed: new Map(), anyContract: null }
-	for (const cap of grants) if (isRecord(cap)) collect(into, cap)
+	for (const cap of grants) if (isObjectLike(cap)) collect(into, cap)
 	const names = new Map(knownContracts.map((entry) => [entry.address, entry.name]))
 	const rows = [...into.listed.entries()].map(([key, row]) => {
 		const name = names.get(key)
@@ -47,7 +48,7 @@ export function buildDetailsTable(grants: readonly unknown[], knownContracts: re
 
 function collect(into: Collected, cap: Record<string, unknown>): void {
 	if (cap.type === "simulation") {
-		for (const part of [cap.transactions, cap.utilities]) if (isRecord(part)) addScope(into, part.scope, "simulate")
+		for (const part of [cap.transactions, cap.utilities]) if (isObjectLike(part)) addScope(into, part.scope, "simulate")
 	} else if (cap.type === "transaction") {
 		addScope(into, cap.scope, "transact")
 	} else if (cap.type === "contracts" && cap.canRegister === true) {
@@ -60,7 +61,7 @@ function collect(into: Collected, cap: Record<string, unknown>): void {
 function addScope(into: Collected, scope: unknown, column: "simulate" | "transact"): void {
 	const patterns = Array.isArray(scope) ? scope : [{ contract: "*", function: "*" }]
 	for (const pattern of patterns) {
-		const record = isRecord(pattern) ? pattern : {}
+		const record = isObjectLike(pattern) ? pattern : {}
 		const fn = typeof record.function === "string" && record.function !== "*" ? record.function : ANY_FUNCTION
 		const list = rowFor(into, record.contract)[column]
 		if (!list.includes(fn)) list.push(fn)
@@ -83,8 +84,4 @@ function rowFor(into: Collected, contract: unknown): DetailsRow {
 function tableLabel(listedCount: number, reachesAny: boolean): string {
 	if (reachesAny) return "any contract"
 	return `${listedCount} ${listedCount === 1 ? "contract" : "contracts"}`
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null
 }

@@ -9,6 +9,7 @@
  * `buildNetworkOperation` / `buildAccountOperation` in dispatcher.ts.
  */
 
+import { isRecord } from "@nulo/wallet-core/utils"
 import type { Capability, GrantedCapabilityRecord, Scope, ScopePattern } from "./capabilities"
 import { sameFieldAddress } from "./field-address"
 import type { MethodName } from "./method-descriptors"
@@ -381,10 +382,6 @@ export function checkRegisterContractClassDisabled(): never {
 }
 
 // ── Authorizations consent ────────────────────────────────────────────
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value)
-}
 
 function typeOf(cap: unknown): string | undefined {
 	return isRecord(cap) && typeof cap.type === "string" ? cap.type : undefined

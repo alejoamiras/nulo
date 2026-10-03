@@ -1,4 +1,4 @@
-import type { EventHandler } from "@nulo/wallet-core/utils"
+import { type EventHandler, isRecord } from "@nulo/wallet-core/utils"
 import { createRunFence } from "@/composables/runFence"
 import { type ComputedRef, computed, ref } from "vue"
 import { pinnedTokensKey } from "@/utils/profile-ui-keys"
@@ -21,8 +21,6 @@ export type PinResult = "pinned" | "full" | "already" | "stale"
 /** The store's profile and chain as a pin scope, or undefined while either is missing. */
 export const pinScopeOf = (profileId: string | undefined, chainId: number | undefined): PinScope | undefined =>
 	profileId !== undefined && chainId !== undefined ? { profileId, chainId } : undefined
-
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v)
 
 /** A chain key is the canonical decimal form of a safe integer: no sign, no leading zero, no exponent. */
 const isChainKey = (key: string) => {

@@ -113,6 +113,7 @@ import {
 } from "@nulo/extension-messaging/errors"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
+import { isObjectLike } from "@nulo/wallet-core/utils"
 import { describeExternalId } from "./external-id"
 import { WALLET_FEATURES } from "./wallet-features"
 import type {
@@ -207,17 +208,16 @@ const FROM_ADDRESSED_KINDS: ReadonlySet<Operation["kind"]> = new Set(["aztec_sim
  * grantPublicAuthwit/registerToken rely on their handlers' own (String-coercion-tolerant) checks.
  */
 function assertAuthRelevantArgShape(methodName: string, args: unknown[]): void {
-	const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null
 	const bad = (m: string): never => {
 		throw new Error(`Malformed ${methodName} request: ${m}`)
 	}
 	const assertCall = (c: unknown, where: string) => {
-		if (!isObj(c) || c.to === undefined || typeof c.name !== "string") {
+		if (!isObjectLike(c) || c.to === undefined || typeof c.name !== "string") {
 			bad(`${where} must have \`to\` and a string \`name\``)
 		}
 	}
 	const assertExecCalls = (exec: unknown) => {
-		if (!isObj(exec)) bad("exec payload must be an object")
+		if (!isObjectLike(exec)) bad("exec payload must be an object")
 		const calls = (exec as Record<string, unknown>).calls
 		if (!Array.isArray(calls)) bad("exec.calls must be an array")
 		for (const c of calls as unknown[]) assertCall(c, "each call")

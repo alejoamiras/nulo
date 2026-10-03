@@ -1,5 +1,5 @@
 import type { StorageArea } from "@nulo/wallet-core/ports"
-import { createSerialQueue } from "@nulo/wallet-core/utils"
+import { createSerialQueue, isRecord } from "@nulo/wallet-core/utils"
 import { BACKOFF_CAP_MS, isScanFailure, isStalled, nextBackoffMs, type ScanEpisode, type ScanOutcome } from "./scan-health"
 
 export const SCAN_EPISODES_KEY = "nulo:incoming:scan-episodes"
@@ -30,7 +30,6 @@ export function scanEpisodeNetworkPrefix(profileId: string, networkId: string): 
 
 const isCount = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0
 const isTime = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value)
 
 /** Validate one stored episode field by field. A streak that cannot be trusted (`failures`,
  *  `failingSince`) drops the entry — a fresh episode under-reports, it never invents a stall. A bad

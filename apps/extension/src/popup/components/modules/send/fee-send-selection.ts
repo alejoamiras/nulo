@@ -1,4 +1,4 @@
-import { createSerialQueue } from "@nulo/wallet-core/utils"
+import { createSerialQueue, isRecord } from "@nulo/wallet-core/utils"
 import { UI_STORAGE_KEYS } from "@/popup/constants/storage-keys"
 import { storageLocalGet, storageLocalRemove, storageLocalSet } from "@/utils/storage"
 import type { SavedRecord, TransferSide } from "./fee-privacy"
@@ -12,8 +12,7 @@ type Blob = Record<string, unknown>
 const MAX_NAME = 64
 
 /** Extension storage is writable by anything that reaches the profile dir: every shape is checked before use. */
-const asObject = (value: unknown): Blob | undefined =>
-	typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Blob) : undefined
+const asObject = (value: unknown): Blob | undefined => (isRecord(value) ? value : undefined)
 
 function asRecord(value: unknown): SavedRecord | undefined {
 	const obj = asObject(value)
