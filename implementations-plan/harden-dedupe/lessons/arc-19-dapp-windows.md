@@ -58,15 +58,19 @@ The program's local harness compared base `0a9e48f9` with head `77969642`. It ra
   - **execute:**
     - `aztec_sendTx` with an embedded fee, and self-pay;
     - `send_transaction` with an embedded fee, and without one (the selectable fee card).
-- **Batch `dapp-windows-queue`: 4 of 4 identical, and 4 of 4 stable,** on the real worker against a served playground.
+- **Batch `dapp-windows-queue`** runs on the real worker against a served playground, at head `9e532274` (the review rounds changed only a TSDoc sentence). Three passes, each 4 of 4 identical:
+  - base `0a9e48f9` vs head `9e532274`;
+  - `--stability` on the base;
+  - `--stability` on the head.
   - **Setup:** the playground origin holds both verify windows on chain 0 and queues four reconnects. A tab asking for the Testnet chain then gets the connect window, which is the shot.
-  - **The assertion ran in all 12 captures** (base, head and base again, each on two browsers in two themes). After Allow:
+  - **The assertion ran in all 24 captures** (three passes, two captures each, two browsers, two themes). After Allow:
     - the window closes within 10 s;
     - the verify-window count stays at 2;
     - the tab never connects;
-    - the log viewer (`#/windows/logger`) gains exactly one new line, `WARN: Discovery rejected (verify-window queue full): request ext-N`. That is `ext-7` in the first theme and `ext-14` in the second, the seventh request of each pass.
+    - the log viewer (`#/windows/logger`) gains exactly one new complete queue-full Warn record, and it names the expected token. That is `ext-7` in the first theme and `ext-14` in the second, 12 of each.
   - **The refusal is observed, not inferred.** Closure alone does not prove it: an attach failure reaches the same `finally`, and `rejectDiscovery` sends the dApp nothing it can read. The Warn level is kept with every toggle off, so no production instrumentation was needed.
-  - **This batch's head is `9e532274`.** Code review round 1 changed only a TSDoc sentence.
+  - **The expected token is derived, not hard-coded.** Tokens are minted in order on first describe, and nothing logs the fresh request before its refusal. So it is one past the highest `ext-N` in the viewer before Allow. Anything else minting a token in between makes the check fail, never pass.
+  - **`--stability` captures only `--base`, twice.** Stability for both commits takes two passes.
 - **Head images were opened by eye, not trusted from the report.** They show the punycode warning, the busy Allow, the fee card's chevron on `send_transaction` without a fee, and the reconnect's "Account 1" strip.
 - **Harness gotchas:**
   - **`innerText` applies `text-transform`.** The identity strip's "Account 1" reads `ACCOUNT 1`, so a text check reads `textContent` instead.
@@ -74,7 +78,7 @@ The program's local harness compared base `0a9e48f9` with head `77969642`. It ra
   - **A relative log path breaks a child with its own `cwd`.** The playground child runs in `PG_DIR`, so its relative stdout path fails as `ENOENT … posix_spawn 'bun'`, which looks like a missing binary.
   - **A 60 s lock retry loses to other agents' runs.** A 5 s retry took the lock on the next free slot.
   - **The log viewer's editor renders only the lines in view.** Its search box filters the source and level lists, not log text, so the whole document is read from the CodeMirror view on `.cm-content` (`cmTile.root.view` in 6.43, `findFromDOM`'s own lookup).
-  - **The viewer's first live line joins the last loaded one.** The loaded document has no trailing newline, so one Firefox read saw `…request ext-6[06:57:40.167] [wallet-sdk] WARN: …`. This is pre-existing viewer behavior; the check matches on a substring and is unaffected.
+  - **The viewer's first live line joins the last loaded one.** The loaded document has no trailing newline, so one Firefox read saw `…request ext-6[06:57:40.167] [wallet-sdk] WARN: …`. This is pre-existing viewer behavior, and it makes any line-based check unsound: records are extracted by pattern and compared as multisets.
 
 ## Code review
 
@@ -87,3 +91,13 @@ The program's local harness compared base `0a9e48f9` with head `77969642`. It ra
 - **Should-fix:** the queue-full refusal was only inferred from the window closing. The harness now observes the worker's Warn line in the log viewer (see Screenshots).
 - **Nit:** the `untilSessionChecked` TSDoc said prod "never settles", which is false: a later false→true transition still resolves. The doc and the plan now state only the precondition, because otherwise the immediate callback reads `stop` before it is initialized.
 - **Gates at `9e532274`:** `lint`, `typecheck:all`, `test:all`, `test:ci-gating` and `audit:vue` all exit 0.
+- **Round 2: not converged, one should-fix, fixed; the TSDoc is exact.** The round-1 check compared whole lines that contained the queue-full text and never checked the token. Codex reproduced two false passes:
+  - an old `ext-6` queue-full line joined with a new `ext-7` attach-failure record;
+  - a fresh queue-full record for an unrelated token.
+- **The fix:** the harness now extracts complete Warn records by regex, takes the multiset difference before and after, and requires exactly one new record naming the derived token.
+- **Proof against injected viewer text** (a scratch script that runs the surface's pure block):
+  - both counterexamples now fail;
+  - so do two new records, no new record, and an `ext-70` when `ext-7` is expected;
+  - the expected record passes whether it is joined onto the last line or on its own;
+  - the old line check passed four of the five failing cases.
+- **No source change in round 2:** the head code is still `9e532274`.
