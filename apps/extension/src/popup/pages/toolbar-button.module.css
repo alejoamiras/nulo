@@ -1,6 +1,5 @@
 /* Keep local overrides order-independent: lazy chunks can repeat these rules. */
 
-/* A page header's 32px icon-only button. */
 .icon_btn {
 	display: flex;
 	align-items: center;

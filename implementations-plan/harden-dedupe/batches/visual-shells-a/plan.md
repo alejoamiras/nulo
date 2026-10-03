@@ -148,17 +148,17 @@ Add `toolbar-button.module.css` and convert the five pages. **Gate:** the same c
 
 **Disjointness table** (one-off, logged in this arc's lessons file): for each consumer class that composes, what it keeps locally and which shared longhands, if any, it meets. Only E1 and E2 may appear.
 
-**Screenshots and computed styles:** `bun ~/.cache/hd-shots/run.ts --batch visual-shells-a --base <parent> --head <head> --browsers chrome,firefox` must report every surface identical. That covers Chrome and Firefox, dark and light, at 360×600@2x, on the real build. Each surface with a probe also writes its touched elements' full computed styles (element and `::after`) per state. The probe runs before the harness's blur and with its freeze CSS off, so transitions report real values. Base and head must match leaf for leaf. A `--stability` pass must be clean too.
+**Screenshots and computed styles:** the local screenshot harness (outside the repo), run as batch `visual-shells-a` with base `<parent>` and head `<head>` on Chrome and Firefox, must report every surface identical. That covers Chrome and Firefox, dark and light, at 360×600@2x, on the real build. Each surface with a probe also writes its touched elements' full computed styles (element and `::after`) per state. The probe runs before the harness's blur and with its freeze CSS off, so transitions report real values. Base and head must match leaf for leaf. A `--stability` pass must be clean too.
 
 **State checklist** (each proven by computed style, and the rest state by pixels too):
 
 | state | where |
 |---|---|
-| rest, hover, `:active`, keyboard focus on the row target | contacts, connected apps, authwits, notes, settings index, account state, network detail |
-| focus on a row action | contact edit, session disconnect, authwit revoke (the `:focus-within` reveal) |
-| the divider hidden on a true last row | every list's last row (`:last-child`); SettingField made the last of its type by lifting its following sibling out of the DOM for the probe, since Profile renders a `div` after it |
+| rest, hover, `:active`, keyboard focus on the row target | contacts, connected apps, authwits, notes (the error card too, for E2), settings index, account state, network detail; the twins' `.row_text` and `.actions` containers are recorded with their rows |
+| hover and focus on a row action | contact edit, session disconnect (with its SVG's red fill), authwit revoke (the `:focus-within` reveal) |
+| the divider hidden on a true last row | every list's last row (`:last-child`), both network-detail containers included; SettingField made the last of its type by lifting its following sibling out of the DOM for the probe, since Profile renders a `div` after it |
 | SettingItem sizes and disabled | account state (`large`), network detail (`small`, and the disabled "Active network" row), FPCs (`raw`) |
-| toolbar rest, hover, `:active`, focus, disabled | contacts, connected apps list and detail, authwits, token detail (`disabled` set on the refresh button for the probe, since nothing disables it today) |
+| toolbar rest, hover, `:active`, focus, disabled | rest, hover, `:active` and focus on all five pages, both token-detail buttons included; `disabled` set on the refresh button for the probe, since nothing disables it today |
 | hover, in pixels | a contact row, an authwit card (revoke shown), the token menu button |
 | late duplicate copies | settings index, contacts, authwits and token detail visited again after every other chunk has loaded |
 

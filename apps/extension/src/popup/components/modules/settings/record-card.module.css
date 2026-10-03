@@ -79,8 +79,7 @@
 	white-space: nowrap;
 }
 
-/* Must follow `kv_val`: addresses and hashes wrap onto two lines instead of truncating, so
- * users can glance-verify the head and tail bytes. */
+/* Must follow kv_val so wrapping overrides its white-space. */
 .kv_val_wrap {
 	white-space: normal;
 	overflow-wrap: anywhere;
