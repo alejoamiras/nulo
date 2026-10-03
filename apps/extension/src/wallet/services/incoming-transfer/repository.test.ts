@@ -143,3 +143,104 @@ describe("IncomingTransferRepository — arrival floors and rows", () => {
 		expect(await repo.getArrivalRow("p11", "n1", "0xa")).toEqual(row)
 	})
 })
+
+describe("IncomingTransferRepository — the five-table scope inventory", () => {
+	const ROOTS = [
+		"nulo:core:incoming-transfers",
+		"nulo:core:incoming-trust",
+		"nulo:core:incoming-public-cursors",
+		"nulo:core:incoming-balance-outbox",
+		"nulo:core:incoming-arrivals",
+	]
+	const RECORD_IDS = ["note:p1|n1|0x1", "pub:p1|n1|0x2|0", "note:p1|n11|0x3", "pub:p11|n1|0x4|0", "other:p1|n1|0x5", "note:p1|n2|0x6"]
+	const SCOPED_IDS = ["p1|n1|x", "p1|n11|x", "p11|n1|x", "p1|n2|x"]
+
+	/** Every row is codec-invalid (`"{}"`), so only key-prefix deletion can remove it. */
+	async function seededRepo() {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const rows: Record<string, string> = {}
+		for (const id of RECORD_IDS) rows[`${ROOTS[0]}@${id}`] = "{}"
+		for (const root of ROOTS.slice(1)) for (const id of SCOPED_IDS) rows[`${root}@${id}`] = "{}"
+		await api.storage.local.set(rows)
+		const area = api.storage.local
+		const realRemove = area.remove.bind(area)
+		const removed: string[] = []
+		area.remove = (keys: string | string[]) => {
+			removed.push(...(Array.isArray(keys) ? keys : [keys]))
+			return realRemove(keys)
+		}
+		return { api, repo: new IncomingTransferRepository(api), removed }
+	}
+
+	const rowsOf = (scoped: string[], records: string[]) => [
+		...records.map((id) => `${ROOTS[0]}@${id}`),
+		...ROOTS.slice(1).flatMap((root) => scoped.map((id) => `${root}@${id}`)),
+	]
+
+	test("clearChain removes (p1, n1) from every table in table order and keeps every neighbour", async () => {
+		const { api, repo, removed } = await seededRepo()
+		await repo.clearChain("p1", "n1")
+		expect(removed).toEqual(rowsOf(["p1|n1|x"], ["note:p1|n1|0x1", "pub:p1|n1|0x2|0"]))
+		expect(Object.keys(await api.storage.local.get()).sort()).toEqual(
+			rowsOf(
+				["p1|n11|x", "p11|n1|x", "p1|n2|x"],
+				["note:p1|n11|0x3", "pub:p11|n1|0x4|0", "other:p1|n1|0x5", "note:p1|n2|0x6"],
+			).sort(),
+		)
+	})
+
+	test("clearProfile removes p1 from every table in table order and keeps p11 and unknown kinds", async () => {
+		const { api, repo, removed } = await seededRepo()
+		await repo.clearProfile("p1")
+		expect(removed).toEqual(
+			rowsOf(["p1|n1|x", "p1|n11|x", "p1|n2|x"], ["note:p1|n1|0x1", "pub:p1|n1|0x2|0", "note:p1|n11|0x3", "note:p1|n2|0x6"]),
+		)
+		expect(Object.keys(await api.storage.local.get()).sort()).toEqual(
+			rowsOf(["p11|n1|x"], ["pub:p11|n1|0x4|0", "other:p1|n1|0x5"]).sort(),
+		)
+	})
+})
+
+// Temporary proof that consolidating the inventory keeps the caller's resumption tick; removed once
+// the counts are logged. A spinner that re-queues itself advances once per microtask-queue pass.
+describe("IncomingTransferRepository — clear fingerprints", () => {
+	const SPIN_CAP = 100_000
+
+	test.each<["clearProfile" | "clearChain", string[]]>([
+		["clearProfile", ["call@0", "remove@4", "remove@15", "remove@36", "resumed@44"]],
+		["clearChain", ["call@0", "remove@4", "remove@15", "remove@36", "resumed@44"]],
+	])("%s", async (method, expected) => {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const repo = new IncomingTransferRepository(api)
+		await repo.upsertRecord(pubRec("p1", "n1", "0xa"))
+		await repo.setTrust("p1", "n1", "0xtok", "trusted")
+		await repo.setArrivalRow("p1", "n1", "0xacct", { sinceBlock: 1, played: [] })
+		let tick = 0
+		let spinning = true
+		const spin = () => {
+			if (!spinning) return
+			tick += 1
+			if (tick < SPIN_CAP) queueMicrotask(spin)
+		}
+		const stamps: Array<[string, number]> = []
+		const area = api.storage.local
+		const realRemove = area.remove.bind(area)
+		area.remove = (keys: string | string[]) => {
+			stamps.push(["remove", tick])
+			return realRemove(keys)
+		}
+		try {
+			queueMicrotask(spin)
+			stamps.push(["call", tick])
+			await (method === "clearProfile" ? repo.clearProfile("p1") : repo.clearChain("p1", "n1"))
+			stamps.push(["resumed", tick])
+		} finally {
+			spinning = false
+		}
+		expect(tick, "the spinner hit its cap: something waited on a timer").toBeLessThan(SPIN_CAP)
+		const base = stamps[0][1]
+		expect(stamps.map(([label, at]) => `${label}@${at - base}`)).toEqual(expected)
+	})
+})

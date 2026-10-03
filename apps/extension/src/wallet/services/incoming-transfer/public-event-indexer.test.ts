@@ -61,6 +61,17 @@ function makeReader(responses: Array<PublicTransferPage | Error>) {
 }
 
 describe("comparePublicPositions", () => {
+	test.each<[string, [number, number, number], [number, number, number], number]>([
+		["the block decides", [3, 0, 0], [5, 9, 9], -2],
+		["the tx index decides", [5, 4, 0], [5, 1, 9], 3],
+		["the log index decides", [5, 1, 2], [5, 1, 7], -5],
+		["equal", [5, 1, 7], [5, 1, 7], 0],
+	])("returns the first differing field's difference: %s", (_name, [b1, t1, l1], [b2, t2, l2], expected) => {
+		const a = { blockNumber: b1, txIndexWithinBlock: t1, logIndexWithinTx: l1 }
+		const b = { blockNumber: b2, txIndexWithinBlock: t2, logIndexWithinTx: l2 }
+		expect(comparePublicPositions(a, b)).toBe(expected)
+	})
+
 	test("orders by (block, txIndex, logIndex)", () => {
 		expect(
 			comparePublicPositions(

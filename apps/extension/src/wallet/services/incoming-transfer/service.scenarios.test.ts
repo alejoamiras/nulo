@@ -39,7 +39,7 @@ import type { IncomingNoteRecord, IncomingPublicEventRecord, IncomingTransferRec
 import { TaskStatus } from "@/wallet/services/task/spec"
 import { type ExecutionFence, ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import type { PublicEventReader } from "./public-event-indexer"
-import { SCAN_EPISODES_KEY } from "./scan-episodes"
+import { SCAN_EPISODES_KEY, scanEpisodeNetworkPrefix } from "./scan-episodes"
 import { type ArrivalRow, isArrivalEligible } from "./arrival-state"
 import type { ScanOutcome } from "./scan-health"
 import type {
@@ -153,6 +153,12 @@ vi.mock("./repository", () => ({
 	},
 	trustKey,
 }))
+
+// Pass-through, so a test can observe when a clear builds its episode prefix.
+vi.mock("./scan-episodes", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("./scan-episodes")>()
+	return { ...actual, scanEpisodeNetworkPrefix: vi.fn(actual.scanEpisodeNetworkPrefix) }
+})
 
 // ── Stub services ───────────────────────────────────────────────────────
 //
@@ -4134,11 +4140,11 @@ describe("IncomingTransferService — public-scan cursor resume (SW-restart, cas
 })
 
 describe("IncomingTransferService — public arm post-park epoch discipline", () => {
-	// The note arm re-checks the service epoch after every parked await inside its
-	// critical sections (the N-17 pins above drive the real watchdog for it). The
-	// public arm's writes carry the same obligation; these pins manufacture the
-	// post-handoff state directly — a bump from inside the CS's own awaited read,
-	// exactly where a handoff-admitted wipe would leave it.
+	// The note arm re-checks the service epoch only at its section's entry and after
+	// each timestamp read (the N-17 pins above drive the real watchdog there); the
+	// public arm re-checks after each read block before any write. These pins
+	// manufacture the post-handoff state directly — a bump from inside the CS's own
+	// awaited read, exactly where a handoff-admitted wipe would leave it.
 
 	test("commitPublicEvent: an epoch bump inside the in-CS token read suppresses record/trust/outbox writes", async () => {
 		const { reader, state } = makePublicReader()
@@ -5440,3 +5446,685 @@ describe("IncomingTransferService — arrival purges", () => {
 		expect([...arrivals.keys()]).toEqual(["p2|n1|0xa"])
 	})
 })
+
+// ── Receipt critical sections: the epoch re-check matrix ─────────────────────
+//
+// Each row parks one await of a receipt critical section, bumps the service epoch while it is
+// parked (where an off-lock hydrate or a watchdog-admitted wipe would land) and releases it. The
+// ordered call log is the oracle: a removed check that a later check masks still changes which
+// collaborators run. A parked collaborator has already run, so its fake effect precedes `BUMP`;
+// that order says nothing about when production storage commits.
+
+type ReceiptFixture = Awaited<ReturnType<typeof bootService>>
+type CollaboratorMap = Record<string, (...args: unknown[]) => Promise<unknown>>
+
+const RECEIPT_COLLABORATORS: Array<[keyof ReceiptFixture | "repo", string, string]> = [
+	["note", "getNotesRaw", "notes"],
+	["token", "getTokensRaw", "tokens"],
+	["transaction", "getTransactions", "outgoing"],
+	["journal", "getOperations", "inflight"],
+	["repo", "getRecord", "getRecord"],
+	["repo", "getTrust", "getTrust"],
+	["repo", "setTrust", "setTrust"],
+	["config", "getValue", "visibility"],
+	["note", "getBlockTimestamp", "timestamp"],
+	["repo", "setOutbox", "setOutbox"],
+	["repo", "upsertRecord", "upsert"],
+]
+
+function collaboratorTarget(f: ReceiptFixture, owner: keyof ReceiptFixture | "repo"): CollaboratorMap {
+	if (owner === "repo") return (f.service as unknown as { repo: CollaboratorMap }).repo
+	return f[owner] as unknown as CollaboratorMap
+}
+
+/** Logs every receipt collaborator call and emit; the first `hold` call parks after it returns. */
+function instrumentReceipt(f: ReceiptFixture, hold?: string) {
+	const log: string[] = []
+	let release!: () => void
+	const gate = new Promise<void>((resolve) => {
+		release = resolve
+	})
+	const parked = { reached: false }
+	for (const [owner, method, label] of RECEIPT_COLLABORATORS) {
+		const target = collaboratorTarget(f, owner)
+		const real = target[method]
+		target[method] = async (...args: unknown[]) => {
+			if (label === "visibility" && args[0] !== "incomingTransfersVisible") return real(...args)
+			log.push(label)
+			const out = await real(...args)
+			if (label === hold && !parked.reached) {
+				parked.reached = true
+				await gate
+			}
+			return out
+		}
+	}
+	f.service.onIncomingTrustChanged.add(() => log.push("trustChanged"))
+	f.service.onIncomingTransferPending.add(() => log.push("pending"))
+	f.service.onIncomingTransferAdded.add(() => log.push("added"))
+	const svc = f.service as unknown as { serviceEpoch: number }
+	const bump = () => {
+		log.push("BUMP")
+		svc.serviceEpoch += 1
+	}
+	return { log, parked, bump, release: () => release() }
+}
+
+/** Run `op`; when `hold` names a collaborator, bump while it is parked; `stale` bumps before the
+ *  critical section's lock is granted. */
+async function runReceipt(inst: ReturnType<typeof instrumentReceipt>, hold: string, op: () => Promise<unknown>) {
+	const done = op()
+	if (hold === "stale") inst.bump()
+	if (hold !== "none" && hold !== "stale") {
+		await vi.waitFor(() => expect(inst.parked.reached).toBe(true), { interval: 1 })
+		inst.bump()
+		inst.release()
+	}
+	await done
+}
+
+const flagString = (flags: boolean[]) => flags.map((f) => (f ? "1" : "0")).join("")
+
+const NOTE_ID = noteRecordId("p1", "n1", validNullifier(1))
+const PUB_TX = "0xptx"
+const PUB_ID = `pub:p1|n1|${PUB_TX}|0`
+const trustedRow = () =>
+	trust.set(trustKey("p1", "n1", tokenA.contract), {
+		profileId: "p1",
+		networkId: "n1",
+		contract: tokenA.contract,
+		state: "trusted",
+		updatedAt: 0,
+	})
+const ownTx = (hash: string) => makeTransactionStub([{ hash, account: "0xa", chainId: 1, profileId: "p1", networkId: "n1" }])
+
+type NoteFixture = "unknown" | "trusted" | "existing" | "outgoing-hit"
+
+async function bootNoteReceipt(fixture: NoteFixture) {
+	const booted = await bootService({
+		network: makeNetworkStub([{ id: "n1", chainId: 1 }]),
+		token: makeTokenStub([tokenA]),
+		note: makeNoteStub({ [tokenA.contract]: [note()] }, { 100: 1_234 }),
+		transaction: fixture === "outgoing-hit" ? ownTx("0xtx1") : makeTransactionStub(),
+	})
+	if (fixture === "trusted") trustedRow()
+	if (fixture === "existing")
+		seedNote({ siloedNullifier: validNullifier(1), contract: tokenA.contract, tokenId: tokenA.id, blockTimestamp: undefined })
+	return booted
+}
+
+/** [trust written, trustChanged, pending, outbox written, record written, added], from state + emits. */
+function receiptFlags(log: string[], recordId: string, fixture: string): string {
+	const record = records.get(recordId)
+	const recordWritten =
+		fixture === "existing"
+			? record?.blockTimestamp === 1_234
+			: fixture === "reconcile"
+				? record?.kind === "public-event" && record.blockHash === "0xbh5"
+				: record !== undefined
+	return flagString([
+		trust.get(trustKey("p1", "n1", tokenA.contract))?.state === "pending",
+		log.includes("trustChanged"),
+		log.includes("pending"),
+		outbox.has(`p1|n1|0xa|${tokenA.id}`),
+		recordWritten,
+		log.includes("added"),
+	])
+}
+
+const NOTE_HEAD = ["tokens", "outgoing", "inflight", "getRecord"]
+const NOTE_PROMOTION = ["getTrust", "setTrust", "trustChanged", "visibility", "pending"]
+const NOTE_UNKNOWN = ["notes", ...NOTE_HEAD, ...NOTE_PROMOTION, "timestamp", "setOutbox", "upsert"]
+const NOTE_TRUSTED = ["notes", ...NOTE_HEAD, "getTrust", "timestamp", "setOutbox", "upsert", "visibility", "added"]
+/** `log` with `BUMP` after the first `label` and everything past `stop` dropped. */
+const bumpedAfter = (log: string[], label: string, stop = log[log.length - 1]) => {
+	const end = log.indexOf(stop) + 1
+	const cut = log.slice(0, end)
+	const at = cut.indexOf(label) + 1
+	return [...cut.slice(0, at), "BUMP", ...cut.slice(at)]
+}
+
+describe("IncomingTransferService — note receipt epoch re-check matrix", () => {
+	test.each<[string, NoteFixture, string, string[], string]>([
+		["control, unknown trust", "unknown", "none", NOTE_UNKNOWN, "111110"],
+		["N0 stale entry: nothing inside the section runs", "unknown", "notes", ["notes", "BUMP"], "000000"],
+		[
+			"(DRIFT PIN) N1 token read: the promotion still lands",
+			"unknown",
+			"tokens",
+			bumpedAfter(NOTE_UNKNOWN, "tokens", "timestamp"),
+			"111000",
+		],
+		["(DRIFT PIN) N2 outgoing read", "unknown", "outgoing", bumpedAfter(NOTE_UNKNOWN, "outgoing", "timestamp"), "111000"],
+		["(DRIFT PIN) N3 in-flight read", "unknown", "inflight", bumpedAfter(NOTE_UNKNOWN, "inflight", "timestamp"), "111000"],
+		["(DRIFT PIN) N4 record read", "unknown", "getRecord", bumpedAfter(NOTE_UNKNOWN, "getRecord", "timestamp"), "111000"],
+		["(DRIFT PIN) N5 trust read", "unknown", "getTrust", bumpedAfter(NOTE_UNKNOWN, "getTrust", "timestamp"), "111000"],
+		["(DRIFT PIN) N6 trust write", "unknown", "setTrust", bumpedAfter(NOTE_UNKNOWN, "setTrust", "timestamp"), "111000"],
+		["(DRIFT PIN) N7 prompt visibility read", "unknown", "visibility", bumpedAfter(NOTE_UNKNOWN, "visibility", "timestamp"), "111000"],
+		[
+			"N8 timestamp read: the record stands down",
+			"unknown",
+			"timestamp",
+			bumpedAfter(NOTE_UNKNOWN, "timestamp", "timestamp"),
+			"111000",
+		],
+		["(DRIFT PIN) N9 outbox write: the record still lands", "unknown", "setOutbox", bumpedAfter(NOTE_UNKNOWN, "setOutbox"), "111110"],
+		["(DRIFT PIN) N10 record write", "unknown", "upsert", bumpedAfter(NOTE_UNKNOWN, "upsert"), "111110"],
+		["control, trusted", "trusted", "none", NOTE_TRUSTED, "000111"],
+		[
+			"(DRIFT PIN) N9 outbox write, trusted: Added still emits",
+			"trusted",
+			"setOutbox",
+			bumpedAfter(NOTE_TRUSTED, "setOutbox"),
+			"000111",
+		],
+		["(DRIFT PIN) N10 record write, trusted", "trusted", "upsert", bumpedAfter(NOTE_TRUSTED, "upsert"), "000111"],
+		["(DRIFT PIN) N11 Added visibility read", "trusted", "visibility", bumpedAfter(NOTE_TRUSTED, "visibility"), "000111"],
+		["control, existing record without a timestamp", "existing", "none", ["notes", ...NOTE_HEAD, "timestamp", "upsert"], "000010"],
+		[
+			"N4b backfill timestamp read: the backfill stands down",
+			"existing",
+			"timestamp",
+			["notes", ...NOTE_HEAD, "timestamp", "BUMP"],
+			"000000",
+		],
+	])("%s", async (_name, fixture, hold, expectedLog, expectedFlags) => {
+		const f = await bootNoteReceipt(fixture)
+		const inst = instrumentReceipt(f, hold)
+		await runReceipt(inst, hold, () => scan(f.service))
+		expect(inst.log).toEqual(expectedLog)
+		expect(receiptFlags(inst.log, NOTE_ID, fixture)).toBe(expectedFlags)
+	})
+
+	test("an own outgoing hash: both sets are read before the record, then the note stands down", async () => {
+		const f = await bootNoteReceipt("outgoing-hit")
+		const inst = instrumentReceipt(f)
+		await scan(f.service)
+		expect(inst.log).toEqual(["notes", ...NOTE_HEAD])
+	})
+})
+
+type PublicFixture = "unknown" | "trusted" | "reconcile" | "outgoing-hit"
+
+async function bootPublicReceipt(fixture: PublicFixture) {
+	const { reader, state } = makePublicReader()
+	const booted = await bootPublic(reader, state, fixture === "outgoing-hit" ? { transaction: ownTx(PUB_TX) } : {})
+	if (fixture === "trusted") trustedRow()
+	if (fixture === "reconcile") seedPublic({ txHash: PUB_TX, blockHash: "0xold" })
+	return booted
+}
+
+type PublicCommit = (
+	p: string,
+	n: string,
+	c: string,
+	chainId: number,
+	account: string,
+	ev: PublicTransferEvent,
+	epochAtStart: number,
+	opts?: { reconcile?: boolean },
+) => Promise<void>
+
+function commitPublic(service: unknown, opts?: { reconcile?: boolean }, ev: PublicTransferEvent = pubEvent({ txHash: PUB_TX })) {
+	const svc = service as { serviceEpoch: number; commitPublicEvent: PublicCommit }
+	return svc.commitPublicEvent("p1", "n1", tokenA.contract, 1, "0xa", ev, svc.serviceEpoch, opts)
+}
+
+const PUB_HEAD = ["tokens", "getRecord", "outgoing", "inflight"]
+const PUB_UNKNOWN = [...PUB_HEAD, "getTrust", "setTrust", "trustChanged", "visibility", "pending", "setOutbox", "upsert"]
+const PUB_TRUSTED = [...PUB_HEAD, "getTrust", "setOutbox", "upsert", "visibility", "added"]
+
+describe("IncomingTransferService — public receipt epoch re-check matrix", () => {
+	test.each<[string, PublicFixture, string, string[], string]>([
+		["control, unknown trust", "unknown", "none", PUB_UNKNOWN, "111110"],
+		["P0 stale entry: nothing inside the section runs", "unknown", "stale", ["BUMP"], "000000"],
+		["P1 token read", "unknown", "tokens", bumpedAfter(PUB_UNKNOWN, "tokens", "tokens"), "000000"],
+		["P2 record read", "unknown", "getRecord", bumpedAfter(PUB_UNKNOWN, "getRecord", "getRecord"), "000000"],
+		[
+			"P3 outgoing read (miss): the journal is still read, then the event stands down",
+			"unknown",
+			"outgoing",
+			bumpedAfter(PUB_UNKNOWN, "outgoing", "inflight"),
+			"000000",
+		],
+		["P4 in-flight read", "unknown", "inflight", bumpedAfter(PUB_UNKNOWN, "inflight", "inflight"), "000000"],
+		["P5 trust read: the promotion stands down", "unknown", "getTrust", bumpedAfter(PUB_UNKNOWN, "getTrust", "getTrust"), "000000"],
+		[
+			"(DRIFT PIN) P6 trust write: the prompt still emits",
+			"unknown",
+			"setTrust",
+			bumpedAfter(PUB_UNKNOWN, "setTrust", "pending"),
+			"111000",
+		],
+		["(DRIFT PIN) P7 prompt visibility read", "unknown", "visibility", bumpedAfter(PUB_UNKNOWN, "visibility", "pending"), "111000"],
+		["P8 outbox write: the record stands down", "unknown", "setOutbox", bumpedAfter(PUB_UNKNOWN, "setOutbox", "setOutbox"), "111100"],
+		["P9 record write", "unknown", "upsert", bumpedAfter(PUB_UNKNOWN, "upsert"), "111110"],
+		["control, trusted", "trusted", "none", PUB_TRUSTED, "000111"],
+		["P8 outbox write, trusted", "trusted", "setOutbox", bumpedAfter(PUB_TRUSTED, "setOutbox", "setOutbox"), "000100"],
+		["P9 record write, trusted: Added stands down", "trusted", "upsert", bumpedAfter(PUB_TRUSTED, "upsert", "visibility"), "000110"],
+		["P10 Added visibility read", "trusted", "visibility", bumpedAfter(PUB_TRUSTED, "visibility", "visibility"), "000110"],
+		["control, reconcile of a moved block", "reconcile", "none", ["tokens", "getRecord", "upsert"], "000010"],
+		["P2 record read, reconcile: the update stands down", "reconcile", "getRecord", ["tokens", "getRecord", "BUMP"], "000000"],
+	])("%s", async (_name, fixture, hold, expectedLog, expectedFlags) => {
+		const f = await bootPublicReceipt(fixture)
+		const inst = instrumentReceipt(f, hold)
+		await runReceipt(inst, hold, () => commitPublic(f.service, fixture === "reconcile" ? { reconcile: true } : undefined))
+		expect(inst.log).toEqual(expectedLog)
+		expect(receiptFlags(inst.log, PUB_ID, fixture)).toBe(expectedFlags)
+	})
+
+	test("an own outgoing hash: the record is read first and the journal is never read", async () => {
+		const f = await bootPublicReceipt("outgoing-hit")
+		const inst = instrumentReceipt(f)
+		await commitPublic(f.service)
+		expect(inst.log).toEqual(["tokens", "getRecord", "outgoing"])
+	})
+})
+
+// ── Microtask fingerprints (proof that consolidation keeps every tick) ─────────
+//
+// A spinner that re-queues itself advances once per pass of the microtask queue, so each stamp
+// counts the hops before it. Collaborators are wrapped synchronously (no frame of their own) and
+// stamps are relative to the first stamp inside the critical section.
+
+const SPIN_CAP = 100_000
+
+async function fingerprint(install: (stamp: (label: string) => void) => void, run: () => Promise<unknown>): Promise<string[]> {
+	let tick = 0
+	let spinning = true
+	const spin = () => {
+		if (!spinning) return
+		tick += 1
+		if (tick < SPIN_CAP) queueMicrotask(spin)
+	}
+	const stamps: Array<[string, number]> = []
+	install((label) => stamps.push([label, tick]))
+	try {
+		queueMicrotask(spin)
+		await run()
+		stamps.push(["resumed", tick])
+	} finally {
+		spinning = false
+	}
+	expect(tick, "the spinner hit its cap: something waited on a timer").toBeLessThan(SPIN_CAP)
+	const base = stamps[0][1]
+	return stamps.map(([label, at]) => `${label}@${at - base}`)
+}
+
+function stampCollaborators(f: ReceiptFixture, stamp: (label: string) => void, labels: string[]) {
+	for (const [owner, method, label] of RECEIPT_COLLABORATORS) {
+		if (!labels.includes(label)) continue
+		const target = collaboratorTarget(f, owner)
+		const real = target[method]
+		target[method] = (...args: unknown[]) => {
+			if (label !== "visibility" || args[0] === "incomingTransfersVisible") stamp(label)
+			return real(...args)
+		}
+	}
+	f.service.onIncomingTrustChanged.add(() => stamp("trustChanged"))
+	f.service.onIncomingTransferPending.add(() => stamp("pending"))
+	f.service.onIncomingTransferAdded.add(() => stamp("added"))
+}
+
+const IN_SECTION = ["tokens", "outgoing", "inflight", "getRecord", "getTrust", "setTrust", "visibility", "timestamp", "setOutbox", "upsert"]
+
+describe("IncomingTransferService — microtask fingerprints", () => {
+	test.each<[string, NoteFixture]>([
+		["note section, unknown trust", "unknown"],
+		["note section, trusted", "trusted"],
+	])("%s", async (_name, fixture) => {
+		const f = await bootNoteReceipt(fixture)
+		await flushPromises()
+		const stamps = await fingerprint(
+			(stamp) => stampCollaborators(f, stamp, IN_SECTION),
+			() => scan(f.service),
+		)
+		expect(stamps).toEqual(NOTE_FINGERPRINTS[fixture])
+	})
+
+	test.each<[string, PublicFixture]>([
+		["public section, unknown trust", "unknown"],
+		["public section, trusted", "trusted"],
+	])("%s", async (_name, fixture) => {
+		const f = await bootPublicReceipt(fixture)
+		await flushPromises()
+		const stamps = await fingerprint(
+			(stamp) => stampCollaborators(f, stamp, IN_SECTION),
+			() => commitPublic(f.service),
+		)
+		expect(stamps).toEqual(PUBLIC_FINGERPRINTS[fixture])
+	})
+
+	test("replay emit", async () => {
+		const f = await bootService({ network: makeNetworkStub([{ id: "n1", chainId: 1 }]), token: makeTokenStub([tokenA]) })
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "pending",
+			updatedAt: 0,
+		})
+		seedNote({ contract: tokenA.contract, tokenId: tokenA.id })
+		await flushPromises()
+		const repo = collaboratorTarget(f, "repo")
+		const stamps = await fingerprint(
+			(stamp) => {
+				const realList = repo.listByContract
+				repo.listByContract = (...args: unknown[]) => {
+					stamp("listByContract")
+					return realList(...args)
+				}
+				stampCollaborators(f, stamp, ["tokens", "getTrust"])
+			},
+			() => f.service.replayPendingPrompts("p1", "n1", "0xa"),
+		)
+		expect(stamps).toEqual(REPLAY_FINGERPRINT)
+	})
+
+	test.each<["clearProfile" | "clearChain"]>([["clearProfile"], ["clearChain"]])("%s", async (method) => {
+		const f = await bootService({ network: makeNetworkStub([{ id: "n1", chainId: 1 }]) })
+		await flushPromises()
+		const repo = collaboratorTarget(f, "repo")
+		const stamps = await fingerprint(
+			(stamp) => {
+				const realWipe = repo[method]
+				repo[method] = (...args: unknown[]) => {
+					stamp("wipe")
+					return realWipe(...args)
+				}
+				const realActive = f.profile.getActiveProfile.getMockImplementation() as () => Promise<unknown>
+				f.profile.getActiveProfile.mockImplementation(() => {
+					stamp("active")
+					return realActive()
+				})
+			},
+			() => (method === "clearProfile" ? f.service.clearProfile("p1") : f.service.clearChain("p1", "n1")),
+		)
+		expect(stamps).toEqual(CLEAR_FINGERPRINTS[method])
+	})
+})
+
+// ── Prompt payloads (wire-shaped) ─────────────────────────────────────────────
+
+const WIRE_ACCOUNT = `0x${"a1".repeat(32)}`
+const WIRE_CONTRACT = `0x${"c3".repeat(32)}`
+const WIRE_AMOUNT = "340282366920938463463374607431768211455"
+const wireToken = { id: 7, chainId: 1, contract: WIRE_CONTRACT, symbol: "WIRE", decimals: 18 }
+const WIRE_PROMPT = {
+	profileId: "p1",
+	networkId: "n1",
+	accountAddress: WIRE_ACCOUNT,
+	contract: WIRE_CONTRACT,
+	tokenId: 7,
+	tokenSymbol: "WIRE",
+	tokenDecimals: 18,
+	amountRaw: WIRE_AMOUNT,
+}
+const PROMPT_KEYS = ["profileId", "networkId", "accountAddress", "contract", "tokenId", "tokenSymbol", "tokenDecimals", "amountRaw"]
+
+describe("IncomingTransferService — prompt payloads", () => {
+	async function bootWire() {
+		const f = await bootService({
+			network: makeNetworkStub([{ id: "n1", chainId: 1 }]),
+			token: makeTokenStub([wireToken]),
+			note: makeNoteStub({ [WIRE_CONTRACT]: [note({ contract: WIRE_CONTRACT, content: { value: WIRE_AMOUNT } })] }, { 100: 1 }),
+			publicReader: makePublicReader().reader,
+		})
+		await flushPromises()
+		const prompts: unknown[] = []
+		f.service.onIncomingTransferPending.add((payload) => prompts.push(payload))
+		return { ...f, prompts }
+	}
+
+	function expectWirePrompt(prompts: unknown[]) {
+		expect(prompts).toEqual([WIRE_PROMPT])
+		expect(Object.keys(prompts[0] as object)).toEqual(PROMPT_KEYS)
+	}
+
+	test("the note arm's first-receive prompt", async () => {
+		const f = await bootWire()
+		const svc = f.service as unknown as { scanContract: (p: string, n: string, a: string, c: string) => Promise<void> }
+		await svc.scanContract("p1", "n1", WIRE_ACCOUNT, WIRE_CONTRACT)
+		expectWirePrompt(f.prompts)
+	})
+
+	test("the public arm's first-receive prompt", async () => {
+		const f = await bootWire()
+		const svc = f.service as unknown as { serviceEpoch: number; commitPublicEvent: PublicCommit }
+		const ev = pubEvent({ to: WIRE_ACCOUNT, amountRaw: WIRE_AMOUNT, txHash: `0x${"7".repeat(64)}` })
+		await svc.commitPublicEvent("p1", "n1", WIRE_CONTRACT, 1, WIRE_ACCOUNT, ev, svc.serviceEpoch)
+		expectWirePrompt(f.prompts)
+	})
+
+	test("the replayed prompt", async () => {
+		const f = await bootWire()
+		trust.set(trustKey("p1", "n1", WIRE_CONTRACT), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: WIRE_CONTRACT,
+			state: "pending",
+			updatedAt: 0,
+		})
+		seedNote({ accountAddress: WIRE_ACCOUNT, contract: WIRE_CONTRACT, tokenId: 7, amountRaw: WIRE_AMOUNT })
+		await f.service.replayPendingPrompts("p1", "n1", WIRE_ACCOUNT)
+		expectWirePrompt(f.prompts)
+	})
+})
+
+// ── Scope clears: order, the episode prefix and the throw path ─────────────────
+
+type ClearInternals = {
+	serviceEpoch: number
+	feeCache: Map<string, string>
+	episodes: { setAnnounced: (prefix: string, stalled: boolean) => boolean }
+	repo: CollaboratorMap
+}
+
+/** Logs `<event>:<epoch delta>` for the clear's ordered steps. */
+async function bootClear(method: "clearProfile" | "clearChain", wipeFails = false) {
+	const f = await bootService({ network: makeNetworkStub([{ id: "n1", chainId: 1 }]) })
+	await flushPromises()
+	const svc = f.service as unknown as ClearInternals
+	const start = svc.serviceEpoch
+	const log: string[] = []
+	const at = (event: string) => log.push(`${event}:${svc.serviceEpoch - start}`)
+	svc.episodes.setAnnounced("p1|n1|", true)
+	svc.feeCache.set("n1|0xtx|0xbh", "1")
+	const realClear = svc.feeCache.clear.bind(svc.feeCache)
+	const realDelete = svc.feeCache.delete.bind(svc.feeCache)
+	svc.feeCache.clear = () => {
+		at("evict")
+		realClear()
+	}
+	svc.feeCache.delete = (key: string) => {
+		at("evict")
+		return realDelete(key)
+	}
+	f.service.onIncomingSyncHealthChanged.add(() => at("health"))
+	const realWipe = svc.repo[method]
+	svc.repo[method] = async (...args: unknown[]) => {
+		at("wipe")
+		// A fee read that wrote after the first eviction: the final eviction must sweep it.
+		svc.feeCache.set("n1|late|0xbh", "2")
+		if (wipeFails) throw new Error("wipe failed")
+		return realWipe(...args)
+	}
+	const realActive = f.profile.getActiveProfile.getMockImplementation() as () => Promise<unknown>
+	f.profile.getActiveProfile.mockImplementation(() => {
+		at("active")
+		return realActive()
+	})
+	const prefixSpy = vi.mocked(scanEpisodeNetworkPrefix)
+	prefixSpy.mockClear()
+	return { f, svc, log, start, prefixCalls: prefixSpy, at }
+}
+
+describe("IncomingTransferService — scope clears", () => {
+	test("clearProfile: bump, drop episodes, evict, wipe, hydrate, evict again", async () => {
+		const { f, log } = await bootClear("clearProfile")
+		await f.service.clearProfile("p1")
+		expect(log).toEqual(["health:1", "evict:1", "wipe:1", "active:2", "evict:2"])
+	})
+
+	test("clearChain: the episode prefix is built after the bump", async () => {
+		const { f, log, prefixCalls, at } = await bootClear("clearChain")
+		const original = prefixCalls.getMockImplementation() as typeof scanEpisodeNetworkPrefix
+		prefixCalls.mockImplementation((profileId: string, networkId: string) => {
+			at("prefix")
+			return original(profileId, networkId)
+		})
+		try {
+			await f.service.clearChain("p1", "n1")
+		} finally {
+			prefixCalls.mockImplementation(original)
+		}
+		expect(log).toEqual(["prefix:1", "prefix:1", "health:1", "evict:1", "wipe:1", "active:2", "evict:2"])
+	})
+
+	test.each<["clearProfile" | "clearChain"]>([["clearProfile"], ["clearChain"]])(
+		"%s: a failed wipe rejects after the final eviction, without a rebuild",
+		async (method) => {
+			const { f, svc, log, start } = await bootClear(method, true)
+			const call = method === "clearProfile" ? f.service.clearProfile("p1") : f.service.clearChain("p1", "n1")
+			await expect(call).rejects.toThrow("wipe failed")
+			expect(log.filter((e) => !e.startsWith("health"))).toEqual(["evict:1", "wipe:1", "evict:1"])
+			expect(svc.serviceEpoch - start).toBe(1)
+		},
+	)
+
+	test.each<["clearProfile" | "clearChain"]>([["clearProfile"], ["clearChain"]])(
+		"%s: success advances the epoch by two",
+		async (method) => {
+			const { f, svc, start } = await bootClear(method)
+			await (method === "clearProfile" ? f.service.clearProfile("p1") : f.service.clearChain("p1", "n1"))
+			expect(svc.serviceEpoch - start).toBe(2)
+		},
+	)
+})
+
+// ── Note-scheduler teardown ─────────────────────────────────────────────────
+
+type TeardownInternals = {
+	schedulers: Map<string, ReturnType<typeof setInterval>>
+	watchedContracts: Map<string, Set<string>>
+	purgeDeletedAccountOnNetworkLocked: (
+		account: { profileId: string; chainId: number; address: string },
+		networkId: string,
+		active: string | undefined,
+	) => Promise<void>
+	detachTokenSchedulersLocked: (profileId: string, network: { id: string; chainId: number }, contract: string) => Promise<void>
+}
+
+describe("IncomingTransferService — note-scheduler teardown", () => {
+	async function bootTeardown() {
+		const f = await bootService({
+			network: makeNetworkStub([{ id: "n1", chainId: 1 }]),
+			account: makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }]),
+			token: makeTokenStub([tokenA, tokenB]),
+		})
+		await flushPromises()
+		const svc = f.service as unknown as TeardownInternals
+		const interval = svc.schedulers.get("n1|0xa")
+		expect(interval).toBeDefined()
+		clearSpy = vi.spyOn(globalThis, "clearInterval")
+		return { svc, interval, clear: clearSpy }
+	}
+
+	let clearSpy: ReturnType<typeof vi.spyOn> | undefined
+	afterEach(() => {
+		clearSpy?.mockRestore()
+		clearSpy = undefined
+	})
+
+	test("an active-profile account delete stops its interval and drops both entries", async () => {
+		const { svc, interval, clear } = await bootTeardown()
+		await svc.purgeDeletedAccountOnNetworkLocked({ profileId: "p1", chainId: 1, address: "0xa" }, "n1", "p1")
+		expect(clear).toHaveBeenCalledWith(interval)
+		expect(svc.schedulers.has("n1|0xa")).toBe(false)
+		expect(svc.watchedContracts.has("n1|0xa")).toBe(false)
+	})
+
+	test("an inactive profile's account delete leaves the scheduler", async () => {
+		const { svc, clear } = await bootTeardown()
+		await svc.purgeDeletedAccountOnNetworkLocked({ profileId: "p2", chainId: 1, address: "0xa" }, "n1", "p1")
+		expect(clear).not.toHaveBeenCalled()
+		expect(svc.schedulers.has("n1|0xa")).toBe(true)
+		expect(svc.watchedContracts.get("n1|0xa")).toEqual(new Set([tokenA.contract, tokenB.contract]))
+	})
+
+	test("detaching one of two contracts keeps the scheduler; detaching the last stops it", async () => {
+		const { svc, interval, clear } = await bootTeardown()
+		await svc.detachTokenSchedulersLocked("p1", { id: "n1", chainId: 1 }, tokenA.contract)
+		expect(clear).not.toHaveBeenCalled()
+		expect(svc.watchedContracts.get("n1|0xa")).toEqual(new Set([tokenB.contract]))
+		await svc.detachTokenSchedulersLocked("p1", { id: "n1", chainId: 1 }, tokenB.contract)
+		expect(clear).toHaveBeenCalledWith(interval)
+		expect(svc.schedulers.has("n1|0xa")).toBe(false)
+		expect(svc.watchedContracts.has("n1|0xa")).toBe(false)
+	})
+})
+
+// Recorded on the unchanged code; Bun 1.4.2.
+const NOTE_FINGERPRINTS: Partial<Record<NoteFixture, string[]>> = {
+	unknown: [
+		"tokens@0",
+		"outgoing@1",
+		"inflight@3",
+		"getRecord@5",
+		"getTrust@6",
+		"setTrust@7",
+		"trustChanged@8",
+		"visibility@8",
+		"pending@10",
+		"timestamp@11",
+		"setOutbox@13",
+		"upsert@15",
+		"resumed@22",
+	],
+	trusted: [
+		"tokens@0",
+		"outgoing@1",
+		"inflight@3",
+		"getRecord@5",
+		"getTrust@6",
+		"timestamp@8",
+		"setOutbox@10",
+		"upsert@12",
+		"visibility@13",
+		"added@15",
+		"resumed@21",
+	],
+}
+const PUBLIC_FINGERPRINTS: Partial<Record<PublicFixture, string[]>> = {
+	unknown: [
+		"tokens@0",
+		"getRecord@1",
+		"outgoing@2",
+		"inflight@4",
+		"getTrust@7",
+		"setTrust@8",
+		"trustChanged@9",
+		"visibility@9",
+		"pending@11",
+		"setOutbox@12",
+		"upsert@14",
+		"resumed@20",
+	],
+	trusted: [
+		"tokens@0",
+		"getRecord@1",
+		"outgoing@2",
+		"inflight@4",
+		"getTrust@7",
+		"setOutbox@9",
+		"upsert@11",
+		"visibility@12",
+		"added@14",
+		"resumed@19",
+	],
+}
+const REPLAY_FINGERPRINT = ["listByContract@0", "tokens@1", "getTrust@2", "pending@3", "resumed@7"]
+const CLEAR_FINGERPRINTS: Record<"clearProfile" | "clearChain", string[]> = {
+	clearProfile: ["wipe@0", "active@1", "resumed@10"],
+	clearChain: ["wipe@0", "active@1", "resumed@10"],
+}
