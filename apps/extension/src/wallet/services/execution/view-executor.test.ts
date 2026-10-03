@@ -15,13 +15,8 @@ import { describe, expect, test, vi } from "vitest"
 import { ContractInitializationStatus } from "@aztec-labs/aztec.js/wallet"
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { FunctionSelector, FunctionType } from "@aztec-labs/stdlib/abi"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { ViewExecutor, type ViewExecutorDeps } from "./view-executor"
-
-const assertLiveChainIdentityMock = vi.hoisted(() => vi.fn())
-vi.mock("@nulo/aztec-runtime/utils", async (importOriginal) => ({
-	...(await importOriginal<object>()),
-	assertLiveChainIdentity: assertLiveChainIdentityMock,
-}))
 
 const fastPathMocks = vi.hoisted(() => ({
 	rehydrateOptimizablePrefix: vi.fn(),
@@ -56,11 +51,13 @@ function makeHarness(overrides: Partial<ViewExecutorDeps> = {}) {
 	const network = {
 		id: "net-1",
 		profileId: "p1",
+		// The live pair below matches it: (1 ^ 6) >>> 0 === 7, and the exact L1 is 1.
 		chainId: 7,
+		l1ChainId: 1,
 		endpoints: [{ id: "e1", rpcUrl: "http://primary" }],
 		primaryEndpointId: "e1",
 	} as never
-	const node = { getNodeInfo: vi.fn(async () => ({ l1ChainId: 1, rollupVersion: 2 })) }
+	const node = { getNodeInfo: vi.fn(async () => ({ l1ChainId: 1, rollupVersion: 6 })) }
 	const account = {
 		address: addr("0xacct"),
 		ensureRegistered: vi.fn(async () => {}),
@@ -226,14 +223,30 @@ describe("ViewExecutor builds under a fence captured at entry", () => {
 })
 
 describe("ViewExecutor.executeAztecGetChainInfo", () => {
-	test("chain identity asserted against live nodeInfo (V-01) before returning", async () => {
-		assertLiveChainIdentityMock.mockClear()
-		const { executor, network } = makeHarness()
+	test("returns the live pair checked against the selected network (V-01), as two fields in wire order", async () => {
+		const { executor } = makeHarness()
 		const info = await executor.executeAztecGetChainInfo({ kind: "aztec_getChainInfo", networkId: "net-1" } as never)
 
-		expect(assertLiveChainIdentityMock).toHaveBeenCalledWith(network, { l1ChainId: 1, rollupVersion: 2 })
-		expect(info.chainId.toBigInt()).toBe(1n)
-		expect(info.version.toBigInt()).toBe(2n)
+		expect(Object.keys(info)).toEqual(["chainId", "version"])
+		expect(info.chainId).toBeInstanceOf(Fr)
+		expect(info.version).toBeInstanceOf(Fr)
+		expect(info.chainId.toString()).toBe(`0x${"0".repeat(63)}1`)
+		expect(info.version.toString()).toBe(`0x${"0".repeat(63)}6`)
+	})
+
+	test("a drifted live pair is refused, never reported to the dApp", async () => {
+		const { executor, node } = makeHarness()
+		node.getNodeInfo.mockResolvedValue({ l1ChainId: 1, rollupVersion: 2 })
+		let refused: unknown
+		try {
+			await executor.executeAztecGetChainInfo({ kind: "aztec_getChainInfo", networkId: "net-1" } as never)
+		} catch (error) {
+			refused = error
+		}
+		expect((refused as Error).constructor).toBe(Error)
+		expect((refused as Error).message).toBe(
+			"Chain identity mismatch: selected network has chainId=7 but live node reports composite=3 (l1ChainId=1, rollupVersion=2). Refusing to sign/prove against a drifted endpoint.",
+		)
 	})
 })
 
@@ -411,5 +424,68 @@ describe("ViewExecutor.executeAztecProfileTx", () => {
 		const profArgs = happy.pxe.profileTx.mock.calls[0] as unknown[]
 		const scopes = (profArgs[1] as { scopes: Array<{ toString(): string }> }).scopes
 		expect(scopes.map((s) => s.toString())).toEqual([validAddr])
+	})
+})
+
+describe("ViewExecutor.executeAztecExecuteUtility — the selector binding, with the call as the dispatcher parses it", () => {
+	const TO = AztecAddress.fromBigIntUnsafe(0x70c3n)
+	const SYMBOL = { name: "symbol", functionType: FunctionType.UTILITY, isStatic: true }
+
+	function harness() {
+		return makeHarness({
+			resolver: {
+				resolveInstance: vi.fn(async () => [null, { currentContractClassId: { toString: () => "class-1" } }]),
+				resolveArtifact: vi.fn(async () => [null, {}]),
+			} as never,
+		})
+	}
+	const op = (name: string | undefined) =>
+		({
+			kind: "aztec_executeUtility",
+			networkId: "net-1",
+			accountAddress: VALID_ADDR,
+			call: {
+				to: TO,
+				selector: FunctionSelector.fromString("0x0f8efe19"),
+				name,
+				args: [],
+				hideMsgSender: false,
+				type: FunctionType.UTILITY,
+				isStatic: true,
+			},
+			opts: { scopes: [] },
+		}) as never
+	async function rejectionOf(run: Promise<unknown>): Promise<Error> {
+		try {
+			await run
+		} catch (error) {
+			return error as Error
+		}
+		throw new Error("expected a rejection")
+	}
+
+	test("an unknown selector, a wrong name and an empty name are refused before PXE runs anything", async () => {
+		const { executor, pxe } = harness()
+		contractResolverMocks.findFunctionBySelector.mockResolvedValueOnce(undefined)
+		const unknown = await rejectionOf(executor.executeAztecExecuteUtility(op("symbol")))
+		expect(unknown.constructor).toBe(Error)
+		expect(unknown.message).toBe("Method not found")
+		for (const name of ["balance_of_private", ""]) {
+			contractResolverMocks.findFunctionBySelector.mockResolvedValueOnce(SYMBOL)
+			const refused = await rejectionOf(executor.executeAztecExecuteUtility(op(name)))
+			expect(refused.constructor).toBe(Error)
+			expect(refused.message).toBe(
+				`Scope violation: call name "${name}" does not match selector's function "symbol" on ${TO.toString()}`,
+			)
+		}
+		expect(pxe.executeUtility).not.toHaveBeenCalled()
+	})
+
+	test("an absent name (a direct call; the wire schema requires one) runs the selector's function", async () => {
+		const { executor, pxe } = harness()
+		contractResolverMocks.findFunctionBySelector.mockResolvedValueOnce(SYMBOL)
+		await executor.executeAztecExecuteUtility(op(undefined))
+		expect(pxe.executeUtility).toHaveBeenCalledTimes(1)
+		expect((pxe.executeUtility as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatchObject({ name: "symbol" })
 	})
 })

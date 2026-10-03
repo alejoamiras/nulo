@@ -275,8 +275,7 @@ describe("runFastPath", () => {
 				node: node as never,
 				pxe: pxe as never,
 				resolver: resolver as never,
-				// chainId=0 means assertLiveChainIdentity skips its check (local
-				// substrate); tests don't exercise chain-identity drift here.
+				// A local row (chainId 0) skips only the composite check; the exact l1ChainId still binds.
 				network: { chainId: 0, l1ChainId: 11155111 },
 				fromAddr: AztecAddress.ZERO,
 				opts: opts as never,
@@ -350,6 +349,70 @@ describe("runFastPath", () => {
 		expect(bound).not.toBeNull()
 		expect(bound).not.toBe(input)
 		expect(input[0].name).toBe("balance_of_public")
+	})
+
+	async function rejectionOf(run: Promise<unknown>): Promise<Error> {
+		try {
+			await run
+		} catch (error) {
+			return error as Error
+		}
+		throw new Error("expected a rejection")
+	}
+	const ZERO = AztecAddress.ZERO.toString()
+
+	test("a drifted live L1 is refused before any call is bound or simulated", async () => {
+		const { deps, resolver } = makeDeps({ node: fakeNode({ nodeInfo: { l1ChainId: 1, rollupVersion: 4127419662 } }) })
+		const refused = await rejectionOf(runFastPath(deps))
+		expect(refused.constructor).toBe(Error)
+		expect(refused.message).toBe(
+			"Chain identity mismatch: selected network has l1ChainId=11155111 but live node reports l1ChainId=1 (rollupVersion=4127419662). Refusing to sign/prove against a drifted endpoint.",
+		)
+		expect(resolver.resolveInstance).not.toHaveBeenCalled()
+		expect(simulateViaNodeMock).not.toHaveBeenCalled()
+	})
+
+	test("the node simulation commits to the checked pair: l1ChainId then rollupVersion", async () => {
+		simulateViaNodeMock.mockResolvedValue([fakeSimResult()])
+		const { deps } = makeDeps()
+		await runFastPath(deps)
+		const chainInfo = simulateViaNodeMock.mock.calls[0][3] as { chainId: Fr; version: Fr }
+		expect(Object.keys(chainInfo)).toEqual(["chainId", "version"])
+		expect(chainInfo.chainId.toBigInt()).toBe(11155111n)
+		expect(chainInfo.version.toBigInt()).toBe(4127419662n)
+	})
+
+	test("binding refusals carry the exact text: an unknown selector, a wrong name, an empty name", async () => {
+		const unknownSplit = rehydrateOptimizablePrefix([
+			rpcShapedPublicStaticCall({ selector: FunctionSelector.fromField(new Fr(0x12345678n)).toString() }),
+		])
+		const unknown = await rejectionOf(runFastPath(makeDeps({ optimizableCalls: unknownSplit!.optimizableCalls }).deps))
+		expect(unknown.constructor).toBe(Error)
+		expect(unknown.message).toBe("Method not found")
+		for (const name of ["balance_of_public", ""]) {
+			const split = rehydrateOptimizablePrefix([rpcShapedPublicStaticCall({ name, selector: TOTAL_SUPPLY_SELECTOR })])
+			const refused = await rejectionOf(runFastPath(makeDeps({ optimizableCalls: split!.optimizableCalls }).deps))
+			expect(refused.constructor).toBe(Error)
+			expect(refused.message).toBe(
+				`Scope violation: call name "${name}" does not match selector's function "total_supply" on ${ZERO}`,
+			)
+		}
+		expect(simulateViaNodeMock).not.toHaveBeenCalled()
+	})
+
+	test("a wire call without a name never reaches the binding: the prefix falls back to the standard path", () => {
+		const { name: _name, ...nameless } = rpcShapedPublicStaticCall()
+		expect(rehydrateOptimizablePrefix([nameless])).toBeNull()
+	})
+
+	test("the binding itself requires a name: a direct call without one is a scope violation", async () => {
+		const call = rehydrateOptimizablePrefix([rpcShapedPublicStaticCall()])!.optimizableCalls[0]
+		;(call as { name?: string }).name = undefined
+		const refused = await rejectionOf(bindOptimizableCalls({} as never, fakeResolver() as never, [call]))
+		expect(refused.constructor).toBe(Error)
+		expect(refused.message).toBe(
+			`Scope violation: call name "undefined" does not match selector's function "balance_of_public" on ${ZERO}`,
+		)
 	})
 
 	test("14. PXE getSyncedBlockHeader is preferred over node.getBlock", async () => {

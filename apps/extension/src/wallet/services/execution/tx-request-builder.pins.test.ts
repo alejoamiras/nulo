@@ -11,9 +11,11 @@ import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { encodeArguments, type FunctionCall, FunctionSelector, FunctionType } from "@aztec-labs/stdlib/abi"
 import { AuthWitness } from "@aztec-labs/stdlib/auth-witness"
 import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { GasFees } from "@aztec-labs/stdlib/gas"
 import { HashedValues } from "@aztec-labs/stdlib/tx"
 import { SessionEndedError } from "@nulo/extension-messaging/errors"
 import { beforeEach, describe, expect, test, vi } from "vitest"
+import z from "zod"
 import { getAuthRegistryAddress, getSetAuthorizedFn } from "@/wallet/utils/auth-registry"
 import { TxRequestBuilder } from "./tx-request-builder"
 
@@ -381,5 +383,93 @@ describe("buildNoFrom pins", () => {
 		await expect(h.builder.buildNoFrom(op as never, FENCE)).rejects.toThrowError(/exactly 1 call/)
 		expect(h.deps.accountService.getAccountContract).toHaveBeenCalledWith("p1", 31337, ACCOUNT_ADDR.toString())
 		expect(h.deps.profileService.getActiveProfile).not.toHaveBeenCalled()
+	})
+})
+
+/** The rejection itself, so a message is compared whole: `toThrowError("text")` matches a substring. */
+async function rejectionOf(run: Promise<unknown>): Promise<Error> {
+	try {
+		await run
+	} catch (error) {
+		return error as Error
+	}
+	throw new Error("expected a rejection")
+}
+
+describe("selector binding: the dApp's name must be the selector's function", () => {
+	const UNKNOWN_SELECTOR = "0x0badc0de"
+	const selectorOf = async () => (await FunctionSelector.fromNameAndParameters(FN.name, FN.parameters)).toString()
+	const mismatch = (name: string) => `Scope violation: call name "${name}" does not match selector's function "${FN.name}" on ${CONTRACT}`
+
+	function noFromHarness() {
+		const getCurrentMinFees = vi.fn(async () => new GasFees(1, 1))
+		h.deps.networkService.getNode.mockResolvedValue({
+			// The NO_FROM fee fallback divides the limits by the fees, so both are numbers here.
+			getNodeInfo: vi.fn(async () => ({ ...NODE_INFO, txsLimits: { gas: { daGas: 111, l2Gas: 222 } } })),
+			getCurrentMinFees,
+		} as never)
+		return getCurrentMinFees
+	}
+	/** The JSON shape `aztec_sendTx` carries for a NO_FROM call. */
+	const wireCall = (fields: Record<string, unknown>) => ({
+		to: CONTRACT,
+		type: FunctionType.PRIVATE,
+		isStatic: false,
+		hideMsgSender: false,
+		args: [],
+		...fields,
+	})
+	const buildNoFrom = (call: unknown) =>
+		h.builder.buildNoFrom(
+			{ networkId: "net-1", accountAddress: ACCOUNT_ADDR.toString(), exec: { calls: [call] }, opts: {} } as never,
+			FENCE,
+		)
+
+	test("NO_FROM: a matching name builds; an unknown selector, a wrong name and an empty name are refused before any fee read", async () => {
+		const selector = await selectorOf()
+		const getCurrentMinFees = noFromHarness()
+
+		const unknown = await rejectionOf(buildNoFrom(wireCall({ name: FN.name, selector: UNKNOWN_SELECTOR })))
+		expect(unknown.constructor).toBe(Error)
+		expect(unknown.message).toBe("Method not found")
+		for (const name of ["sneaky", ""]) {
+			const refused = await rejectionOf(buildNoFrom(wireCall({ name, selector })))
+			expect(refused.constructor).toBe(Error)
+			expect(refused.message).toBe(mismatch(name))
+		}
+		expect(getCurrentMinFees).not.toHaveBeenCalled()
+
+		const built = await buildNoFrom(wireCall({ name: FN.name, selector }))
+		expect(getCurrentMinFees).toHaveBeenCalledTimes(1)
+		expect(built.txRequest.functionSelector.toString()).toBe(selector)
+	})
+
+	test("NO_FROM: an absent name never reaches the binding: the call schema refuses it", async () => {
+		const selector = await selectorOf()
+		const getCurrentMinFees = noFromHarness()
+		const refused = await rejectionOf(buildNoFrom(wireCall({ selector })))
+		expect(refused).toBeInstanceOf(z.ZodError)
+		expect((refused as z.ZodError).issues.map((i) => i.path.join("."))).toEqual(["name"])
+		expect(getCurrentMinFees).not.toHaveBeenCalled()
+	})
+
+	test("encoded_call: an unknown selector, a wrong name and an empty name are refused before the entrypoint build", async () => {
+		const selector = await selectorOf()
+		const unknown = await rejectionOf(build(h, [{ kind: "encoded_call", to: CONTRACT, selector: UNKNOWN_SELECTOR, args: [] }]))
+		expect(unknown.constructor).toBe(Error)
+		expect(unknown.message).toBe("Method not found")
+		for (const name of ["sneaky", ""]) {
+			const refused = await rejectionOf(build(h, [{ kind: "encoded_call", to: CONTRACT, selector, args: [], name }]))
+			expect(refused.constructor).toBe(Error)
+			expect(refused.message).toBe(mismatch(name))
+		}
+		expect(h.account.buildTxExecutionRequest).not.toHaveBeenCalled()
+	})
+
+	test("encoded_call: an absent name is bound to the selector's function and builds", async () => {
+		const selector = await selectorOf()
+		const result = await build(h, [{ kind: "encoded_call", to: CONTRACT, selector, args: [] }])
+		expect(h.account.buildTxExecutionRequest).toHaveBeenCalledTimes(1)
+		expect(result.txCalls).toEqual([{ contract: CONTRACT, method: FN.name, args: [] }])
 	})
 })

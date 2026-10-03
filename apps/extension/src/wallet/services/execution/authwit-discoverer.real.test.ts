@@ -10,9 +10,9 @@
  * (`authwit-discoverer.test.ts`) keeps the plumbing cases that need no hashing.
  */
 
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
-import { FunctionSelector, FunctionType } from "@aztec-labs/stdlib/abi"
+import { FunctionCall, FunctionSelector, FunctionType } from "@aztec-labs/stdlib/abi"
 import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { computeVarArgsHash } from "@aztec-labs/stdlib/hash"
 import { CallAuthorizationRequest, computeAuthWitMessageHash, computeInnerAuthWitHash } from "@aztec-labs/aztec.js/authorization"
@@ -77,7 +77,7 @@ describe("AuthwitDiscoverer.discoverPrivateAuthwits — a real CallAuthorization
 			node: { getNodeInfo: async () => CHAIN },
 			pxe: { simulateTx },
 			account: { address: account },
-			// chainId 0 makes assertLiveChainIdentity a no-op; l1ChainId/rollupVersion match the node.
+			// A local row (chainId 0) skips only the composite check; the exact l1ChainId still binds.
 			network: { chainId: 0, ...CHAIN },
 		}
 		const disc = new AuthwitDiscoverer(fakeLogger())
@@ -173,5 +173,132 @@ describe("AuthwitDiscoverer.discoverPrivateAuthwits — a real CallAuthorization
 		)
 
 		expect(content).toMatchObject({ name: fn.name, type: fn.functionType, isStatic: fn.isStatic, returnType: fn.returnType })
+	})
+})
+
+/** The rejection itself, so a message is compared whole: `toThrowError("text")` matches a substring. */
+async function rejectionOf(run: Promise<unknown>): Promise<Error> {
+	try {
+		await run
+	} catch (error) {
+		return error as Error
+	}
+	throw new Error("expected a rejection")
+}
+
+/** The `ChainInfo` an authwit commits to, written out: `l1ChainId` then `rollupVersion`, never swapped. */
+const CHAIN_INFO = { chainId: new Fr(CHAIN.l1ChainId), version: new Fr(CHAIN.rollupVersion) }
+/** The stored row for a non-local network whose composite matches `CHAIN`. */
+const NON_LOCAL = { chainId: (CHAIN.l1ChainId ^ CHAIN.rollupVersion) >>> 0, l1ChainId: CHAIN.l1ChainId }
+
+describe("AuthwitDiscoverer — the live chain binding", () => {
+	function discover(nodeInfo: { l1ChainId: number; rollupVersion: number }, network: { chainId: number; l1ChainId: number }) {
+		const consumer = AztecAddress.fromFieldUnsafe(new Fr(0x5555n))
+		const simulateTx = vi.fn(async (..._args: unknown[]) => ({ privateExecutionResult: {} }))
+		return {
+			simulateTx,
+			run: async () => {
+				const { fields } = await realAuthorizationFields()
+				simulateTx.mockResolvedValue({ privateExecutionResult: executionResult(consumer, fields) } as never)
+				const ctx = {
+					txRequest: {},
+					node: { getNodeInfo: async () => nodeInfo },
+					pxe: { simulateTx },
+					account: { address: AztecAddress.fromFieldUnsafe(new Fr(0xacc0n)) },
+					network,
+				}
+				return new AuthwitDiscoverer(fakeLogger()).discoverPrivateAuthwits(
+					{ networkId: "net", accountAddress: "0xacc0", actions: [] as Action[] },
+					async () => ctx as never,
+				)
+			},
+		}
+	}
+
+	test("a non-local row whose composite matches the live pair hashes over that pair", async () => {
+		const result = await discover(CHAIN, NON_LOCAL).run()
+		expect(result.actions).toEqual([{ kind: "add_private_authwit", content: { kind: "message_hash", messageHash: KAT.messageHash } }])
+	})
+
+	test("a drifted rollup version is refused after the discovery simulation, before any hash", async () => {
+		const { run, simulateTx } = discover({ l1ChainId: CHAIN.l1ChainId, rollupVersion: 2 }, NON_LOCAL)
+		const refused = await rejectionOf(run())
+		expect(refused.constructor).toBe(Error)
+		expect(refused.message).toBe(
+			"Chain identity mismatch: selected network has chainId=31336 but live node reports composite=31339 (l1ChainId=31337, rollupVersion=2). Refusing to sign/prove against a drifted endpoint.",
+		)
+		expect(simulateTx).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("AuthwitDiscoverer — call and encoded-call hashes and the selector binding", () => {
+	const fn = {
+		name: "transfer_in_public",
+		functionType: FunctionType.PUBLIC,
+		isStatic: false,
+		parameters: [],
+		returnType: { kind: "boolean" },
+	}
+	const to = AztecAddress.fromFieldUnsafe(new Fr(0x5555n)).toString()
+	const caller = AztecAddress.fromFieldUnsafe(new Fr(0x1234n)).toString()
+	const instances = new Map([[to, { currentContractClassId: { toString: () => "0xc1a55" } }]])
+	const artifacts = new Map([["0xc1a55", { functions: [fn], nonDispatchPublicFunctions: [] }]])
+	const selectorOf = async () => (await FunctionSelector.fromNameAndParameters(fn.name, fn.parameters)).toString()
+	const expectedHash = async () =>
+		computeAuthWitMessageHash(
+			{
+				caller: AztecAddress.fromStringUnsafe(caller),
+				call: new FunctionCall(
+					fn.name,
+					AztecAddress.fromStringUnsafe(to),
+					FunctionSelector.fromString(await selectorOf()),
+					fn.functionType,
+					false,
+					fn.isStatic,
+					[],
+					fn.returnType as never,
+				),
+			},
+			CHAIN_INFO,
+		)
+	const encoded = (content: Record<string, unknown>) =>
+		new AuthwitDiscoverer(fakeLogger()).computeEncodedCallMessageHash(
+			content as never,
+			CHAIN as never,
+			instances as never,
+			artifacts as never,
+		)
+
+	test("a call-kind hash commits to the l1ChainId and rollupVersion it was given", async () => {
+		const hash = await new AuthwitDiscoverer(fakeLogger()).computeCallMessageHash(
+			{ kind: "call", caller, contract: to, method: fn.name, args: [] },
+			CHAIN as never,
+			instances as never,
+			artifacts as never,
+		)
+		expect(hash.toString()).toBe((await expectedHash()).toString())
+	})
+
+	test("an encoded-call hash with a matching or absent name commits to the same pair", async () => {
+		const selector = await selectorOf()
+		const expected = (await expectedHash()).toString()
+		expect((await encoded({ kind: "encoded_call", caller, to, selector, args: [], name: fn.name })).toString()).toBe(expected)
+		expect((await encoded({ kind: "encoded_call", caller, to, selector, args: [] })).toString()).toBe(expected)
+	})
+
+	test("an unknown selector, a wrong name and an empty name are refused before the content is rewritten", async () => {
+		const selector = await selectorOf()
+		const unknown = await rejectionOf(encoded({ kind: "encoded_call", caller, to, selector: "0x0badc0de", args: [], type: "lie" }))
+		expect(unknown.constructor).toBe(Error)
+		expect(unknown.message).toBe("Method not found")
+		for (const name of ["sneaky", ""]) {
+			const content = { kind: "encoded_call", caller, to, selector, args: [], name, type: "lie" }
+			const refused = await rejectionOf(encoded(content))
+			expect(refused.constructor).toBe(Error)
+			expect(refused.message).toBe(
+				`Scope violation: authwit call name "${name}" does not match selector's function "${fn.name}" on ${to}`,
+			)
+			expect(content.type).toBe("lie")
+		}
 	})
 })

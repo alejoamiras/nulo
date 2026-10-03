@@ -49,12 +49,6 @@ vi.mock("@aztec-labs/aztec.js/authorization", async (importOriginal) => ({
 	computeAuthWitMessageHash: async (intent: { innerHash: string }) => ({ toString: () => `mh:${intent.innerHash}` }),
 }))
 
-const assertLiveChainIdentityMock = vi.hoisted(() => vi.fn())
-vi.mock("@nulo/aztec-runtime/utils", async (importOriginal) => ({
-	...(await importOriginal<object>()),
-	assertLiveChainIdentity: assertLiveChainIdentityMock,
-}))
-
 // Gas-limit shaping is pinned by the structural fee fixtures; no-op here
 // so plain-object txRequest fakes survive the NO_FROM path.
 vi.mock("./fee/fee-strategy", async (importOriginal) => ({
@@ -104,13 +98,15 @@ function makeHarness(
 	const network = {
 		id: "net-1",
 		profileId: "p1",
+		// The live pair below matches it: (1 ^ 6) >>> 0 === 7, and the exact L1 is 1.
 		chainId: 7,
+		l1ChainId: 1,
 		name: "N",
 		primaryEndpointId: "ep1",
 		endpoints: [{ id: "ep1", rpcUrl: "https://rpc.submit" }],
 	} as never
 	const node = {
-		getNodeInfo: vi.fn(async () => ({ l1ChainId: 1, rollupVersion: 2 })),
+		getNodeInfo: vi.fn(async () => ({ l1ChainId: 1, rollupVersion: 6 })),
 		getTxReceipt: vi.fn(async () => ({ status: "success" })),
 	}
 	const account = { address: addr("0xacct"), createAuthWit: vi.fn(async () => ({ kind: "authwit" })) }
@@ -539,20 +535,50 @@ describe("DappSendExecutor.executeNoFromSendTx (via default_entrypoint)", () => 
 		expect(proveCtx.scopes).toEqual([built.account.address, scopeADup, scopeB])
 	})
 
-	test("chain identity rebind (V-01): asserted against live nodeInfo before authwit hashing; skipped when no effects", async () => {
-		assertLiveChainIdentityMock.mockClear()
-		collectOffchainEffectsMock.mockReturnValue([{ data: [], contractAddress: addr("0xconsumer") }])
-		const withEffects = makeHarness()
-		await withEffects.executor.executeAztecSendTx(makeNoFromOp(), ORIGIN, undefined, undefined, FENCE)
-		expect(withEffects.node.getNodeInfo).toHaveBeenCalledTimes(1)
-		expect(assertLiveChainIdentityMock).toHaveBeenCalledWith(withEffects.built.network, { l1ChainId: 1, rollupVersion: 2 })
+	const authEffect = (tag: string) => ({ data: [tag], contractAddress: addr("0xconsumer") })
 
-		assertLiveChainIdentityMock.mockClear()
+	test("chain identity rebind (V-01): with effects, the live pair is fetched once and a matching pair signs", async () => {
+		collectOffchainEffectsMock.mockReturnValue([authEffect("n")])
+		const { executor, node, account } = makeHarness()
+		await executor.executeAztecSendTx(makeNoFromOp(), ORIGIN, undefined, undefined, FENCE)
+		expect(node.getNodeInfo).toHaveBeenCalledTimes(1)
+		expect(account.createAuthWit).toHaveBeenCalledTimes(1)
+	})
+
+	test("chain identity rebind (V-01): with effects, a drifted live pair is refused before any authwit or send", async () => {
+		collectOffchainEffectsMock.mockReturnValue([authEffect("n")])
+		const { executor, node, account, proveAndSend } = makeHarness()
+		node.getNodeInfo.mockResolvedValue({ l1ChainId: 1, rollupVersion: 2 })
+		let refused: unknown
+		try {
+			await executor.executeAztecSendTx(makeNoFromOp(), ORIGIN, undefined, undefined, FENCE)
+		} catch (error) {
+			refused = error
+		}
+		expect((refused as Error).constructor).toBe(Error)
+		expect((refused as Error).message).toBe(
+			"Chain identity mismatch: selected network has chainId=7 but live node reports composite=3 (l1ChainId=1, rollupVersion=2). Refusing to sign/prove against a drifted endpoint.",
+		)
+		expect(account.createAuthWit).not.toHaveBeenCalled()
+		expect(proveAndSend).not.toHaveBeenCalled()
+	})
+
+	test("chain identity rebind (V-01): with no effects, the live pair is never fetched", async () => {
 		collectOffchainEffectsMock.mockReturnValue([])
-		const noEffects = makeHarness()
-		await noEffects.executor.executeAztecSendTx(makeNoFromOp(), ORIGIN, undefined, undefined, FENCE)
-		expect(noEffects.node.getNodeInfo).not.toHaveBeenCalled()
-		expect(assertLiveChainIdentityMock).not.toHaveBeenCalled()
+		const { executor, node } = makeHarness()
+		await executor.executeAztecSendTx(makeNoFromOp(), ORIGIN, undefined, undefined, FENCE)
+		expect(node.getNodeInfo).not.toHaveBeenCalled()
+	})
+
+	test("discovered authorizations are signed in effect order, a malformed effect between them skipped", async () => {
+		collectOffchainEffectsMock.mockReturnValue([
+			authEffect("first"),
+			{ data: [], contractAddress: addr("0xconsumer") },
+			authEffect("second"),
+		])
+		const { executor, account } = makeHarness()
+		await executor.executeAztecSendTx(makeNoFromOp(), ORIGIN, undefined, undefined, FENCE)
+		expect(account.createAuthWit.mock.calls.map((call) => String((call as unknown[])[0]))).toEqual(["mh:ih:first", "mh:ih:second"])
 	})
 
 	test("history record: nonce Fr.ZERO, feePaymentMethod EXTERNAL", async () => {
