@@ -66,10 +66,10 @@ V2 and V3 read `account.address` from a destructured `built`; the rest read `bui
 
 ### What changes
 
-1. **`fee/fee-strategy.ts`** exports `validatedSimOpts(built: { account: { address: AztecAddress } })`, which is synchronous and returns a fresh `{ simulatePublic: true, skipFeeEnforcement: true, scopes: [built.account.address] }`.
-   - `probedFirstSimOpts` becomes `if (!probe) return validatedSimOpts(built)`, followed by its stub branch unchanged.
-   - V1–V6 become `validatedSimOpts(built)`. At V2 and V3, `built.account` is the object they destructured.
-   - The argument keeps the name `built` at every site, so an engine's text for a missing `account` is unchanged.
+1. **`fee/fee-strategy.ts`** exports `validatedSimOpts(scope: AztecAddress)`, which is synchronous and returns a fresh `{ simulatePublic: true, skipFeeEnforcement: true, scopes: [scope] }`.
+   - `probedFirstSimOpts` keeps its first line, `const address = built.account.address`, then `if (!probe) return validatedSimOpts(address)`, followed by its stub branch unchanged.
+   - Each site passes the access expression it had, at the moment it had it. V2 and V3 keep their destructure of `account` before `suggestGasLimits` (and, at V3, before the cap's await) and pass `account.address`; V1 and V4–V6 pass `built.account.address`.
+   - So every read of `account` runs in today's order, and an engine's text for a missing `account` names today's expression.
 2. **`send/fee-helpers.ts`** gains three typed exports, and the card imports them through its existing `./fee-helpers` block:
    - `liveFeeScope(live)` projects `{ profile, network, account }` into `{ profileId, networkId, chainId, accountAddress }`, reading with `?.` in that order and in that key order;
    - `feeScopeKey(scope)` is the pipe-joined template literal, not `.join`;
@@ -89,7 +89,7 @@ V2 and V3 read `account.address` from a destructured `built`; the rest read `bui
 
 ### What stays
 
-Every task lifecycle, every fee composition and `?? DEFAULT_FEE_MULTIPLIER` line, the three probe folds, the two FPC finalize tails, the fast path's `try`/`catch` and its un-awaited hand-off, `service.ts`, and both reuse ladders. In the card: `committedScope`, `committedKey`, P3's first line (left as is rather than swapped for `embeddedHidden()`), and the template and style blocks, byte for byte. No existing test file changes after Phase 1, except that `fee-helpers.test.ts` gains rows in Phase 3.
+Every task lifecycle, every fee composition and `?? DEFAULT_FEE_MULTIPLIER` line, the three probe folds, the two FPC finalize tails, the fast path's `try`/`catch` and its un-awaited hand-off, `service.ts`, and both reuse ladders. In the card: `committedScope`, `committedKey`, P3's first line (left as is rather than swapped for `embeddedHidden()`), and the template and style blocks, byte for byte. No existing test file changes after Phase 1, except that `fee-helpers.test.ts` gains rows in Phase 3 and the review rounds add pins (logged in the arc's lessons).
 
 ### Alternatives not taken
 
@@ -112,7 +112,7 @@ No touched function is in `scripts/complexity-baseline/manifest.json`. Its one a
 - **`validatedSimOpts` is a security boundary.** A validated simulation carrying `skipTxValidation` or a stubbed account verifies nothing. Phase 1 pins V0–V6 with `toStrictEqual` and pins the scope's identity per build, so a stale account fails as well.
 - **The card's guards are the cross-account fence.** Dropping a field, loosening `===` or losing a site's extras would let account A's balances or pick derive settings for account B. The identity matrix pins each field at each guard. The lazy reads keep each computed's reactive dependencies exactly as they are today.
 - **Engine-generated text.** The fee compositions stay inline because their text is reachable. `safe_json_rpc_client.js:173-182` (foundation 6.0.0-rc.1) returns `undefined` for a null-like result before any schema parse, so a malformed min-fee reply makes `predictedWorstMinFees` resolve `undefined`. Each site then throws its own Bun text (`maxFeesPerGas.mul …`, or an expression naming `built.node`), which `WrappedTask.fail` exposes. The moved expressions here are not reachable that way:
-  - `built.account.address` reads builder output, under the same name;
+  - each simulation site passes its own access expression for the account address, read when it was read before;
   - the card's `scope` is never nullish at P1–P3, and the helper's parameter is still `scope`;
   - `props` is never nullish.
 - **Preserved, not fixed:** see § Drift.
@@ -189,7 +189,7 @@ Items 2 and 3. `fee-helpers.test.ts` gains three rows:
   - at the head, `bun run build`, with the generated declaration files unchanged.
 - **Pass criteria:**
   - every command exits 0;
-  - between the Phase 1 commit and the head, `git diff -- '*.test.ts'` lists only `fee-helpers.test.ts`, with additions only;
+  - between the Phase 1 commit and the Phase 3 head, `git diff -- '*.test.ts'` lists only `fee-helpers.test.ts`, with additions only (review-round pins come after);
   - the `.vue` diff stays inside `<script setup>`.
 - **Mutation check.** Each mutant is applied alone to a scratch copy and restored from that copy, never with git. A kill means a test case that ran and failed.
   - `validatedSimOpts` returning the stub shape; V5 or V6 reading the first build's account.
