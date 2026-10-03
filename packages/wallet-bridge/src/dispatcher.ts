@@ -101,7 +101,10 @@ import {
 	authorizationsEffective,
 	coversAnyContract,
 	effectiveGrants,
+	grantsOfType,
+	inAddressList,
 	isCreateAuthWitCoveredByTxOrSimulationScope,
+	matchesPattern,
 	readConsent,
 } from "./method-scope-checkers"
 import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
@@ -225,13 +228,7 @@ function contractsRequestCovered(existing: ContractsCapability[], requested: Con
 function scopeCovers(existing: Scope, requested: Scope): boolean {
 	if (existing === "*") return true
 	if (requested === "*") return false
-	return requested.every((rp) =>
-		existing.some(
-			(ep) =>
-				(ep.contract === "*" || sameFieldAddress(String(ep.contract), String(rp.contract))) &&
-				(ep.function === "*" || ep.function === rp.function),
-		),
-	)
+	return requested.every((rp) => existing.some((ep) => matchesPattern(String(rp.contract), rp.function, ep)))
 }
 
 function transactionRequestCovered(existing: TransactionCapability[], requested: TransactionCapability): boolean {
@@ -271,8 +268,9 @@ function privateEventsCovered(held: DataCapability[], requested: "*" | string[] 
 	if (requested === "*") return held.some((h) => h.privateEvents?.contracts === "*")
 	return requested.every((addr) =>
 		held.some((h) => {
+			// An address-book-only grant legitimately has no list.
 			const list = h.privateEvents?.contracts
-			return list === "*" || (Array.isArray(list) && list.some((x) => sameFieldAddress(String(x), String(addr))))
+			return list === "*" || (Array.isArray(list) && inAddressList(String(addr), list))
 		}),
 	)
 }
@@ -684,13 +682,6 @@ function collectNewGrants(
 		newGrants.push({ capability: replacement, grantedAt: now })
 	}
 	return newGrants
-}
-
-/** Grants of one capability type, narrowed to that variant. The single typed cast
- *  lives here instead of the `existing.capability as XCapability` casts scattered
- *  across the coverage branches. */
-function grantsOfType<K extends Capability["type"]>(grants: GrantedCapabilityRecord[], type: K): Extract<Capability, { type: K }>[] {
-	return grants.filter((g) => g.capability.type === type).map((g) => g.capability as Extract<Capability, { type: K }>)
 }
 
 /** Is `requested` already covered by the existing grants of its type — i.e. NO
