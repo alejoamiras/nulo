@@ -8,7 +8,7 @@ declaration ("No remote code", on both stores) rests on a stated mechanism rathe
 ## What arrives
 
 An application connected over the wallet-sdk channel can register a contract: an **instance**
-(address preimage) and, optionally, an **artifact** (`packages/wallet-bridge/src/dispatcher.ts:1660-1667`).
+(address preimage) and, optionally, an **artifact** (`packages/wallet-bridge/src/dispatcher.ts:1099-1106`).
 The artifact is a JSON document: an ABI plus, per function, one ACIR program with any Brillig code
 inside it (`@aztec-labs/stdlib/src/abi/abi.ts:273-274`). The wallet parses it against a schema before storing it
 (`packages/aztec-runtime/src/pxe/service.ts:439-464`) and derives the contract address from the
@@ -73,7 +73,7 @@ account's own Fee Juice (it names no fee payer, or pays itself), and always for 
 `AccessLevel.Transactions` (`apps/extension/src/wallet/services/wallet-sdk/background.ts:1081`), so
 sends prompt. Auth-witness creation prompts too, unless the user let that application sign, without
 asking, the authorizations its granted scopes cover: a consent stored on the session
-(`packages/wallet-bridge/src/dispatcher.ts:1171-1195`). Simulations and utility calls at lower
+(`packages/wallet-bridge/src/dispatcher.ts:604-628`). Simulations and utility calls at lower
 levels run silently for a session the user already approved
 (`apps/extension/src/wallet/services/dapp-interaction/service.ts:429-430`). A silent utility call can
 therefore execute application-supplied bytecode and, through the oracle, cause node reads, with no
