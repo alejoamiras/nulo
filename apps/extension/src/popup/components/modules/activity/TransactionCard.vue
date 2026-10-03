@@ -195,13 +195,8 @@ onBeforeUnmount(() => {
 	color: var(--nulo-outline);
 }
 
-/* Subtle separator between the title and the title-trailing chip.
- * Matches the body/headline rhythm without competing with the title text. */
 .title_sep {
-	font-family: var(--font-headline);
-	font-size: 13px;
-	color: var(--nulo-outline);
-	user-select: none;
+	composes: title_sep from "../../../../components/composite/activity/activity-card.module.css";
 }
 
 .chip {

@@ -84,6 +84,89 @@ describe("buildRecentActivityRows — scope", () => {
 	})
 })
 
+/** Wraps a record so every string-keyed property read is logged, in order. */
+function recorded<T extends object>(target: T, log: string[]): T {
+	return new Proxy(target, {
+		get(t, key, receiver) {
+			if (typeof key === "string") log.push(key)
+			return Reflect.get(t, key, receiver)
+		},
+	})
+}
+
+describe("buildRecentActivityRows — scope pins", () => {
+	const keysOf = (p: {
+		transactions?: Tx[]
+		incomingTransfers?: IncomingTransferRecord[]
+		journalOps?: OperationRecord[]
+		scope?: typeof scope
+		token?: RecentTokenScope
+	}) =>
+		buildRecentActivityRows({ journalOps: [], transactions: [], incomingTransfers: [], scope, token: undefined, ...p }).map(
+			(r) => r.key,
+		)
+
+	test("under a known scope, an incoming row stamped with another profile is dropped beside an identical kept one", () => {
+		expect(keysOf({ incomingTransfers: [inc({ id: "mine", discoveredAt: 6 }), inc({ id: "theirs", profileId: "p2" })] })).toEqual([
+			"incoming:mine",
+		])
+	})
+
+	test("the incoming token check does not reach journal rows, which arrive filtered", () => {
+		expect(
+			keysOf({
+				incomingTransfers: [inc({ id: "other-token", tokenId: 2 })],
+				journalOps: [op({ id: "other-token-op", tokenId: 2 })],
+				token: { id: 1 },
+			}),
+		).toEqual(["journal:other-token-op"])
+	})
+
+	test("chain id 0 is a known chain, not an unknown one", () => {
+		expect(
+			keysOf({ transactions: [tx({ hash: "zero", chainId: 0 }), tx({ hash: "one", chainId: 1 })], scope: { ...scope, chainId: 0 } }),
+		).toEqual(["tx:zero"])
+	})
+})
+
+describe("buildRecentActivityRows — read order", () => {
+	test("under a token scope, another token's incoming row reads only its token; a kept one reads token, scope, sort key, id", () => {
+		const reads = (over: Record<string, unknown>) => {
+			const log: string[] = []
+			buildRecentActivityRows({
+				journalOps: [],
+				transactions: [],
+				incomingTransfers: [recorded(inc(over), log)],
+				scope,
+				token: { id: 1 },
+			})
+			return log
+		}
+		expect(reads({ tokenId: 2 })).toEqual(["tokenId"])
+		expect(reads({ accountAddress: "0xother" })).toEqual(["tokenId", "accountAddress"])
+		expect(reads({ networkId: "net-2" })).toEqual(["tokenId", "accountAddress", "networkId"])
+		expect(reads({ profileId: "p2" })).toEqual(["tokenId", "accountAddress", "networkId", "profileId"])
+		expect(reads({})).toEqual(["tokenId", "accountAddress", "networkId", "profileId", "blockTimestamp", "discoveredAt", "id"])
+	})
+
+	test("a tx stops at the first failed check, and a kept one reads its key after its scope", () => {
+		const reads = (over: Record<string, unknown>) => {
+			const log: string[] = []
+			buildRecentActivityRows({
+				journalOps: [],
+				transactions: [recorded(tx(over), log)],
+				incomingTransfers: [],
+				scope,
+				token: undefined,
+			})
+			return log
+		}
+		expect(reads({ account: "0xother" })).toEqual(["account"])
+		expect(reads({ chainId: 2 })).toEqual(["account", "chainId"])
+		expect(reads({})).toEqual(["account", "chainId", "profileId", "hash", "updatedAt"])
+	})
+})
+
 describe("buildRecentActivityRows — order", () => {
 	test("newest first across kinds; block timestamp (seconds) is scaled to ms; a null terminalAt sorts as 0", () => {
 		const rows = buildRecentActivityRows({

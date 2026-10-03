@@ -1,0 +1,21 @@
+/* The title row's separator and chip, shared so a row reads the same in every phase of its lifecycle. */
+
+.title_sep {
+	font-family: var(--font-headline);
+	font-size: 13px;
+	color: var(--nulo-outline);
+	user-select: none;
+}
+
+.chip {
+	flex-shrink: 0;
+	white-space: nowrap;
+
+	font-family: var(--font-mono);
+	font-size: 8px;
+	text-transform: uppercase;
+	color: var(--nulo-secondary);
+	background: var(--nulo-surface-low);
+	border: 1px solid var(--hairline-soft);
+	padding: 1px 4px;
+}

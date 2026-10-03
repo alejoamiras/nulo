@@ -25,8 +25,18 @@ import { createRunFence } from "@/composables/runFence"
 import { usePrices } from "@/composables/usePrices"
 import { balanceFormatted } from "@/utils/amount.js"
 import { stageSubtitle } from "@/utils/card-subtitle"
-import { ACTIVITY_FEED_KINDS, buildJournalTerminalCardProps, journalTerminalDisplay, sanitizeJournalSubtitle } from "@/utils/journal-state"
-import { formatTransferType, humanizeMethodName } from "@/utils/tx-enrichment"
+import { activityRowRoute } from "@/utils/activity-rows"
+import {
+	ACTIVITY_FEED_KINDS,
+	buildJournalTerminalCardProps,
+	journalCardIcon,
+	journalCardOriginLabel,
+	journalCardTitle,
+	journalCardTransferTypeLabel,
+	journalTerminalDisplay,
+	sanitizeJournalSubtitle,
+} from "@/utils/journal-state"
+import { humanizeMethodName } from "@/utils/tx-enrichment"
 import { buildIncomingCardProps } from "@/utils/received-display"
 import { buildCancelHandler, buildFocusHandler, filterPendingDoubleRender, isMatchingTask } from "./recent-activity-handlers"
 import { buildRecentActivityRows, remainingRowSlots } from "./recent-activity-rows"
@@ -332,38 +342,8 @@ const showJournalAwaiting = computed(() => inFlightJournalOps.value.length > 0)
  *  is independent. */
 const renderedInFlightOps = computed(() => [...inFlightJournalOps.value].sort((a, b) => b.createdAt - a.createdAt))
 
-/** Per-op card title. Used in the template's v-for; was previously a
- *  computed over `topJournalOp` which forced single-card rendering. */
-function cardTitleFor(op) {
-	if (!op) return ""
-	if (op.kind === "transfer") {
-		const token = op.tokenId !== undefined ? tokenById(op.tokenId) : undefined
-		return token?.symbol || "Transfer"
-	}
-	// dapp_execute: title is the raw primary-method fn name persisted in
-	// the journal (e.g. "swap_tokens_for_exact_tokens"). Humanize for display.
-	return op.title ? humanizeMethodName(op.title) : "Transaction"
-}
-
-/** Per-op dApp identity chip. The persisted record's `subtitle` field
- *  carries the dApp hostname for `dapp_execute` ops; null for transfers.
- *  Sanitized so a schemeful subtitle (set by a malicious dApp at session-
- *  discover time) is bracketed and doesn't read as a clickable link. */
-function cardOriginLabelFor(op) {
-	if (!op || op.kind === "transfer") return null
-	return sanitizeJournalSubtitle(op.subtitle)
-}
-
-/** Per-op icon. Transfers use the up-right arrow; dApp ops use the zap. */
-function cardIconFor(op) {
-	return op?.kind === "transfer" ? "arrow-narrow-up-right" : "zap"
-}
-
-/** Per-op amount string. Derived from `op.amountRaw` (raw base units) and the
- *  token's decimals — same formatter the settled `TransactionCard` uses, so
- *  the in-flight and settled phases read identically once the badge swaps.
- *  Returns null when the token hasn't loaded yet OR when the journal record
- *  doesn't carry an amount (dApp ops). */
+/** The awaiting card's amount, gated unlike the terminal card's: an empty `amountRaw` still shows
+ *  (as 0). Null while the token is unknown or for dApp ops. */
 function cardAmountFor(op) {
 	if (op?.kind !== "transfer") return null
 	if (op.amountRaw === undefined) return null
@@ -373,22 +353,11 @@ function cardAmountFor(op) {
 	return balanceFormatted(op.amountRaw, token.decimals || 0, 8, { compact: true }).value
 }
 
-/** Per-op symbol. Same gating as the amount — returns null when token
- *  hasn't loaded or the record isn't a transfer. */
+/** The awaiting card's symbol: set whenever the token is known, amount or not. */
 function cardAmountSymbolFor(op) {
 	if (op?.kind !== "transfer") return null
 	if (op.tokenId === undefined) return null
 	return tokenById(op.tokenId)?.symbol || null
-}
-
-/** Per-op transfer-type chip. Resolves the persisted `op.transferType`
- *  through `formatTransferType()` — same source the settled card uses.
- *  Guard on `=== undefined` because `TransferType.Private === 0`; a truthy
- *  check would silently drop the Private → Private chip. */
-function cardTransferTypeFor(op) {
-	if (op?.kind !== "transfer") return null
-	if (op.transferType === undefined) return null
-	return formatTransferType(op.transferType)
 }
 
 /** Compute card props for a terminal journal record. Thin wrapper over
@@ -810,22 +779,20 @@ onBeforeUnmount(() => {
 		</div>
 
 		<div :class="$style.list">
-			<!-- One awaiting card per in-flight journal op, oldest-first by
-			     createdAt. The previous single-card render keyed off
-			     inFlightJournalOps[0] caused tx A to disappear when tx B was
-			     submitted concurrently (codex audit catch). Cancel is per-card:
-			     TransactionAwaitingCard emits `cancel(jobId)` and
-			     buildCancelHandler dispatches to that specific record. -->
+			<!-- One awaiting card per in-flight journal op, newest-first by
+			     createdAt. Cancel is per-card: TransactionAwaitingCard emits
+			     `cancel(jobId)` and buildCancelHandler dispatches to that
+			     specific record. -->
 			<TransactionAwaitingCard
 				v-for="op in renderedInFlightOps"
 				:key="`awaiting:${op.id}`"
-				:title="cardTitleFor(op)"
+				:title="journalCardTitle(op, tokenById)"
 				:subtitle="cardSubtitleFor(op)"
-				:icon="cardIconFor(op)"
-				:originLabel="cardOriginLabelFor(op)"
+				:icon="journalCardIcon(op)"
+				:originLabel="journalCardOriginLabel(op)"
 				:amount="cardAmountFor(op)"
 				:amountSymbol="cardAmountSymbolFor(op)"
-				:transferTypeLabel="cardTransferTypeFor(op)"
+				:transferTypeLabel="journalCardTransferTypeLabel(op)"
 				:cancellable="true"
 				:jobId="op.id"
 				:stage="op.progress?.stage ?? null"
@@ -850,17 +817,17 @@ onBeforeUnmount(() => {
 			<!-- Chronological merge of terminal journal records + settled chain
 			     txs. Branch by row.type. -->
 			<template v-for="row in recentActivityRows" :key="row.key">
-				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" :tokens="tokens" :to="`/popup/tx/${row.tx.hash}`" />
+				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" :tokens="tokens" :to="activityRowRoute(row)" />
 				<TransactionIncomingCard
 					v-else-if="row.type === 'incoming'"
 					v-bind="incomingCardProps(row.inc)"
-					:to="`/popup/received/${row.inc.id}`"
+					:to="activityRowRoute(row)"
 					:arriving="!token && (arrivals?.isArriving(row.inc) ?? false)"
 				/>
 				<TransactionTerminalCard
 					v-else-if="row.type === 'journal' && journalTerminalCardProps(row.op)"
 					v-bind="journalTerminalCardProps(row.op)"
-					:to="`/popup/journal/${row.op.id}`"
+					:to="activityRowRoute(row)"
 				/>
 			</template>
 		</div>
@@ -945,14 +912,14 @@ onBeforeUnmount(() => {
 }
 
 .empty_state {
-	composes: empty_state from "./list-empty.module.css";
+	composes: empty_state from "../../../../components/composite/list-empty.module.css";
 }
 
 .empty_headline {
-	composes: empty_headline from "./list-empty.module.css";
+	composes: empty_headline from "../../../../components/composite/list-empty.module.css";
 }
 
 .empty_sub {
-	composes: empty_sub from "./list-empty.module.css";
+	composes: empty_sub from "../../../../components/composite/list-empty.module.css";
 }
 </style>

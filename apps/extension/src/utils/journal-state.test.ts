@@ -7,7 +7,7 @@
  * if someone changes the kind→state routing.
  */
 
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import { KNOWN_JOB_ERROR_KINDS, type SendCheckOutcome } from "@nulo/wallet-core/jobs"
 import type { OperationKind, OperationRecord } from "@/wallet/services/operation-journal/spec"
 import {
@@ -323,6 +323,31 @@ describe("buildJournalTerminalCardProps", () => {
 			TEST_CTX,
 		)
 		expect(props).toBeNull()
+	})
+
+	test("a dApp card never looks a token up, even when its record carries a token id", () => {
+		const tokenById = vi.fn(TEST_TOKEN_BY_ID)
+		const props = buildJournalTerminalCardProps(
+			recordWith({ kind: "dapp_execute", tokenId: 42, amountRaw: "1500000", title: "swap" }),
+			{ tokenById },
+		)
+		expect(tokenById).not.toHaveBeenCalled()
+		expect(props).toMatchObject({ title: "Swap", amount: null, amountSymbol: null, transferTypeLabel: null })
+	})
+
+	test("an empty amount shows no amount and no symbol", () => {
+		const props = buildJournalTerminalCardProps(transferRecord({ amountRaw: "" }), TEST_CTX)
+		expect(props).toMatchObject({ title: "USDC", amount: null, amountSymbol: null })
+	})
+
+	test("a token whose symbol is empty titles the card 'Transfer' and keeps the empty symbol beside the amount", () => {
+		const props = buildJournalTerminalCardProps(transferRecord(), { tokenById: () => ({ symbol: "", decimals: 6 }) })
+		expect(props).toMatchObject({ title: "Transfer", amount: "1.5", amountSymbol: "" })
+	})
+
+	test("the transfer-type chip reads type 0 (private) and is absent without a type", () => {
+		expect(buildJournalTerminalCardProps(transferRecord({ transferType: 0 }), TEST_CTX)?.transferTypeLabel).toBe("Private → Private")
+		expect(buildJournalTerminalCardProps(transferRecord(), TEST_CTX)?.transferTypeLabel).toBeNull()
 	})
 })
 

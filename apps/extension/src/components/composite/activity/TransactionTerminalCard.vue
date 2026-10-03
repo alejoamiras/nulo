@@ -81,26 +81,11 @@ defineProps({
 	color: var(--green);
 }
 
-/* Title-trailing chip + separator. Mirrors the awaiting + settled cards
- * so the chip stays put across the lifecycle (badge swap is the only
- * visible difference between phases). */
 .title_sep {
-	font-family: var(--font-headline);
-	font-size: 13px;
-	color: var(--nulo-outline);
-	user-select: none;
+	composes: title_sep from "./activity-card.module.css";
 }
 
 .chip {
-	flex-shrink: 0;
-	white-space: nowrap;
-
-	font-family: var(--font-mono);
-	font-size: 8px;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
-	background: var(--nulo-surface-low);
-	border: 1px solid var(--hairline-soft);
-	padding: 1px 4px;
+	composes: chip from "./activity-card.module.css";
 }
 </style>

@@ -61,6 +61,7 @@ declare global {
   const VOCABULARY_SELECTORS: typeof import('../utils/token-transfer-vocabulary').VOCABULARY_SELECTORS
   const abiNameFitsRole: typeof import('../utils/token-transfer-vocabulary').abiNameFitsRole
   const activateNetworkGuarded: typeof import('../utils/guarded-network-activation').activateNetworkGuarded
+  const activityRowRoute: typeof import('../utils/activity-rows').activityRowRoute
   const aggregateFiat: typeof import('../utils/token-aggregate').aggregateFiat
   const applyOutcome: typeof import('../composables/full-backup-restore').applyOutcome
   const approvedSendsInFlight: typeof import('../utils/in-flight-send').approvedSendsInFlight
@@ -142,6 +143,8 @@ declare global {
   const holdHeroFit: typeof import('../utils/hero-fit').holdHeroFit
   const humanizeErrorKind: typeof import('../utils/journal-state').humanizeErrorKind
   const humanizeMethodName: typeof import('../utils/tx-enrichment').humanizeMethodName
+  const incomingInScope: typeof import('../utils/activity-rows').incomingInScope
+  const incomingRow: typeof import('../utils/activity-rows').incomingRow
   const initAppServiceContext: typeof import('../utils/core').initAppServiceContext
   const initTransactionService: typeof import('../utils/core').initTransactionService
   const inject: typeof import('vue').inject
@@ -165,6 +168,10 @@ declare global {
   const isUnknownRow: typeof import('../utils/token-order').isUnknownRow
   const isValidDecimals: typeof import('../utils/token-amount').isValidDecimals
   const isValidHex: typeof import('../utils/string').isValidHex
+  const journalCardIcon: typeof import('../utils/journal-state').journalCardIcon
+  const journalCardOriginLabel: typeof import('../utils/journal-state').journalCardOriginLabel
+  const journalCardTitle: typeof import('../utils/journal-state').journalCardTitle
+  const journalCardTransferTypeLabel: typeof import('../utils/journal-state').journalCardTransferTypeLabel
   const journalTerminalDisplay: typeof import('../utils/journal-state').journalTerminalDisplay
   const knownDecimals: typeof import('../utils/token-amount').knownDecimals
   const legalAboutRow: typeof import('../utils/legal-about').legalAboutRow
@@ -251,6 +258,7 @@ declare global {
   const sanitizeJournalSubtitle: typeof import('../utils/journal-state').sanitizeJournalSubtitle
   const sanitizePinMap: typeof import('../composables/usePinnedTokens').sanitizePinMap
   const sanitizeString: typeof import('../utils/string').sanitizeString
+  const scopedTxRows: typeof import('../utils/activity-rows').scopedTxRows
   const scrubUrls: typeof import('../utils/scrub-urls').scrubUrls
   const sendOutcome: typeof import('../utils/journal-state').sendOutcome
   const setLastActiveProfileId: typeof import('../utils/lastActiveProfile').setLastActiveProfileId
@@ -589,6 +597,7 @@ declare module 'vue' {
     readonly VOCABULARY_SELECTORS: UnwrapRef<typeof import('../utils/token-transfer-vocabulary')['VOCABULARY_SELECTORS']>
     readonly abiNameFitsRole: UnwrapRef<typeof import('../utils/token-transfer-vocabulary')['abiNameFitsRole']>
     readonly activateNetworkGuarded: UnwrapRef<typeof import('../utils/guarded-network-activation')['activateNetworkGuarded']>
+    readonly activityRowRoute: UnwrapRef<typeof import('../utils/activity-rows')['activityRowRoute']>
     readonly aggregateFiat: UnwrapRef<typeof import('../utils/token-aggregate')['aggregateFiat']>
     readonly applyOutcome: UnwrapRef<typeof import('../composables/full-backup-restore')['applyOutcome']>
     readonly approvedSendsInFlight: UnwrapRef<typeof import('../utils/in-flight-send')['approvedSendsInFlight']>
@@ -670,6 +679,8 @@ declare module 'vue' {
     readonly holdHeroFit: UnwrapRef<typeof import('../utils/hero-fit')['holdHeroFit']>
     readonly humanizeErrorKind: UnwrapRef<typeof import('../utils/journal-state')['humanizeErrorKind']>
     readonly humanizeMethodName: UnwrapRef<typeof import('../utils/tx-enrichment')['humanizeMethodName']>
+    readonly incomingInScope: UnwrapRef<typeof import('../utils/activity-rows')['incomingInScope']>
+    readonly incomingRow: UnwrapRef<typeof import('../utils/activity-rows')['incomingRow']>
     readonly initAppServiceContext: UnwrapRef<typeof import('../utils/core')['initAppServiceContext']>
     readonly initTransactionService: UnwrapRef<typeof import('../utils/core')['initTransactionService']>
     readonly inject: UnwrapRef<typeof import('vue')['inject']>
@@ -693,6 +704,10 @@ declare module 'vue' {
     readonly isUnknownRow: UnwrapRef<typeof import('../utils/token-order')['isUnknownRow']>
     readonly isValidDecimals: UnwrapRef<typeof import('../utils/token-amount')['isValidDecimals']>
     readonly isValidHex: UnwrapRef<typeof import('../utils/string')['isValidHex']>
+    readonly journalCardIcon: UnwrapRef<typeof import('../utils/journal-state')['journalCardIcon']>
+    readonly journalCardOriginLabel: UnwrapRef<typeof import('../utils/journal-state')['journalCardOriginLabel']>
+    readonly journalCardTitle: UnwrapRef<typeof import('../utils/journal-state')['journalCardTitle']>
+    readonly journalCardTransferTypeLabel: UnwrapRef<typeof import('../utils/journal-state')['journalCardTransferTypeLabel']>
     readonly journalTerminalDisplay: UnwrapRef<typeof import('../utils/journal-state')['journalTerminalDisplay']>
     readonly knownDecimals: UnwrapRef<typeof import('../utils/token-amount')['knownDecimals']>
     readonly legalAboutRow: UnwrapRef<typeof import('../utils/legal-about')['legalAboutRow']>
@@ -777,6 +792,7 @@ declare module 'vue' {
     readonly sanitizeJournalSubtitle: UnwrapRef<typeof import('../utils/journal-state')['sanitizeJournalSubtitle']>
     readonly sanitizePinMap: UnwrapRef<typeof import('../composables/usePinnedTokens')['sanitizePinMap']>
     readonly sanitizeString: UnwrapRef<typeof import('../utils/string')['sanitizeString']>
+    readonly scopedTxRows: UnwrapRef<typeof import('../utils/activity-rows')['scopedTxRows']>
     readonly scrubUrls: UnwrapRef<typeof import('../utils/scrub-urls')['scrubUrls']>
     readonly sendOutcome: UnwrapRef<typeof import('../utils/journal-state')['sendOutcome']>
     readonly setLastActiveProfileId: UnwrapRef<typeof import('../utils/lastActiveProfile')['setLastActiveProfileId']>

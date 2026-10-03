@@ -193,3 +193,111 @@ describe("buildActivityRows — three-source merge", () => {
 		expect(rows.map((r) => (r.type === "incoming" && r.inc.kind === "note" ? r.inc.siloedNullifier : ""))).toEqual(["0xhere"])
 	})
 })
+
+/** Wraps a record so every string-keyed property read is logged, in order. */
+function recorded<T extends object>(target: T, log: string[]): T {
+	return new Proxy(target, {
+		get(t, key, receiver) {
+			if (typeof key === "string") log.push(key)
+			return Reflect.get(t, key, receiver)
+		},
+	})
+}
+
+describe("buildActivityRows — scope pins", () => {
+	const scoped = { accountAddress: "0xa", chainId: 1, networkId: "net-1", profileId: "p1" }
+
+	test("tx: a foreign profile is dropped; an unstamped one stays", () => {
+		const rows = buildActivityRows({
+			transactions: [
+				{ ...tx(3_000, "0xmine"), chainId: 1, profileId: "p1" } as Tx,
+				{ ...tx(2_000, "0xtheirs"), chainId: 1, profileId: "p2" } as Tx,
+				{ ...tx(1_000, "0xunstamped"), chainId: 1 } as Tx,
+			],
+			terminalJournalOps: [],
+			incomingTransfers: [],
+			...scoped,
+		})
+		expect(rows.map((r) => r.key)).toEqual(["tx:0xmine", "tx:0xunstamped"])
+	})
+
+	test("tx: chain id 0 is a known chain, not an unknown one", () => {
+		const rows = buildActivityRows({
+			transactions: [{ ...tx(3_000, "0xzero"), chainId: 0 } as Tx, { ...tx(2_000, "0xone"), chainId: 1 } as Tx],
+			terminalJournalOps: [],
+			incomingTransfers: [],
+			accountAddress: "0xa",
+			chainId: 0,
+		})
+		expect(rows.map((r) => r.key)).toEqual(["tx:0xzero"])
+	})
+
+	test("an unknown scope keeps every tx and every incoming record", () => {
+		const rows = buildActivityRows({
+			transactions: [{ ...tx(3_000, "0xany"), account: "0xother", chainId: 9, profileId: "p9" } as Tx],
+			terminalJournalOps: [],
+			incomingTransfers: [incoming({ siloedNullifier: "0xany", accountAddress: "0xother", networkId: "net-9", profileId: "p9" })],
+		})
+		expect(rows.map((r) => r.key)).toEqual(["tx:0xany", "incoming:note:p1|net-1|0xany"])
+	})
+
+	test("a terminal journal row from another network is kept: History reads by profile, not network", () => {
+		const rows = buildActivityRows({
+			transactions: [],
+			terminalJournalOps: [
+				journal({ id: "here", networkId: "net-1" }),
+				journal({ id: "there", networkId: "net-2", terminalAt: 900 }),
+			],
+			incomingTransfers: [],
+			...scoped,
+		})
+		expect(rows.map((r) => r.key)).toEqual(["journal:here", "journal:there"])
+	})
+
+	test("an incoming record stamped with another profile is kept under a known scope: History has no incoming profile guard", () => {
+		const rows = buildActivityRows({
+			transactions: [],
+			terminalJournalOps: [],
+			incomingTransfers: [
+				incoming({ siloedNullifier: "0xmine" }),
+				incoming({ siloedNullifier: "0xtheirs", profileId: "p2", discoveredAt: 900 }),
+			],
+			...scoped,
+		})
+		expect(rows.map((r) => r.key)).toEqual(["incoming:note:p1|net-1|0xmine", "incoming:note:p1|net-1|0xtheirs"])
+	})
+})
+
+describe("buildActivityRows — read order", () => {
+	const scoped = { accountAddress: "0xa", chainId: 1, networkId: "net-1", profileId: "p1" }
+	const txReads = (over: Record<string, unknown>, scope: Record<string, unknown> = scoped) => {
+		const log: string[] = []
+		buildActivityRows({
+			transactions: [recorded({ ...tx(1, "0xh"), chainId: 1, profileId: "p1", ...over } as Tx, log)],
+			terminalJournalOps: [],
+			incomingTransfers: [],
+			...scope,
+		})
+		return log
+	}
+	const incomingReads = (over: Partial<IncomingNoteRecord>) => {
+		const log: string[] = []
+		buildActivityRows({ transactions: [], terminalJournalOps: [], incomingTransfers: [recorded(incoming(over), log)], ...scoped })
+		return log
+	}
+
+	test("a tx stops at the first failed check, and a kept one reads its key after its scope", () => {
+		expect(txReads({ account: "0xother" })).toEqual(["account"])
+		expect(txReads({ chainId: 2 })).toEqual(["account", "chainId"])
+		expect(txReads({ profileId: "p2" })).toEqual(["account", "chainId", "profileId"])
+		expect(txReads({})).toEqual(["account", "chainId", "profileId", "hash", "updatedAt"])
+		expect(txReads({}, {})).toEqual(["profileId", "hash", "updatedAt"])
+	})
+
+	test("an incoming record stops at the first failed check, and a kept one reads its sort key before its id", () => {
+		expect(incomingReads({ accountAddress: "0xother" })).toEqual(["accountAddress"])
+		expect(incomingReads({ networkId: "net-2" })).toEqual(["accountAddress", "networkId"])
+		expect(incomingReads({})).toEqual(["accountAddress", "networkId", "blockTimestamp", "discoveredAt", "id"])
+		expect(incomingReads({ blockTimestamp: 7 })).toEqual(["accountAddress", "networkId", "blockTimestamp", "blockTimestamp", "id"])
+	})
+})
