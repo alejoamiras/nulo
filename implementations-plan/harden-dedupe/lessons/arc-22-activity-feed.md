@@ -27,6 +27,10 @@
   - A fourth case pins `journalCardTitle` skipping the lookup for a dApp op. The new mutant 13 survived without it, because the terminal builder no longer calls that helper. Base had the same logic in the SFC's `cardTitleFor`, so the case has no base twin to run against.
 - **Should-fix: price state.** The first forced run's Firefox capture priced the tx and receipt rows (`≈ $12.50`, `≈ $3.00`) where base did not. The fiat line widened the amount column, which squeezed the shrinkable chips into two lines. Neither nudge did it; it was a live quote landing in one capture only. The surfaces now pin the price port (below).
 
+## Code review, Codex round 2: CONVERGED
+
+- One nit: the plan's "Reads and error precedence" section still claimed two lookups and kept the rejected argument that a single thrower makes order irrelevant. Fixed: one lookup in base read order, with the new test file credited.
+
 ## Mutation check
 
 - **Method:** 27 mutants, each applied alone to the code at `5e588b2b` by a scratch script, against the six frozen suites plus `journal-terminal-order.test.ts`. Each file was restored from an in-memory copy, never with git, and the tree was clean afterwards.

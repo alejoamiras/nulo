@@ -73,12 +73,12 @@ The awaiting card's getters (`RecentActivityView.vue:337-392`) re-derive what th
 
 - **Dependency set.**
   - On both paths, per card: the record's own fields, plus the token list only on transfer cards.
-  - The terminal transfer card now calls `tokenById` twice: once for the title, once for the amount. That is the same list read; `tokenById` is a pure `find` (`composables/useScopedTokens.ts:67`) or a `Map` get (`TransactionsList.vue:48-51`).
+  - The terminal transfer card calls `tokenById` once, and its reads keep base order: lookup, amount, symbol, title, then transfer type. The dApp card never reads the lookup.
   - Home's awaiting card reads exactly what its getters read today.
 - **Throwers.**
   - A transfer card has one: `balanceFormatted`, through `BigInt` on a non-numeric `amountRaw`. `formatTransferType` (`utils/tx-enrichment.ts:145-147`) is a lookup with a `String` fallback, and `sanitizeJournalSubtitle` only runs a regex.
   - A dApp card has one: `humanizeMethodName`, but only on a non-string title, which the schema bars (`wallet/services/operation-journal/spec.ts:243`).
-  - A card that can throw at most once throws the same error, whatever order its fields evaluate in. Home's binding order is unchanged anyway.
+  - Matching errors are not enough: a Vue render tracks everything it reads before a throw, so the read order itself is preserved. `journal-terminal-order.test.ts` pins the terminal card's read sequence, its throwing path and the dApp card's untouched lookup. Home's binding order is unchanged.
 - The comment at `journal-state.ts:319-324` loses its history of the two inline copies, and `:351-353` loses the "Codex flagged" attribution. The `TransferType.Private === 0`, subtitle-sanitization and timestamp-unit notes stay.
 
 ### Q-06 (c): dispatch ladders
@@ -347,3 +347,7 @@ Two blockers, both adopted, plus five more findings, all adopted:
    - mutants 25 to 27 were added and the full set re-run.
 2. **Should-fix: the forced run had different price state.** Fiat labels appeared in the forced Firefox capture but not in base, which widened the amount column and squeezed the chips. **Adopted:** the surfaces pin the price port to one quote on every fresh document and assert the fiat labels before and after each capture; stability, base vs head and forced were re-run.
 3. **Nit:** the lessons file credited mutant 8 to one test only. **Adopted:** both killing tests are named.
+
+### Code review, Codex round 2: CONVERGED
+
+One nit, adopted: this section still claimed two token lookups and kept the "one thrower makes order irrelevant" argument that round 1 rejected. It now states one lookup in base read order and credits `journal-terminal-order.test.ts` for the characterization.
