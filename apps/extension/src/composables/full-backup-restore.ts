@@ -326,9 +326,8 @@ export type RestoreData = Record<string, unknown> & {
  *  of its own — and a hostile backup can ship tens of thousands of un-relinkable rows. */
 const MAX_DROPPED_BALANCES_RECORDED = 200
 
-// Both transforms forward an absent slice to its service unchanged and never validate a service
-// result: a malformed one throws natively, and that message, which names these locals, reaches
-// the failure copy.
+// Account and token restores forward absent slices unchanged, and their results stay unvalidated:
+// keep the local names, because native errors reach the import failure copy.
 
 /**
  * Restores the account slice, then drops every transaction, authwit and token-balance row whose
