@@ -63,6 +63,7 @@ The harness is shared with arc 3, and every edit to it was additive.
   4. **The docs overstated the harness.** There is no price interception, so the fiat lines are live and in the shots. The probe split is 8 interactive and 10 rest-only. The sponsored detail rows are the cost readout and the priority row. The plan no longer names a machine-local path. Every surface without a post-shot recount gained one.
   5. **The time-format constant carried a caller inventory.** Deleted.
 - **Restack:** onto 7450928c after arcs 3, 5 and 7 landed. Arc 3 added composed modules in other files, so the evidence below is against that base.
+- **Code review round 2:** CONVERGED, no findings, high confidence. All five round 1 fixes were checked against the harness and the saved evidence. Across the full restacked diff, the token values, the date formats and units, the templates and testids, the light twin, GlobalLoader's literal and both deferrals are preserved.
 
 ## Screenshots
 
