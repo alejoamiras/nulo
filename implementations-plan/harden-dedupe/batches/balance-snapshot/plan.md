@@ -308,8 +308,8 @@ Detail in `../../lessons/arc-21-balance-snapshot.md`.
 - Phase 1 green on the unchanged code; Phases 2 and 3 left every frozen test green.
 - Mutation: 40 mutants; 38 killed, 2 equivalent (A4, A5). The first run killed 36. C20 and A12 (a predicate over a built object) survived because the effect tests only edited `chainId` in place; the tests now also replace the network object. A4 and A5 (`dispose` after `disconnect()`) are equivalent for these consumers by probe of the messaging client: `disconnect()` never fires `onConnected` or sends a request, and neither view listens to `onDisconnected`. After code review round 1, the script records a kill only for a named failed test (an exit without one is an error), and the full set was rerun at the restacked code head: 38 killed, each with its failing tests on record, 0 errors.
 - Restacked onto `harden-dedupe` at `1a08fa52` without conflict; no manifest changed.
-- Gates green at `6a0db7de`.
-- Screenshots: not yet captured. The surface file is written, and two staging errors in it were fixed: holdings counts five rows, and the picker shows search past three rows. The final run never won the shared harness lock within its two-hour limit.
+- Gates green at `6a0db7de`, and again at the restacked code head `e4b5822d`.
+- Screenshots, base `1a08fa52` vs head `e4b5822d`: 17 surfaces × 2 themes × 2 browsers, 64 of 64 identical; `--stability` 64 of 64 identical.
 
 ## Post-implementation
 

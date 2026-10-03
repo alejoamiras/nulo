@@ -31,12 +31,13 @@
 
   - **C20 and A12 survived because the effect tests only edited `chainId` in place.** A built object reads the `network` property, which only a replacement of the network object triggers. Each effect test now also replaces the network object while a foreign row is in play; the rerun kills both, through the three components' "reads the network only once the account matches" tests.
   - **A4 and A5 are equivalent.** `disconnect()` (`packages/extension-messaging/src/background/client.ts:80-92`) removes the port listeners, rejects pending requests as microtasks and calls `onDisconnected`, which neither view listens to. It never calls `onConnected` or sends a request, so nothing between it and `dispose()` can reach the composable.
-- **Gates at `6a0db7de`:** lint, typecheck:all, test:all, test:ci-gating and audit:vue all passed.
-- **Screenshots: not yet captured.**
-  - Two base runs on Chrome staged the Home and token surfaces, then failed on the surface file's own wrong expectations, not on the code:
-    - holdings counted five rows, not six;
-    - the Send picker shows its search box past Home's three rows, so the plain-list surface now carries three rows.
-  - The corrected run then retried every 10 s for the full two-hour limit without winning the shared harness lock against other arcs' runs. The base-vs-head zero diff and `--stability` are still owed.
+- **Gates at `6a0db7de`, and again at the restacked code head `e4b5822d`:** lint, typecheck:all, test:all, test:ci-gating and audit:vue all passed.
+- **Screenshots: 64 of 64 identical, base `1a08fa52` vs head `e4b5822d`, and 64 of 64 under `--stability`** (17 surfaces × 2 themes × Chrome and Firefox). Every failed run before that was the surface file, never the code:
+  - holdings counted five rows, not six;
+  - the Send picker shows its search box past Home's three rows, so the plain-list surface carries three;
+  - the token page refreshes its row on mount, and the real service rejects a fixed row's id ("unknown token balance id" page errors), so the spec answers `refreshTokenBalance` too;
+  - **the picker is mounted from login** (`PopupManager.vue`), so its price client took its one snapshot before any spec existed. The order then depended on whether a real broadcast happened to land, and a stability run flipped USDC and ALPHA. The surface now broadcasts the token's quote to every live price client when the picker opens, and waits for the priced token to lead. Lesson: a stub keyed on requests misses a long-lived client that already asked; check when the host was mounted.
+  - Lock contention: a 10 s retry loop lost the shared harness lock for two hours. Polling the holder's pid every second won it.
 - **Shell discipline in an isolated worktree.** The guard refused compound git commands, heredocs, and `sed` with a variable operand; plain single commands, scratch scripts and the Edit tool worked.
 
 ## Code review round 1: NOT CONVERGED
