@@ -25,6 +25,7 @@
  *   that.
  */
 
+import type { GasFees } from "@aztec-labs/stdlib/gas"
 import { type MinFeeNode, predictedWorstMinFees } from "@nulo/aztec-runtime/fee-juice"
 import { SessionEndedError } from "@nulo/extension-messaging/errors"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
@@ -146,7 +147,12 @@ export class OperationEstimateReuse {
 		if (fpcDrift) return this.reject(fpcDrift)
 		const node = await this.deps.getNode(network.chainId)
 		const multiplier = reuseFeeMultiplier(entry.feeSettings.priorityLevel)
-		const current = (await predictedWorstMinFees(node)).mul(multiplier)
+		let current: GasFees
+		try {
+			current = (await predictedWorstMinFees(node)).mul(multiplier)
+		} catch (error) {
+			return this.feeReadFailed(error, multiplier)
+		}
 		if (fingerprintBaseFee(current) !== entry.baseFeeFingerprint) {
 			return this.reject("base fee drift")
 		}
@@ -167,6 +173,13 @@ export class OperationEstimateReuse {
 			fresh.chainId !== snap.chainId ||
 			(fresh.isProtocol ?? false) !== snap.isProtocol
 		return drifted ? "fpc identity drift" : undefined
+	}
+
+	/** The priority lookup is unvalidated; a non-number multiplier is an unknown priority and must keep throwing. */
+	private feeReadFailed(error: unknown, multiplier: unknown): undefined {
+		if (typeof multiplier !== "number") throw error
+		// A fixed category: the node's message never reaches the log.
+		return this.reject("base fee fetch failed")
 	}
 
 	private reject(reason: string): undefined {
