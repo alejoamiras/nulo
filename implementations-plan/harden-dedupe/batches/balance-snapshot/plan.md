@@ -98,6 +98,8 @@ Read on `harden-dedupe` at `eb06c37d`; none of these files changed since `2adab9
      6. on either path, `(inScope && !inScope()) || !isCurrent()` returns first;
      7. on reject: `loaded` survives, and the timed retry (`RETRY_MS = 2_000`) is armed unless this run is the retry;
      8. on resolve: `if (dirty) return fetchTokenBalances()`, and only then `landed = forChain(fetched, chainId)`, `rows.value = mapRow ? landed.map(mapRow) : landed`, `state.value = "loaded"`.
+
+     As built, steps 6 to 8 sit in three synchronous helpers (`superseded`, `settleRejected`, `land`), which keep the function under the complexity budget without changing the order.
    - **`onBalanceUpdated(tb)`:** dirty if in scope, then replace the first id match, unscoped. Both views run this today.
    - **The connect listener** is added when the composable is called. From the second connect on, it refetches.
    - **`dispose()`:** bump the fence (`void fence.begin()`), `clearTimeout`, then remove the connect listener.
@@ -191,7 +193,7 @@ Expected values are literals. Fake timers are used wherever a retry is counted. 
 **`TokensView.test.ts`:**
 
 - **T1 (cross-account).** A's fetch is held. Switch to B while B's task snapshot is held. Resolve A's fetch with A's rows: no card. Release B's tasks: the next request is `(undefined, B)`, and only B's rows render.
-- **T2.** As T1, but A's fetch rejects. Exactly one retry fires at 2 s, during B's task wait, and it asks for `(undefined, B)`. This pins drift 6.
+- **T2.** As T1, but A's fetch rejects during B's task wait. The rejection is out of scope, so it arms no retry.
 - **T3.** Within one scope, run 1 is held and a second connect starts run 2. Resolve run 2 with NEW, then run 1 with OLD: NEW stays.
 - **T4.** No account: no request, and the empty state shows once seeds are ready.
 - **T5.** Two rejections give exactly two calls by 4.1 s. A reconnect fetch inside the 2 s window cancels the pending retry.
@@ -204,7 +206,7 @@ Expected values are literals. Fake timers are used wherever a retry is counted. 
 - **T9.** A rejection arms the retry, then unmount: no call at 2 s, and two connects after unmount make none.
 - **T10.** A live add on the active chain from another account is ignored.
 - **T11.** During a held run, an add for an id already displayed still marks the snapshot dirty: resolve, and it refetches. This pins dirty before the dedupe return.
-- **T12.** An in-place `network.chainId` change does not move the request: it stays on the same address. Covered with T8b.
+- **T12.** A retry armed by a rejection in A fires at 2 s during B's task wait and asks for `(undefined, B)`. This pins drift 6.
 - **T13 (suspension boundary).** A second connect starts a fetch whose request is already resolved. After exactly one microtask an in-scope update arrives. No refetch follows, because the snapshot landed first. An inserted `await` would let the update mark it dirty.
 - **T14 (predicate reads).** The view's real update handler runs inside `effect()`. With a foreign account, mutating `network.chainId` does not re-run it. With the active account and an undisplayed id, it does.
 
@@ -272,7 +274,7 @@ What Changes 2 to 7.
   - at head, `bun run build`, and review the generated declaration files.
 - **Pass criteria:**
   - every command exits 0;
-  - between the Phase 1 commit and head, `git diff -- '*.test.ts'` lists only the new composable test and additions to `token-order.test.ts`;
+  - between the Phase 1 commit and head, `git diff -- '*.test.ts'` lists only the new composable test and additions to `token-order.test.ts` (as built, also its import line, and the post-mutation strengthening of the three effect tests; see Build log);
   - `.vue` diffs stay inside `<script setup>`, and no watcher getter changes.
 - **Mutation check.** Each mutant is applied alone to a scratch copy and restored from that copy, never with git. A kill means a test ran and failed. A survivor counts as equivalent only with a probe.
   - **In the composable:**
@@ -298,6 +300,15 @@ What Changes 2 to 7.
   - **In `isActiveScopeRow`:** either arm dropped; `==` on the account arm alone; `==` on the chain arm alone; eager reads.
   - **After Phase 2, in `isUnknownParsedRow`:** `?.` dropped (the token-less utility rows); `&&` for `||` (existing tables); a re-parse in the aggregate (the read-count rows).
 - **Screenshots:** § UI impact.
+
+### Build log
+
+Detail in `../../lessons/arc-21-balance-snapshot.md`.
+
+- Phase 1 green on the unchanged code; Phases 2 and 3 left every frozen test green.
+- Mutation: 40 mutants, 38 killed on the first run. C20 and A12 (a predicate over a built object) survived because the effect tests only edited `chainId` in place; the tests now also replace the network object, and both are killed. A4 and A5 (`dispose` after `disconnect()`) are equivalent by probe of the messaging client: `disconnect()` never fires `onConnected` or sends a request.
+- Gates green at `6a0db7de`.
+- Screenshots: not yet captured. The surface file is written, and two staging errors in it were fixed: holdings counts five rows, and the picker shows search past three rows. The final run never won the shared harness lock within its two-hour limit.
 
 ## Post-implementation
 
@@ -335,7 +346,7 @@ Each host is captured on Chrome and Firefox, in dark and light. The parent again
 3. **Watch keys differ per host.** TokensView keys `network.id` and BalanceView `network.chainId`, so an in-place chain-id change resets only the hero. The picker has no profile (`SelectTokenPopup.vue:144`). Holdings keys `[profile, account, chainId]` (`holdings.vue:103-109`) and Send `[profile, network.id, account]` (`send.vue:613-620`).
 4. **Update scoping.** The views replace any id match; the picker only an in-scope one (`:82`).
 5. **Holdings' `accept`** reads `tb.token.chainId` without `?.` (`holdings.vue:54`).
-6. **TokensView's retry timer crosses a scope change.** A retry armed in A fires during B's task wait, before B's own fetch clears it. It requests B's rows and flags them from A's task list. Today this is invisible: the flags it would get wrong are `isUpdating`, which B's own fetch recomputes once its task snapshot lands, and `isMinting`, which nothing reads. Pinned by T2.
+6. **TokensView's retry timer crosses a scope change.** A retry armed in A fires during B's task wait, before B's own fetch clears it. It requests B's rows and flags them from A's task list. Today this is invisible: the flags it would get wrong are `isUpdating`, which B's own fetch recomputes once its task snapshot lands, and `isMinting`, which nothing reads. Pinned by T12.
 
 ## Deferred (program follow-ups)
 
@@ -365,7 +376,7 @@ All adopted:
 
 All adopted:
 
-5. **Retry crossing a scope change** (drift 6), pinned by T2.
+5. **Retry crossing a scope change** (drift 6), pinned by T12.
 6. **Kill attributions corrected.** The connect counter is killed only by `BalanceView.test.ts:357`. The missing clear is killed by T9, plus the B6 variant.
 7. **Dirty before the dedupe return** (T11). The `dirty = false`-after-await mutant is listed.
 8. **Stated:** the returned `fetchTokenBalances` is the async function itself; no lifecycle hook; `forChain` runs after the fences and the dirty check.
