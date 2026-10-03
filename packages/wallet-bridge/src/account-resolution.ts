@@ -12,6 +12,24 @@
  * disagreed with itself. This is the one rule both call.
  */
 
+/** The wallet-sdk `opts.from` sentinel for a send through the default entrypoint. */
+const NO_FROM = "NO_FROM"
+
+export function isNoFromRequest(from: unknown): boolean {
+	return from === NO_FROM
+}
+
+/**
+ * The sender a request's options name, or `undefined` when they name none (`from` absent, nullish
+ * or NO_FROM). Anything else is stringified, exactly as the dispatcher sends it: a stricter rule on
+ * the journal's side would file a non-string `from` the dispatcher coerces and honors under the
+ * default account, while the send goes out as another.
+ */
+export function requestedSenderOf(opts: unknown): string | undefined {
+	const from = (opts as { from?: unknown } | null | undefined)?.from
+	return from == null || isNoFromRequest(from) ? undefined : String(from)
+}
+
 /** The minimum an account needs for resolution. Wallet order is the caller's. */
 export interface ResolvableAccount {
 	address: string

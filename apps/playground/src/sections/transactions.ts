@@ -106,8 +106,7 @@ export function bindTransactions(root: HTMLElement): void {
 		safe("sendTx", async () => {
 			const wallet = getWallet()!
 			const { exec } = await buildTransferExec(1)
-			// NoFrom: dispatcher.ts:82-88 detects from === "NO_FROM" and routes
-			// through DefaultEntrypoint instead of the account contract.
+			// The wallet sends `from: "NO_FROM"` through the default entrypoint, not the account contract.
 			// biome-ignore lint/suspicious/noExplicitAny: NO_FROM is a sentinel string the SDK doesn't type
 			return wallet.sendTx(exec as any, { from: "NO_FROM", wait: "NO_WAIT" } as any)
 		}),
