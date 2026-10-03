@@ -369,3 +369,59 @@ describe("tryCreateQueuedJournal — the session's chain id", () => {
 		expect(log).toHaveBeenCalledWith("wallet-sdk-bg", LogLevel.Warn, "tryCreateQueuedJournal failed", expect.any(SyntaxError))
 	})
 })
+
+/**
+ * The same sender rows the dispatcher's characterization runs (`@nulo/wallet-bridge`
+ * `dapp-grant.characterization.test.ts`), so each row shows the record is filed under the account
+ * the send goes out as, or that nothing is filed for a send the dispatcher refuses. Wire-shaped
+ * addresses; the session lists ACC2 first while wallet order is [ACC1, ACC2, STRANGER].
+ */
+describe("tryCreateQueuedJournal — the sender a request names", () => {
+	const ACC1 = new Fr(1n).toString()
+	const ACC2 = new Fr(0xabcdefn).toString()
+	const ACC2_UP = `0x${ACC2.slice(2).toUpperCase()}`
+	const STRANGER = new Fr(3n).toString()
+
+	const rows: Array<[label: string, tail: unknown[], filedUnder: string | undefined]> = [
+		["opts absent", [], ACC1],
+		["opts undefined", [undefined], ACC1],
+		["opts null", [null], ACC1],
+		["from absent", [{}], ACC1],
+		["from undefined", [{ from: undefined }], ACC1],
+		["from null", [{ from: null }], ACC1],
+		["NO_FROM", [{ from: "NO_FROM" }], ACC1],
+		["no_from", [{ from: "no_from" }], undefined],
+		["empty string", [{ from: "" }], undefined],
+		["zero", [{ from: 0 }], undefined],
+		["false", [{ from: false }], undefined],
+		["an object", [{ from: {} }], undefined],
+		["a session account", [{ from: ACC2 }], ACC2],
+		["a session account in upper case", [{ from: ACC2_UP }], undefined],
+		["a wallet account outside the session", [{ from: STRANGER }], undefined],
+		["an Fr naming a session account", [{ from: new Fr(0xabcdefn) }], ACC2],
+		["an object String() cannot convert", [{ from: { toString: "x" } }], undefined],
+	]
+
+	test.each(rows)("%s", async (_label, tail, filedUnder) => {
+		const { deps, journal } = makeDeps({
+			dappSession: {
+				tryGetDappSessionByOriginAndChain: vi.fn(async () => ({
+					accounts: [`aztec:1338:${ACC2}`, `aztec:1338:${ACC1}`],
+					capabilityGrants: [{ capability: { type: "transaction" } }],
+					dappMetadata: { name: "Example Dapp" },
+				})),
+			} as never,
+			account: makeAccountStub([ACC1, ACC2, STRANGER]) as never,
+		})
+		const message = { messageId: "msg-sender", type: "sendTx", args: [{ calls: [{ name: "transfer" }] }, ...tail] }
+
+		const id = await tryCreateQueuedJournal(message as unknown as WalletMessage, makeSession(), deps)
+
+		if (filedUnder === undefined) {
+			expect(id).toBeUndefined()
+			expect(await journal.countOperations({ stage: "queued" })).toBe(0)
+			return
+		}
+		expect((await journal.getOperation(id as string))?.accountAddress).toBe(filedUnder)
+	})
+})

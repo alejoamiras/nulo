@@ -11,10 +11,3 @@ export function detectEmbeddedFeePayment(feePayer: unknown, from: unknown, calls
 	const route = classifyFeePayer(feePayer, from, calls)
 	return route === "fjwc" || route === "fpc" ? route : undefined
 }
-
-/**
- * Detects whether a sendTx opts.from value indicates a NO_FROM (DefaultEntrypoint) transaction.
- */
-export function isNoFromRequest(from: unknown): boolean {
-	return from === "NO_FROM"
-}

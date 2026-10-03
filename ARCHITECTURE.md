@@ -167,7 +167,7 @@ A **late-activation** pattern is used for full-backup restore: `ProfileService.r
 dApps interact via `@aztec-labs/wallet-sdk` over a postMessage-bridged encrypted channel. Wiring lives in:
 
 - `apps/extension/src/wallet/services/wallet-sdk/background.ts` — sets up `BackgroundConnectionHandler` from the SDK. Owns discovery, key exchange, message routing.
-- `packages/wallet-bridge/src/dispatcher.ts` — the typed dispatcher. Receives wallet messages, narrows protocol shapes via Zod, enforces session scope, and delegates to typed service calls.
+- `packages/wallet-bridge/src/dispatcher.ts` — the typed dispatcher. Receives wallet messages, narrows protocol shapes via Zod, enforces session scope, and delegates to typed service calls; the consent planning behind `requestCapabilities` lives beside it in `capability-negotiation.ts`.
 - `packages/wallet-bridge/src/capability-map.ts` — declarative map of every capability the wallet exposes (~17 RPCs + 4 special). Determines which RPCs need user approval vs auto-approve, which open a popup vs run silently.
 - `packages/wallet-bridge/src/scope-enforcement.ts` — re-checks per-message scope against the granted session (call-intent targets, fee-payer constraints, chainId, accounts).
 

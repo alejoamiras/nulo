@@ -9,17 +9,7 @@
  * `buildNetworkOperation` / `buildAccountOperation` in dispatcher.ts.
  */
 
-import type {
-	GrantedCapabilityRecord,
-	Scope,
-	ScopePattern,
-	AccountsCapability,
-	ContractsCapability,
-	ContractClassesCapability,
-	SimulationCapability,
-	TransactionCapability,
-	DataCapability,
-} from "./capabilities"
+import type { Capability, GrantedCapabilityRecord, Scope, ScopePattern } from "./capabilities"
 import { sameFieldAddress } from "./field-address"
 import type { MethodName } from "./method-descriptors"
 import { scopeViolation } from "./scope-violation"
@@ -59,8 +49,8 @@ function inAddressList(address: string, list: "*" | unknown[]): boolean {
 	return list.some((item) => sameFieldAddress(String(item), address))
 }
 
-function grantsOfType<T extends { type: string }>(grants: GrantedCapabilityRecord[], type: string): T[] {
-	return grants.filter((g) => g.capability.type === type).map((g) => g.capability as T)
+export function grantsOfType<K extends Capability["type"]>(grants: GrantedCapabilityRecord[], type: K): Extract<Capability, { type: K }>[] {
+	return grants.filter((g) => g.capability.type === type).map((g) => g.capability as Extract<Capability, { type: K }>)
 }
 
 // ── Per-method checkers ───────────────────────────────────────────────
@@ -73,7 +63,7 @@ function requireContractsGrant(
 	flag: "canRegister" | "canGetMetadata",
 	grants: GrantedCapabilityRecord[],
 ): void {
-	const caps = grantsOfType<ContractsCapability>(grants, "contracts")
+	const caps = grantsOfType(grants, "contracts")
 	if (!caps.length) return
 	if (!caps.some((c) => c[flag] && inAddressList(address, c.contracts))) {
 		throw scopeViolation(`Scope violation: ${method} contract not permitted by granted contracts scope`)
@@ -98,7 +88,7 @@ export function checkIsTokenRegistered(args: unknown[], grants: GrantedCapabilit
 export function checkGetContractClassMetadata(args: unknown[], grants: GrantedCapabilityRecord[]): void {
 	const id = String(args[0])
 
-	const caps = grantsOfType<ContractClassesCapability>(grants, "contractClasses")
+	const caps = grantsOfType(grants, "contractClasses")
 	if (!caps.length) return
 
 	const permitted = caps.some((c) => c.canGetMetadata && inAddressList(id, c.classes))
@@ -115,7 +105,7 @@ function checkTransactionCalls(methodName: MethodName, args: unknown[], grants: 
 	}
 	if (calls.length === 0) return // Vacuously true — no calls to restrict
 
-	const caps = grantsOfType<TransactionCapability>(grants, "transaction")
+	const caps = grantsOfType(grants, "transaction")
 	if (!caps.length) return
 
 	const typedCalls = calls as WireCall[]
@@ -133,7 +123,7 @@ export function checkGrantPublicAuthwit(args: unknown[], grants: GrantedCapabili
 	const contract = String(content?.contract)
 	const method = String(content?.method)
 
-	const caps = grantsOfType<TransactionCapability>(grants, "transaction")
+	const caps = grantsOfType(grants, "transaction")
 	if (!caps.length) return
 
 	const permitted = caps.some((c) => matchesScope(contract, method, c.scope))
@@ -150,7 +140,7 @@ function checkSimulationTransactions(methodName: MethodName, args: unknown[], gr
 	}
 	if (calls.length === 0) return
 
-	const caps = grantsOfType<SimulationCapability>(grants, "simulation")
+	const caps = grantsOfType(grants, "simulation")
 	if (!caps.length) return
 
 	const typedCalls = calls as WireCall[]
@@ -179,7 +169,7 @@ export function checkExecuteUtility(args: unknown[], grants: GrantedCapabilityRe
 	const contract = String(call.to)
 	const fn = call.name
 
-	const caps = grantsOfType<SimulationCapability>(grants, "simulation")
+	const caps = grantsOfType(grants, "simulation")
 	if (!caps.length) return
 
 	const permitted = caps.some((c) => {
@@ -196,7 +186,7 @@ export function checkGetPrivateEvents(args: unknown[], grants: GrantedCapability
 	const eventFilter = args[1] as Record<string, unknown> | undefined
 	const address = String(eventFilter?.contractAddress)
 
-	const caps = grantsOfType<DataCapability>(grants, "data")
+	const caps = grantsOfType(grants, "data")
 	if (!caps.length) return
 
 	const permitted = caps.some((c) => {
@@ -222,8 +212,8 @@ function callWithinTxOrSimulationScope(
 	fn: string,
 	grants: GrantedCapabilityRecord[],
 ): { hasTxCaps: boolean; permitted: boolean } {
-	const txCaps = grantsOfType<TransactionCapability>(grants, "transaction")
-	const simCaps = grantsOfType<SimulationCapability>(grants, "simulation")
+	const txCaps = grantsOfType(grants, "transaction")
+	const simCaps = grantsOfType(grants, "simulation")
 	const hasTxCaps = txCaps.length > 0 || simCaps.some((c) => !!c.transactions?.scope)
 	if (!hasTxCaps) return { hasTxCaps: false, permitted: false }
 
@@ -270,7 +260,7 @@ export function isCreateAuthWitCoveredByTxOrSimulationScope(intent: unknown, gra
 export function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRecord[]): void {
 	const from = String(args[0])
 
-	const caps = grantsOfType<AccountsCapability>(grants, "accounts")
+	const caps = grantsOfType(grants, "accounts")
 	if (caps.length) {
 		// A granted accounts capability legitimately omits an explicit `accounts` list: a dApp can't
 		// enumerate the wallet's accounts at connect time (it connects in order to learn them). Treat a
@@ -325,7 +315,7 @@ export function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRec
 
 /** No accounts grant passes here: type-level enforcement refuses that call first. */
 export function checkGetAccounts(_args: unknown[], grants: GrantedCapabilityRecord[]): void {
-	const caps = grantsOfType<AccountsCapability>(grants, "accounts")
+	const caps = grantsOfType(grants, "accounts")
 	if (!caps.length) return
 	if (!caps.some((c) => c.canGet === true)) {
 		throw scopeViolation("Scope violation: getAccounts requires accounts.canGet=true")
@@ -353,7 +343,7 @@ export function checkRegisterSender(_args: unknown[], grants: GrantedCapabilityR
 
 /** The sub-bit must be literally `true`: a data grant with anything else denies. */
 function requireAddressBookGrant(method: MethodName, grants: GrantedCapabilityRecord[]): void {
-	const caps = grantsOfType<DataCapability>(grants, "data")
+	const caps = grantsOfType(grants, "data")
 	if (!caps.length) return
 	if (!caps.some((c) => c.addressBook === true)) {
 		throw scopeViolation(`Scope violation: ${method} requires data.addressBook=true`)

@@ -28,7 +28,7 @@ import type { ProfileService } from "@/wallet/services/profile/service"
 import type { DappSessionService } from "@/wallet/services/dapp-session/service"
 import type { NetworkService } from "@/wallet/services/network/service"
 import type { AccountService } from "@/wallet/services/account/service"
-import { resolveAuthorizedSessionAccount } from "@nulo/wallet-bridge"
+import { requestedSenderOf, resolveAuthorizedSessionAccount } from "@nulo/wallet-bridge"
 import { parseCaipAccount } from "@/wallet/utils/caip"
 import type { CaipAccount } from "@/wallet/services/dapp-interaction/spec"
 import { pickPrimaryMethod } from "@/utils/primary-method"
@@ -57,22 +57,6 @@ export interface TryCreateQueuedJournalDeps {
 	 *  B-profile record. */
 	stampedProfileId: string
 	logger: ILogger
-}
-
-/**
- * The sender a sendTx message names, if it names one.
- *
- * Mirrors the dispatcher's normalization exactly (`handleSendTx`): absent or
- * `NO_FROM` means "let the wallet pick", and anything else is stringified. A
- * stricter rule here would diverge — a non-string `from` the dispatcher coerces
- * and honors would be read as no-from on this side, filing the record under the
- * default account while the send goes out as another.
- */
-export function extractSendFrom(message: WalletMessage): string | undefined {
-	const opts = (message as { args?: unknown[] }).args?.[1] as Record<string, unknown> | undefined
-	const from = opts?.from
-	if (from == null || from === "NO_FROM") return undefined
-	return String(from)
 }
 
 /**
@@ -137,7 +121,7 @@ export async function tryCreateQueuedJournal(
 		const resolved = resolveAuthorizedSessionAccount({
 			walletAccounts,
 			sessionAddresses,
-			requestedFrom: extractSendFrom(message),
+			requestedFrom: requestedSenderOf((message as { args?: unknown[] }).args?.[1]),
 		})
 		// An unauthorized or unresolvable sender is left un-journaled: the dispatch
 		// itself will refuse it, and a record naming the wrong account is worse

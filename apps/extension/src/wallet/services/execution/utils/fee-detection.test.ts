@@ -1,6 +1,6 @@
 import { CLAIM_AND_END_SETUP, CLAIM_AND_END_SETUP_SELECTOR, FEE_JUICE_CONTRACT } from "@nulo/wallet-bridge"
 import { describe, test, expect } from "vitest"
-import { detectEmbeddedFeePayment, isNoFromRequest } from "./fee-detection"
+import { detectEmbeddedFeePayment } from "./fee-detection"
 
 const SENDER = "0x1a228350bbfa130d71aa1105c93e6432bd8c65476bc46ba579d2dc885e2873d1"
 const CLAIM = [
@@ -52,19 +52,5 @@ describe("detectEmbeddedFeePayment", () => {
 
 	test('treats empty string feePayer as defined (returns "fpc", not undefined)', () => {
 		expect(detectEmbeddedFeePayment("", "0xabc")).toBe("fpc")
-	})
-})
-
-describe("isNoFromRequest", () => {
-	test('returns true for "NO_FROM"', () => {
-		expect(isNoFromRequest("NO_FROM")).toBe(true)
-	})
-
-	test("returns false for a normal address", () => {
-		expect(isNoFromRequest("0x1a228350bbfa130d71aa1105c93e6432bd8c65476bc46ba579d2dc885e2873d1")).toBe(false)
-	})
-
-	test("is case-sensitive", () => {
-		expect(isNoFromRequest("no_from")).toBe(false)
 	})
 })
