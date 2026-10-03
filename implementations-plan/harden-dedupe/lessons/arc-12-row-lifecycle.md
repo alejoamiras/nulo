@@ -27,3 +27,14 @@
   - **Nit:** the tuple-lock comment now states the lock-order rule: under a row lock, await storage only.
   - **Nit:** the revoke-cap test pins `Cannot revoke more than 28 authwits per single tx` exactly. The "cap raised to 29" mutant is killed.
 - **Cross-arc:** profile-rows did not carry the `getProfileDek` reserved-id pin, so this arc adds it to `profile/service.integration.test.ts`. The "reserved refusal dropped" mutant is killed. Codex found no semantic conflict with network-endpoints.
+
+## Code review round 2: CONVERGED
+
+- **Codex: CONVERGED, with no findings at high confidence.** It confirmed four things:
+  - the compensation lock covers only the storage delete and is never taken in reverse order;
+  - the regression really interleaves the import, the rename and the deletion;
+  - the imported-key cleanup has no analogous race;
+  - the reconcile delete stays deferred.
+
+  Its four probes queued each purge before and after the compensation. All four were clean.
+- **Next:** restack after profile-rows and network-endpoints land. Re-check the reserved-id pin against profile-rows' test file. Resolve the network-endpoints overlap in `network/service.ts`: the `profileDeletedError` import and the two fenced throws.
