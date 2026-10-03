@@ -418,3 +418,8 @@ Every state in the Phase 0 table must be pixel-identical, with identical probes,
 12. **The boundary (both): adopted.**
     - Arc 23 never edits `create.vue`, and arc 24 does not own `new.vue`'s lines.
     - Whichever arc lands first, the other rebases, keeping both arcs' tests.
+
+### Code review (Codex): round 1 CONVERGED; rounds 2 and 3 on the screenshot evidence
+
+- **Round 2: NOT CONVERGED, all adopted.** The Chrome onboarding noise was fixed at its cause: stale LCD fringes at 1x. The onboarding tab is now shot at 2x and repainted whole before capture. Masked full-backup captures and focused name captures were added, each run's bundle keeps only its own evidence, and the loose reach checks were tightened. All three final runs show zero diffs on both browsers.
+- **Round 3: NOT CONVERGED on one should-fix, adopted.** The focus-return check could pass without production returning focus, because typing left the name field focused. The surface now blurs the field before the submit, asserts it is unfocused, and keeps the post-submit assertion that the page focused it. A no-op `ProfileNameField.focus()` mutant now fails in all four name hosts.

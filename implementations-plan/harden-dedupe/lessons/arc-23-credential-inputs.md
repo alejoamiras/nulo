@@ -72,6 +72,14 @@
 - **Coordinator sweep: loose reach checks.** Tightened, as listed above.
 - The code itself stayed CONVERGED, with no product regression found.
 
+## Code review round 3: NOT CONVERGED on one should-fix, adopted
+
+- **The focus-return check could pass without production returning focus.** `replaceInputValue` focuses the name field, and a synthetic `.click()` leaves focus there. So a no-op `focus()` still met "the page focused it".
+- The name-error surfaces now blur the field before the submit and assert it is unfocused, then keep the post-submit assertion.
+- A throwaway build with `ProfileNameField`'s exposed `focus()` made a no-op fails that assertion in each of the four name hosts, one run per host, and the real build passes.
+- The four name-error surfaces were re-shot against the testid commit and against themselves, on Chrome and Firefox in both themes: zero diffs.
+- Codex accepted the repaint, the per-input no-op `blur` and the 1x shake mutants (their probes do not depend on scale).
+
 ## Risk carried
 
 - **Change-password reveals current, new and repeat together** from one flag. Kept as today; listed in Drift.
