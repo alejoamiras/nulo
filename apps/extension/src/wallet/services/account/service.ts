@@ -299,6 +299,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	 * duplicate accounts at indices 0 and 1.
 	 */
 	// maxHoldMs: null — no watchdog: a held tuple lock is never force-released.
+	// Under a row lock, await storage only; chain purges can already hold the network lock.
 	private readonly tupleLocks = new KeyedLock({ maxHoldMs: null })
 	private serializePerTuple<T>(profileId: string, chainId: number, type: AccountType, op: () => Promise<T>): Promise<T> {
 		return this.tupleLocks.withLock(`${profileId}:${chainId}:${type}`, op)
@@ -519,7 +520,8 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 					deletion.assertCurrent(profileId, epoch)
 					await this.storage.set(accountRowIdOf(account), account)
 					if (!deletion.isCurrent(profileId, epoch)) {
-						await this.storage.delete(accountRowIdOf(account))
+						// Under the row's lock: a rename that read the row must not write it back.
+						await this.tupleLocks.withLock(accountRowIdOf(account), () => this.storage.delete(accountRowIdOf(account)))
 						throw profileDeletedError(profileId)
 					}
 				} catch (rowErr) {

@@ -543,7 +543,7 @@ describe("AccountService.importAccount — deletion fence", () => {
 		const run = () => service.importAccount("p1", 1, "body", "0xI", "pw", "I")
 		const keysLeft = async () => Object.keys(await api.storage.local.get(null)).filter((k) => k === accountKey || k === keyRowKey)
 		const dekWiped = () => deks.length === 1 && deks[0]!.every((b) => b === 0)
-		return { deletion, emit, log, run, keysLeft, dekWiped }
+		return { api, service, deletion, emit, log, run, keysLeft, dekWiped }
 	}
 
 	function gate() {
@@ -603,6 +603,58 @@ describe("AccountService.importAccount — deletion fence", () => {
 		dek.open()
 		await expect(run).rejects.toThrow(staleText)
 		expect(h.log).toEqual([])
+		expect(h.dekWiped()).toBe(true)
+	})
+
+	test("a rename parked on the written row cannot resurrect it after the compensation", async () => {
+		const h = await makeHarness()
+		const area = h.api.storage.local
+		const realSet = area.set.bind(area)
+		const realGet = area.get.bind(area)
+		const importGate = gate()
+		const renameGate = gate()
+		let importParked!: () => void
+		let renameParked!: () => void
+		const importReached = new Promise<void>((r) => {
+			importParked = r
+		})
+		const renameReached = new Promise<void>((r) => {
+			renameParked = r
+		})
+		let parkImport = true
+		let parkRename = false
+		area.set = async (entries) => {
+			await realSet(entries)
+			if (parkImport && accountKey in entries) {
+				parkImport = false
+				importParked()
+				await importGate.promise
+			}
+		}
+		area.get = (async (key: unknown) => {
+			const value = await realGet(key as never)
+			if (parkRename && key === accountKey) {
+				parkRename = false
+				renameParked()
+				await renameGate.promise
+			}
+			return value
+		}) as typeof area.get
+
+		const run = h.run()
+		await importReached
+		parkRename = true
+		const rename = h.service.changeAccountName("p1", 1, "0xI", "renamed")
+		await renameReached
+		h.deletion.beginDeletion("p1")
+		importGate.open()
+		await new Promise((r) => setTimeout(r, 0))
+		renameGate.open()
+
+		await expect(run).rejects.toThrow(/^profile p1 deleted$/)
+		await rename
+		expect(await h.keysLeft()).toEqual([])
+		expect(added(h.emit)).toEqual([])
 		expect(h.dekWiped()).toBe(true)
 	})
 
