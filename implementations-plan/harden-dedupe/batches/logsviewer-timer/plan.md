@@ -35,6 +35,12 @@ None. The template and styles do not change. The zero-diff gate covers the logge
 - the same fixed log set and three states as async-primitives (loaded, Debug Mode on, empty);
 - Chrome and Firefox, dark and light, plus a `--stability` run.
 
+## Results
+
+- The test row failed against async-primitives' head file and passed after the cherry-picked fix. Both mutants were killed.
+- The program gates pass at the fix plus this plan (`4585a49c`).
+- Shots against async-primitives' head (`c27831b7`): 12 of 12 identical, and 12 of 12 identical in the `--stability` run.
+
 ## Delivery
 
 One arc, `hd/15b-logsviewer-timer`, stacked on `hd/15-async-primitives`. Code review: off. Codex reviews this diff in the same round as async-primitives'.
