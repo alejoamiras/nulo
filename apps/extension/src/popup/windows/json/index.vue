@@ -4,6 +4,7 @@
 import { onMounted } from "vue"
 
 /** Utils */
+import { closeCurrentWindow } from "@/utils/close-current-window"
 import { DappInteractionServiceClient } from "@/wallet/services/dapp-interaction/client"
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
 
@@ -15,11 +16,7 @@ const data = computed(() => payload.value?.params.operations)
 let profileService
 
 function onActiveProfileChanged(profile) {
-	if (!profile) {
-		chrome.windows.getCurrent((window) => {
-			chrome.windows.remove(window.id)
-		})
-	}
+	if (!profile) closeCurrentWindow()
 }
 
 function onClose() {

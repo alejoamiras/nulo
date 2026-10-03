@@ -1,6 +1,7 @@
 <!-- Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0. -->
 <script setup>
 /** Utils */
+import { closeCurrentWindow } from "@/utils/close-current-window"
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
 
 /** Store */
@@ -11,11 +12,7 @@ let profileService
 let unsubscribe
 
 function onActiveProfileChanged(profile) {
-	if (!profile) {
-		chrome.windows.getCurrent((window) => {
-			chrome.windows.remove(window.id)
-		})
-	}
+	if (!profile) closeCurrentWindow()
 }
 
 function onClose() {
