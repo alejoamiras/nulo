@@ -833,7 +833,7 @@ export class WalletSdkDispatcher {
 		const origin: LocalTxOrigin = { type: OriginType.DAPP, name: ctx.origin }
 
 		const results = await this.executionService.executeOperations([operation], origin)
-		return this.unwrapResult(results[0])
+		return unwrapOperationResult(results[0])
 	}
 
 	/** The synchronous guard ladder every dispatch runs after the session read —
@@ -1124,7 +1124,7 @@ export class WalletSdkDispatcher {
 			{ onExecutionEnqueued: hooks?.onExecutionEnqueued, queuedJournalId: hooks?.queuedJournalId, originKey: ctx.origin },
 		)
 
-		return this.unwrapResult(results[0])
+		return unwrapOperationResult(results[0])
 	}
 
 	/**
@@ -1170,7 +1170,7 @@ export class WalletSdkDispatcher {
 			}
 			const origin: LocalTxOrigin = { type: OriginType.DAPP, name: ctx.origin }
 			const results = await this.executionService.executeOperations([operation], origin, undefined, undefined, undefined, ctx.fence)
-			return this.unwrapResult(results[0])
+			return unwrapOperationResult(results[0])
 		}
 
 		const authwitReq: AztecCreateAuthWitRequest = {
@@ -1182,7 +1182,7 @@ export class WalletSdkDispatcher {
 			sessionId: dappSession.id,
 			operations: [authwitReq],
 		})
-		return this.unwrapResult(results[0])
+		return unwrapOperationResult(results[0])
 	}
 
 	/**
@@ -1228,7 +1228,7 @@ export class WalletSdkDispatcher {
 			operations: [registerOp],
 		})
 
-		return this.unwrapResult(results[0])
+		return unwrapOperationResult(results[0])
 	}
 
 	/** Nulo-custom `grantPublicAuthwit`: writes a public authwit for
@@ -1281,7 +1281,7 @@ export class WalletSdkDispatcher {
 			{ originKey: ctx.origin },
 		)
 
-		return this.unwrapResult(results[0])
+		return unwrapOperationResult(results[0])
 	}
 
 	/**
@@ -1767,9 +1767,5 @@ export class WalletSdkDispatcher {
 
 		// No session or no accounts on session — require account authorization
 		throw new Error("No accounts authorized. The dApp must call requestCapabilities() with accounts type first.")
-	}
-
-	private unwrapResult(result: OperationResult): unknown {
-		return unwrapOperationResult(result)
 	}
 }
