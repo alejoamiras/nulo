@@ -177,7 +177,7 @@ Every lock, fence capture point, liveness leg, emit, `finally`, return shape and
 **Cross-arc contracts** (profile-rows owns those files):
 
 - **`SessionManager.getDek` returns a fresh copy:** no test pins it. Phase 1 adds one to `profile/session-manager.test.ts`, which profile-rows does not edit.
-- **`getProfileDek` refuses a reserved id with "Invalid profile id":** no test pins it, and the natural home (`profile/service.integration.test.ts`) is profile-rows' frozen Phase 1 file. This is an explicit handoff: profile-rows adds the pin, or the program follow-ups carry it.
+- **`getProfileDek` refuses a reserved id with "Invalid profile id":** no test pinned it. Profile-rows did not take the handoff, so this arc adds the pin to `profile/service.integration.test.ts` after code review round 1.
 - **"A locked profile has no DEK"** is pinned at `profile/service.integration.test.ts:2656-2664`.
 
 **Inferences:**
@@ -305,8 +305,8 @@ One arc, `hd/12-row-lifecycle`, stacked on `harden-dedupe`; the driver sets the 
 **Seams with arcs in build:**
 
 - **network-endpoints (arc 9)** edits `network/service.ts` around `:135`, `:337`, `:412` and `:584` onward, plus its import list. This arc touches only the throw lines `:321` and `:490` and adds one import. Whichever lands second resolves the import block.
-- **profile-rows (arc 13)** owns `profile/service.ts`, `session-manager.ts` and `service.integration.test.ts`, none of which this arc edits. This arc relies on three contracts:
-  - `getProfileDek`'s reserved refusal (handed off; see Assumptions);
+- **profile-rows (arc 13)** owns `profile/service.ts`, `session-manager.ts` and `service.integration.test.ts`. This arc adds one test to `service.integration.test.ts` and edits no source there. It relies on three contracts:
+  - `getProfileDek`'s reserved refusal (pinned here; see Assumptions);
   - `SessionManager.getDek`'s fresh copy (pinned here in `session-manager.test.ts`);
   - `consumeDekRewrapContext`'s signature (type-checked).
 - **incoming-arms (arc 14)** owns `incoming-transfer/service.ts`.
