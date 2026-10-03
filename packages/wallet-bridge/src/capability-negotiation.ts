@@ -358,7 +358,6 @@ type CapabilityDecisionInput = {
 export function mergeGrantsAndRejections(result: CapabilityResult, plan: CapabilityPlan): CapabilityDecisionInput {
 	const grantedResults = ensureAccountsGrant(result, plan.delta)
 
-	// Compute which delta types were approved vs rejected
 	const approvedTypes = new Set(grantedResults.map((cap) => cap.type as string))
 	const now = Date.now()
 	const deltaApprovedTypes = new Set(plan.delta.filter((cap) => approvedTypes.has(cap.type as string)).map((cap) => cap.type as string))
@@ -369,7 +368,6 @@ export function mergeGrantsAndRejections(result: CapabilityResult, plan: Capabil
 		(g) => !(keepAccountsGrant && g.capability.type === "accounts"),
 	)
 
-	// Delta items NOT approved become rejections.
 	const rejectedDeltaTypes = plan.delta.filter((cap) => !approvedTypes.has(cap.type as string)).map((cap) => cap.type as string)
 
 	return {
@@ -446,7 +444,6 @@ function accountsAdditions(result: CapabilityResult, plan: CapabilityPlan): Pick
 	return { addAccounts, aliasPatch }
 }
 
-/** Safety net: ensure accounts capability is in granted when accounts were selected. */
 function ensureAccountsGrant(result: CapabilityResult, delta: Record<string, unknown>[]): Record<string, unknown>[] {
 	const grantedResults = result.granted as Record<string, unknown>[]
 	if (result.selectedAccounts && result.selectedAccounts.length > 0) {
@@ -461,13 +458,9 @@ function ensureAccountsGrant(result: CapabilityResult, delta: Record<string, unk
 	return grantedResults
 }
 
-/** Approved DELTA types REPLACE their stored grant (never-granted types simply append).
- *  The old type-only filter silently dropped re-approved types: a contracts re-consent
- *  (field-diff, e.g. after a redeploy adds token addresses) was REPORTED granted but never
- *  persisted - every later call still refused on the stale grant. Same hole applied to
- *  accounts upgrades. The popup echoes existing caps alongside the newly approved delta,
- *  so for replaced types we take the LAST result entry of that type that differs from the
- *  stored capability (falling back to the delta's requested shape). */
+/** Approved DELTA types REPLACE their stored grant; never-granted types append. The popup echoes
+ *  held caps beside the approved delta, so a replaced type takes the LAST answer entry of that type
+ *  that differs from the stored capability, else the delta's requested shape. */
 function collectNewGrants(
 	popupResults: Record<string, unknown>[],
 	plan: CapabilityPlan,
@@ -498,13 +491,10 @@ function collectNewGrants(
 	return newGrants
 }
 
-/** Is `requested` already covered by the existing grants of its type — i.e. NO
- *  re-prompt needed? Field-aware for accounts/contracts/transaction/simulation/data;
- *  TYPE-ONLY for `contractClasses` (the field-blind coverage drift filed as the
- *  out-of-arc `wallet-sdk-capability-field-diff` finding, pinned in dispatcher.test.ts).
- *  Exhaustive over `Capability["type"]`: a new variant forces a coverage decision here
- *  rather than silently defaulting to covered (fail-open) or not (spurious re-prompt).
- *  `cap` is the discriminated union, so the branches narrow WITHOUT per-branch casts. */
+/** Whether the held grants of `cap`'s type already cover it, so no window opens. Field-aware for
+ *  every type but `contractClasses`, whose coverage is type-only (pinned in dispatcher.test.ts).
+ *  Exhaustive over `Capability["type"]`, so a new variant forces a coverage decision instead of
+ *  defaulting to covered (fail-open) or not (a spurious window). */
 function isCapabilityCovered(cap: Capability, existingGrants: GrantedCapabilityRecord[], grantedTypes: Set<string>): boolean {
 	switch (cap.type) {
 		case "accounts": {
