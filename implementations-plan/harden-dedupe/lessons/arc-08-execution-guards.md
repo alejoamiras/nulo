@@ -13,7 +13,7 @@
 - **The mocks had to go.** `dapp-send-executor.test.ts` and `view-executor.test.ts` mocked `assertLiveChainIdentity` at the module boundary, and their fixtures did not match (stored `chainId: 7`, no `l1ChainId`, live `(1, 2)`). A site calling `liveChainInfo` reaches the real check through a same-module reference, which the mock cannot intercept. Both harnesses now carry a matching pair: stored `l1ChainId: 1`, live `rollupVersion: 6`, composite 7.
 - **A fixture was signed.** `batched-view-mixed-arm.pins.test.ts` built its drifted stored id as `STORED_CHAIN_ID ^ 1`, which is negative (`-156673112`); it is unsigned now (`>>> 0`). The refusal it tests is unchanged.
 - **The NO_FROM success control needs number gas limits.** `GasSettings.fallback` divides limits by fees, and the shared fixture's bigint `txsLimits` throws a mixed BigInt/number `TypeError` there.
-- **One path stays unpinned on its own.** The provided-artifact path of the two registrations is not pinned separately, because the real `ContractArtifactSchema` rejects any fixture artifact. The class-id check sits on the same line whichever source the artifact came from; both lookup paths are pinned.
+- **The provided-artifact path is pinned too (code review round 1).** The real `ContractArtifactSchema` accepts a minimal artifact (`name`, empty `functions` and `nonDispatchPublicFunctions`, `outputs`, `storageLayout`, `fileMap`), so each registration has a supplied-artifact mismatch row: refused, no lookup, nothing registered. Skipping the check for a supplied artifact reds exactly those two rows.
 - **Phase 2** touched no test file: the diff between the phase commits lists no `*.test.ts`.
 
 ## Mutation check
@@ -59,3 +59,11 @@ Chrome, `NODE_OPTIONS=--dns-result-order=ipv4first bun run e2e:agent`, on the Ph
 - **Passed (12 tests in 7 files):** `authwit-variants` (4), `authwit-consume-smoke`, `tx-sendTx-default`, `tx-sendTx-noFrom`, `contracts-register`, `sim-methods` (3) and `meta-getChainInfo`.
 - **Skipped:** `tx-sendTx-delegated-authwit` skips itself (`skipIf(!hasConfig || !hasStandardContracts)`), because the local sandbox lacks its standard contracts.
 - **Left out:** `authwit-lifecycle` carries `@requires-proverless`.
+
+## Code review
+
+- **Round 1 (Codex): CONVERGED.** No dropped guard, changed precedence, effect-order regression or changed reachable error text across the eight chain sites, S1 to S6, C1/C2 and the shared decode. It ran 81 baseline/current probe comparisons, including malformed and duplicate effects. Four nits, all adopted:
+  - the supplied-artifact rows above;
+  - `AuthwitDiscoverer`'s header now says "do not validate chain identity" instead of "check nothing";
+  - the fast-path comment keeps only the invariant;
+  - the decode catch comment was deleted, because the module header already covers it.
