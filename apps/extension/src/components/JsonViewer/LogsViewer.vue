@@ -187,12 +187,17 @@ async function getLogs() {
 }
 
 async function fetchLogs(cnt, fromId) {
+	let timer
 	try {
 		const fetch = logViewerService.getLogs(cnt, fromId)
 		const timeout = new Promise((_, reject) => {
-			setTimeout(() => reject("Logs fetch timeout"), 500)
+			timer = setTimeout(() => reject("Logs fetch timeout"), 500)
 		})
-		await Promise.race([fetch, timeout])
+		try {
+			await Promise.race([fetch, timeout])
+		} finally {
+			clearTimeout(timer)
+		}
 		return await fetch
 	} catch {
 		if (cnt === 1) throw new Error("Failed to fetch logs")
