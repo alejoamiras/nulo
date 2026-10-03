@@ -19,8 +19,13 @@ Finding Q-25, from `audit/quality/2026-09-30-dedup-high/`. The full-backup resto
 - **Excellent:**
   - The stage module owns account filtering and token re-linking. It calls them directly, so a signature change fails to typecheck at the call.
   - `AccountRestoreClient` declares the `restore` it is called with. The five slice clients satisfy `SliceRestoreClient` with no cast.
-  - Before the move, characterization pins what the move could disturb: the arguments each restore receives, the error-log key order, the `token-balance` gate, and the native `TypeError` text of the two hostile-reachable expressions. Each pin is shown to turn red on a named mutant.
-- **Good enough:** the three other `as never` casts in the stage module (`:343`, `:522`, `:523`) stay as they are. Recon lists them as related, but they are not part of the finding (see Asks).
+  - Before the move, characterization pins what the move could disturb, and each pin is shown to turn red on a named mutant:
+    - the arguments each restore receives;
+    - the error-log key order and its microtask timing;
+    - the `token-balance` gate;
+    - rollback-before-disconnect;
+    - the native `TypeError` text of the two expressions reachable from service results.
+- **Good enough:** the two `chainSyncClients` casts (`full-backup-restore.ts:522-523`) stay. Typing them means threading the account-state and node-status types through chain sync, which is outside the finding. `:343` goes, as a no-op cast inside a function Phase 2 edits (see Decisions).
 
 ## Architecture & Implementation
 
@@ -68,13 +73,15 @@ Files: `apps/extension/src/composables/full-backup-restore.ts` (579 lines), `use
 1. **`full-backup-restore.ts` gains:**
    - `export type RestoreData`: today's `ValidatedBackup["data"]` shape, verbatim.
    - `restore(rows: unknown[] | undefined): Promise<unknown>` on `AccountRestoreClient`, in method shorthand like its siblings.
-   - The cap constant, and both transforms moved verbatim, with every local name kept (`newAccounts`, `a`, `oldTokens`, `old`, `newTokens`, `tb`, `i`). Only three things change:
+   - The cap constant, and both transforms moved verbatim, with every local name kept (`newAccounts`, `a`, `oldTokens`, `old`, `newTokens`, `tb`, `i`). The `${chainId}:${address}` key stays inline at its four sites (see Follow-ups). Only these things change:
      - their parameter types (`data: RestoreData`, `accountService: AccountRestoreClient`);
-     - the doc comments drop the `Q-02` finding tags, which the comment style bans, keeping the substance;
+     - **comments.** Dropped: the `Q-02` and `(F)` tags (`useFullBackupImport.ts:152`, `:158`, `:208`, `:232`), "stage 2a/2b", "the Q-02 verifier's constraint" and "today's append point". Kept: the provenance, index-pairing, chain-authority and bounded-diagnostic explanations. Added: one invariant comment at the boundary, saying that absent slices are forwarded unchanged, service results are not validated, and a malformed result throws natively, with a message that names these locals and reaches the failure copy. The `[full-backup-import]` log prefix stays verbatim, because it is exportable log text;
      - two imports (`AUTH_REGISTRY_SERVICE_NAME`, `TOKEN_BALANCE_SERVICE_NAME`), plus `ACCOUNT_SERVICE_NAME` added to the existing `account/spec` import.
+   - `RestoreData` moves verbatim. Its `profile` and `network` fields overstate what is validated (see Follow-ups).
 2. **`restoreAccountsStage`:**
    - The `restoreAccountsAndFilterOwnedSlices` field (`:326-331`) is deleted.
    - The call becomes `await restoreAccountsAndFilterOwnedSlices(data, accountService, io.recordRestoreErrors)`.
+   - `importedKeySlice as never` (`:343`) loses its cast. `Array.isArray` has already narrowed the value to `any[]`, so this is pure type erasure.
 3. **`restoreTokensStage`:**
    - The fourth parameter is deleted.
    - `tokenService.restore(data.token)` is called without the cast.
@@ -82,16 +89,19 @@ Files: `apps/extension/src/composables/full-backup-restore.ts` (579 lines), `use
    - The stages keep `data: Record<string, unknown>`. A scratch probe showed it is assignable to `RestoreData`, so no stage signature widens or narrows.
 4. **`useFullBackupImport.ts`:**
    - The moved block and the now-unused `ACCOUNT_SERVICE_NAME` import (`:5`) go.
+   - `type RestoreData` and `type SliceRestoreClient` join the existing `./full-backup-restore` import (`:23-39`).
    - `ValidatedBackup.data` becomes `RestoreData`.
    - `executeRestore` loses the injected field (`:528`) and the fourth argument (`:536`).
    - `buildSliceClients` returns `Array<{ name: string; client: SliceRestoreClient }>`, with no cast. The scratch probe typechecked all five real clients against it.
-5. **`useFullBackupImport.test.ts`:** only its import statement (`:177-182`) changes. The two transform names now come from `./full-backup-restore`.
+5. **`useFullBackupImport.test.ts`:** only import lines change (`:177-182`); no assertion, fixture or title does. The two transform names now come from `./full-backup-restore`.
 6. **`bun run build`** regenerates `auto-imports.d.ts`:
    - The two globals (`:224`, `:237`, `:751`, `:763`) point at `full-backup-restore`.
    - `RestoreData` joins that module's type line (`:358`).
    - The stale `restoreNetworksStage` line (`:240`), a global for an export that was renamed long ago, is pre-existing and left alone.
 
-**Await shape.** Today the stage runs `await deps.restoreAccountsAndFilterOwnedSlices(…)`, one `await` on that async function's promise. Afterwards it runs `await restoreAccountsAndFilterOwnedSlices(…)`: the same function, the same arguments, evaluated in the same order. Relink stays synchronous. No wrapper and no new async function is added. The only runtime difference is `this` inside stage 2a (`deps` today, `undefined` afterwards), and the function never reads `this`.
+**Await shape.** Today the stage runs `await deps.restoreAccountsAndFilterOwnedSlices(…)`, one `await` on that async function's promise. Afterwards it runs `await restoreAccountsAndFilterOwnedSlices(…)`: the same function, the same arguments, evaluated in the same order. Relink stays synchronous. No wrapper and no new async function is added, and `return await rollbackAndFail` stays as it is. The only runtime difference is `this` inside stage 2a (`deps` today, `undefined` afterwards), and the function never reads `this`.
+
+An added `await` *would* be observable. A microtask queued by the token client's `disconnect` sees `appendErrors → recordRestoreErrors` already done today; with an `await` before relink, it runs first. Dropping the `await` from `return await rollbackAndFail` would also let `finally` disconnect the account client between rollback attempts. Phase 1 pins both (cases 4 and 7).
 
 **Module evaluation.** `useFullBackupImport.ts` already imports both new spec modules (`:7`, `:15`) before it imports the stage module (`:23-39`). No production module imports `full-backup-restore.ts` directly, so no evaluation order changes.
 
@@ -110,10 +120,12 @@ Files: `apps/extension/src/composables/full-backup-restore.ts` (579 lines), `use
   - The caller is the popup or the onboarding page. No dApp reaches this path.
 - **No validation added, none removed.** Casts are erased at compile time, and the transforms move byte-for-byte apart from their parameter annotations. The trust-gate order, the refusal copy and the block-listed roots sit in code this arc does not edit.
 - **The provenance filters stay intact.** Stage 2a's allow-set is exactly this restore's successful accounts. That set is still returned and threaded into relink, and it is never re-derived. A crafted backup naming a foreign account still loses those rows before any slice restore writes them.
-- **Native `TypeError` text.** Two hostile-reachable expressions throw today and stay byte-identical, under the same local names:
+- **Native `TypeError` text.** Two expressions reachable from service results throw today and stay byte-identical, under the same local names:
   - A `undefined` account result throws at `for (const a of newAccounts …)`. Bun 1.4.2 says `undefined is not an object (evaluating 'a of newAccounts')`; Node 24 says `newAccounts is not iterable`.
   - A `undefined` token result with a non-empty balance slice throws at `newTokens.length`.
   - Both reach the user through the failure path's `fillError("full_backup", "Import failed", message)` after the pre-finalize rollback. Phase 1 pins both in the test engine, against reference expressions that bind the same names.
+  - The backup itself cannot reach them. Normalization rejects a non-array slice, and an absent account slice throws inside the service.
+  - The other throwing reads (`a.restoreError`, `newTokens[i].restoreError`, `oldTokens[i]`) are covered by source identity: every expression and local is preserved, and no guard is added.
   - The production bundle is minified, so its messages carry mangler-chosen names. Those already shift with unrelated edits to the chunk. The guarantee here is source-identical expressions, the standard earlier arcs applied.
 - **Restore order across slices** is pinned by `useFullBackupImport.stages.test.ts:286-372` and stays unchanged. Phase 1 adds the error-log key order, the one place where the order of stage 2a, imported keys, the relink and the token errors shows outside the services.
 - **Logging.** The moved `console.warn` lines keep today's count-only payloads. No new log line.
@@ -139,16 +151,11 @@ Files: `apps/extension/src/composables/full-backup-restore.ts` (579 lines), `use
 - **The seam with arc 12 (row-lifecycle).**
   - Its `requireRestoreProfileId` guards the receiving end of `restoreServiceSlices`' second argument (transaction, token-balance, auth-registry). This arc keeps that argument, `scratch.createdProfileId`, and its arity.
   - Its `restoreRowProfileId` projections sit inside `account`/`token`/`contact` `restore` (`account/service.ts:674-677`, `:766-769`; `token/service.ts:858-861`; `contact/service.ts:287-290`), which receive `data.account`, the imported-key slice, `data.token` and the contact slice. This arc passes the same expressions. So arc 12's preserved `.map` `TypeError` for a non-array slice stays reachable exactly as today.
+  - It adds `accountScopeKey(chainId, address)` to `account/spec.ts`, which is the `${chainId}:${address}` key that the moved code builds at four sites. This arc does not adopt it. That would not be a verbatim move, and the frozen suites' `vi.mock` lists for `account/spec` lack the name. The duplication goes to Follow-ups.
   - No file overlap, so either order restacks cleanly.
 - **The seam with arc 13 (profile-rows).** It rebuilds `ProfileService.restore`'s row construction and the restore stash behind `ProfileRestoreClient.restore` → `{ id, restoreError? }` and `finalizeRestore(profileId, password)`. This arc touches neither `ProfileRestoreClient` nor `restoreProfileStep`. No file overlap.
 
-**Asks** (for the plan audit):
-
-1. **Accept the one-statement test edit in Phase 2.** It moves two names in `useFullBackupImport.test.ts`'s import, with no assertion, fixture or title change. The alternative is a test-only re-export, rejected above.
-2. **Leave `full-backup-restore.ts:343`, `:522`, `:523`.**
-   - `:343` casts an `Array.isArray`-narrowed `any[]` and is a no-op.
-   - `:522-523` would need `AccountStateServiceClient.restore`'s and `NodeStatus`' types threaded through `chainSyncClients`.
-   - Recon marks all three "not part of the finding". Taking `:343` along is free if the audit prefers it.
+**Asks:** both are answered under Decisions. The import-only test edit is accepted. `:343` is taken; `:522-523` stay.
 
 ## Phases
 
@@ -160,14 +167,19 @@ Add one `describe("restore wiring handoffs")` to `useFullBackupImport.stages.tes
 2. **Token handoff:** `tokenClient.restore.mock.calls` equals `[[tokenRows]]`.
 3. **The `token-balance` gate.**
    - Absent slice, with the token restore resolving `[]`: the import completes, the log has no `token-balance` key, and the balance client is never called.
-   - Empty slice: the same, except the balance client gets `([], "new-id")`.
+   - Empty slice, with the token restore resolving `undefined`: the import completes, the log has no `token-balance` key, and the balance client gets `([], "new-id")`. The baseline skips relink. A truthiness-only gate would relink and throw at `newTokens.length`.
 4. **Error-log order.** The account result has one failed row, the imported-key result has one failed row, one balance cannot be re-linked, the token result has one failed row, and the transaction passthrough returns one failed row.
    - `Object.keys(restoreErrorLog)` equals `["account", "imported-account-keys", "token-balance", "token", "transaction"]`.
-   - The `token-balance` entries are the dropped-position record. When the balance service also reports one, it is that record followed by the service's row.
-5. **Hostile results keep native text.**
+   - The `token-balance` entries are the dropped-position record followed by the balance service's own row.
+   - The token client's `disconnect` queues a microtask that snapshots the log keys. The snapshot already holds `token-balance` and `token`, because `appendErrors` and the token record run synchronously after the disconnect.
+5. **Service results keep native text.**
    - The account restore resolves `undefined`. `deleteProfile` is called, the stage ends `rolled-back`, and `fillError` gets `("full_backup", "Import failed", expected)`. `expected` is the message thrown in the test's own engine by a reference loop `for (const a of newAccounts)` over an `undefined` `newAccounts`.
    - The same for a token restore resolving `undefined` with one balance row, against a reference `newTokens.length`.
-6. **Slice pairing:** each of the five passthroughs' `restore.mock.calls` equals `[[its slice rows after filtering and migration, "new-id"]]`.
+6. **Slice pairing:** each of the five passthroughs' `restore.mock.calls` equals `[[its slice rows after filtering and migration, "new-id"]]`. Every slice's surviving rows carry a distinct marker, so a swapped `(rows, id)` pairing turns red.
+7. **The duplicate-account rollback finishes before disconnect.** `accountClient.restore` rejects with "Duplicate account", and `deleteProfile` rejects once, then resolves. Assert:
+   - `deleteProfile` is called twice;
+   - `accountClient.disconnect`'s first `invocationCallOrder` comes after both `deleteProfile` calls;
+   - `fillError` gets the duplicate copy.
 
 **Mutation check** (each mutant is applied to the unchanged source; Phase 1's suite plus the two existing suites must turn red; the log names the red test):
 
@@ -175,17 +187,19 @@ Add one `describe("restore wiring handoffs")` to `useFullBackupImport.stages.tes
 |--:|---|---|
 | M1 | stage 2a bypassed: the stage calls `accountService.restore` and returns every account | existing P1/P3 provenance tests, case 4 |
 | M2 | relink receives `new Set()` | `useFullBackupImport.test.ts` token-balance tests (`:1320-1476`), case 4 |
-| M3 | the `?.length` gate removed | case 3 |
+| M3 | the `?.length` gate weakened to `if (data["token-balance"])` | case 3 (empty slice) |
 | M4 | `appendErrors("token-balance")` moved after the token errors are recorded | case 4 |
 | M5 | `tokenService.restore(data)` | case 2 |
-| M6 | `accountService.restore(data.account, profileId)` | case 1 |
+| M6 | `accountService.restore(data.account, "new-id")` | case 1's exact `mock.calls` comparison |
 | M7 | `newAccounts` renamed | case 5 (on Bun/JSC) |
 | M8 | `newTokens` renamed in relink | case 5 (on Bun/JSC) |
-| M9 | two slice-client names swapped | case 6, the stage-order law |
+| M9 | the `(rows, id)` pairing swapped between two slice clients | case 6 |
 | M10 | `restoreImportedKeys` before stage 2a | the stage-order law, case 4 |
-| M11 | the accounts stage's `finally` disconnect dropped | `useFullBackupImport.test.ts:1500` |
+| M11 | the accounts stage's `finally` disconnect dropped | `useFullBackupImport.test.ts:512-536` (one disconnect before reconcile settles, two after) |
+| M12 | `return await rollbackAndFail` becomes `return rollbackAndFail` | case 7 |
+| M13 | an added await: `await Promise.resolve()` before relink | case 4's microtask snapshot |
 
-M7 and M8 are re-run at the Phase 2 head against the moved code. An added `await` in front of either transform cannot be observed in this sequential flow, so the diff review checks that no wrapper or extra `await` exists (see Await shape).
+M7 and M8 are re-run at the Phase 2 head against the moved code.
 
 ### Phase 2: move the transforms
 
@@ -196,9 +210,9 @@ Make the changes above, then run `bun run build` and commit the regenerated `aut
 - **Commands:** `bun run test -- src/composables/`, `bun run lint`, `bun run typecheck:all`, `bun run test:all`, `bun run test:ci-gating`, `bun run audit:vue`, and, in Phase 2, `bun run build`.
 - **Pass criteria:**
   - Everything exits 0.
-  - Phase 2's diff in test files is exactly the one import statement.
+  - In Phase 2, only import lines change in `useFullBackupImport.test.ts`; no assertion, fixture or title does. Every other test file is byte-identical.
   - The regenerated `auto-imports.d.ts` names each moved global once, pointing at `full-backup-restore`. Its only other change is `RestoreData` in that module's type line.
-  - `git grep -n "as never" apps/extension/src/composables/full-backup-restore.ts` lists only `:343`, `:522` and `:523` under their new line numbers.
+  - `git grep -n "as never" apps/extension/src/composables/full-backup-restore.ts` lists only today's `:522` and `:523`, under their new line numbers.
 - **Screenshots:** none; no `.vue` or CSS file changes.
 - **Layers:** lint, typecheck, unit and composition. The e2e lanes run in CI per the program gates; `backup-restore-sw-restart` and `passkey-backup` drive this path.
 
@@ -222,6 +236,35 @@ None. No `.vue` or CSS file changes. The restore's statuses, stages and failure 
 
 ## Drift left for the alignment arc
 
-None found. The copies agree, and nothing here is user-visible. The stale `restoreNetworksStage` global in `auto-imports.d.ts` is generated-file hygiene, not behaviour, and goes to the program's follow-ups.
+None found. The copies agree, and nothing here is user-visible.
+
+## Follow-ups (for the program close)
+
+- **The `${chainId}:${address}` scope key.** The moved stage 2a and relink build it at four sites. Once arc 12 lands, they could use `accountScopeKey` from `account/spec.ts`, which needs the two suites' `vi.mock` lists extended.
+- **`RestoreData` overstates what is validated.** Its `profile` field is block-listed and unvalidated, and its `network` field is dead: a `network` slice is refused before any write.
+- **The stale `restoreNetworksStage` global** in `auto-imports.d.ts` is generated-file hygiene, not behaviour.
 
 ## Decisions (delegated)
+
+### Plan audit: Codex (GPT-6 Astra, xhigh) REVISE, Opus REVISE
+
+Neither leg found a blocker. Both confirmed the move is verbatim and keeps one `await`; relink stays synchronous; the try/finally, rollback and disconnect order is intact; the type-only changes add or remove no validation; the trust gate is untouched; and nothing couples blockingly with arcs 12 or 13. Every finding was adopted:
+
+1. **Codex: the empty-slice witness did not prove the non-empty gate.** With token results `[]`, a truthiness gate stays green. The empty case now resolves `undefined`, and M3 is that weakened gate.
+2. **Codex: an added `await` is observable.** A microtask queued by the token client's `disconnect` lands before `appendErrors` once relink is awaited. The unobservability claim is gone, case 4 carries the observer, and M13 is the added `await`.
+3. **Opus: pin `return await rollbackAndFail`.** Without the `await`, `finally` disconnects between rollback attempts. Adopted as case 7 and M12.
+4. **Codex: M6 failed for the wrong reason.** `profileId` is unbound in the moved function, so the mutant raised a `ReferenceError`. It now passes `"new-id"`, and the red must come from case 1's `mock.calls` comparison.
+5. **Both legs: M11's witness** is `useFullBackupImport.test.ts:512-536`, not `:1500`.
+6. **Case 6:** the slice fixtures get distinguishable surviving rows.
+7. **Opus: arc 12's `accountScopeKey` duplicates the moved key.** Not adopted here, since it would not be a verbatim move and the frozen mocks lack it. Recorded under Follow-ups.
+8. **Wording.** The pinned throws are "reachable from service results". The other throwing reads are covered by source identity. The gate reads "only import lines change". The type imports are listed.
+9. **Both legs: comments.** The tags and stage labels are dropped, one boundary invariant comment is added, the explanations stay, and the log prefix stays verbatim.
+10. **Opus: `RestoreData` moves verbatim.** Its overstated fields go to Follow-ups.
+
+### Asks
+
+1. **The import-only test edit:** accepted. Both legs agreed.
+2. **The three casts.** The legs split:
+   - Codex: leave all three.
+   - Opus: take `:343`, which sits in the function Phase 2 edits and is pure type erasure on an `any[]`.
+   - **Call: take `:343`; leave `:522-523`,** which need chain-sync typing outside the finding.
