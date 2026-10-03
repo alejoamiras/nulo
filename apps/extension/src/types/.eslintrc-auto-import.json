@@ -373,7 +373,6 @@
     "readBackupFile": true,
     "readLiveness": true,
     "readonly": true,
-    "realSleep": true,
     "receivedLabel": true,
     "ref": true,
     "refreshBalances": true,

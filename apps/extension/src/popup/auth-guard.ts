@@ -9,6 +9,8 @@
  * instead: the lagging flag stays in the equation only where no better source exists.
  */
 
+import { sleep } from "@nulo/wallet-core/utils"
+
 export type AuthRequiredGate = "pass" | "auth"
 
 /**
@@ -63,7 +65,7 @@ export async function lookupActiveProfileWithBackoff<P>(
 	const delays = [0, 250, 500, 750]
 	for (const delay of delays) {
 		if (deadline - Date.now() <= delay) break
-		if (delay) await new Promise<void>((r) => setTimeout(r, delay))
+		if (delay) await sleep(delay)
 		// Re-read after the sleep: a starved timer can resume past the deadline, and a request
 		// must never be launched with no budget left to attach to it.
 		const remaining = deadline - Date.now()

@@ -14,6 +14,7 @@ import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 
 import { useSyncedRef } from "@/composables/syncedRef.js"
 import type { ActivityScope } from "@nulo/wallet-core/activity"
+import { sleep } from "@nulo/wallet-core/utils"
 import { type AwaitingTx, txBelongsToScope, txScope, useActivityStore } from "@/stores/activity.store"
 import { approvedSendsInFlight as countApprovedSendsInFlight, hasInFlightSend as inFlightHasSend } from "@/utils/in-flight-send"
 import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
@@ -645,7 +646,7 @@ async function syncScopedTransactions(
 	// which would leave a cold scope holding only those events and none of its
 	// history. Backoff keeps a busy scope from spinning.
 	for (let attempt = 0; attempt < 4; attempt++) {
-		await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** attempt))
+		await sleep(50 * 2 ** attempt)
 		if (activeScope.value === null) return
 		const retryVersion = activity.mutationVersionFor(captured)
 		if (install(await managers.transaction.getTransactions(captured.accountAddress), retryVersion)) return
