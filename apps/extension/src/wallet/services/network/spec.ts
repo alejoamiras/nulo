@@ -1,3 +1,4 @@
+import { rpcTransportVerdict } from "@nulo/wallet-core/utils"
 import { z } from "zod"
 
 export const NETWORK_SERVICE_NAME = "network"
@@ -90,7 +91,7 @@ export type NetworkInfo = {
  * endpoint (data-shape invariant violation).
  */
 export function networkInfoFrom(network: Network): NetworkInfo {
-	const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
+	const primary = findPrimaryEndpoint(network)
 	if (!primary) throw new Error(`Network ${network.id} has no primary endpoint`)
 	return { profileId: network.profileId, chainId: network.chainId, rpcUrl: primary.rpcUrl }
 }
@@ -99,12 +100,17 @@ export function networkInfoFrom(network: Network): NetworkInfo {
  * The Network's primary endpoint URL, or `undefined` if it has no primary
  * endpoint. Unlike `networkInfoFrom`, never throws — for callers that want to
  * record/pin the endpoint a tx was submitted to and should degrade gracefully
- * when the primary is missing rather than abort. The `endpoints?.` guard is
+ * when the primary is missing rather than abort. The nullish `endpoints` guard is
  * defensive against a malformed record crossing the storage boundary; a
  * well-formed Network always carries ≥1 endpoint.
  */
 export function primaryEndpointUrl(network: Network): string | undefined {
-	return network.endpoints?.find((e) => e.id === network.primaryEndpointId)?.rpcUrl
+	return network.endpoints == null ? undefined : findPrimaryEndpoint(network)?.rpcUrl
+}
+
+/** The endpoint `primaryEndpointId` names, or `undefined`; each caller owns its missing-primary policy. */
+export function findPrimaryEndpoint(network: Network): NetworkEndpoint | undefined {
+	return network.endpoints.find((e) => e.id === network.primaryEndpointId)
 }
 
 // ── Service-thrown error message prefixes ────────────────────────────
@@ -125,28 +131,15 @@ export const ERR_UNATTENDED_LIVE_CHECK = "UNATTENDED_LIVE_CHECK"
 export const ChainKindSchema: z.ZodType<ChainKind> = z.enum(["mainnet", "testnet", "devnet", "local", "custom"])
 
 /**
- * F-011 / Phase 5: RPC URL allowlist.
+ * An RPC URL the wallet may treat as its chain authority: the transport rule
+ * (`rpcTransportVerdict`), and no userinfo, which only this schema refuses.
+ * zod trims the string before the refine sees it.
  *
- * Pre-fix, RPC URL validation was only `z.string().url()`, which accepts
- * `javascript:`, `data:`, `file://`, `chrome:`, plus any HTTP URL on any
- * host. A phishing-added or backup-imported endpoint could become the
- * wallet's trusted chain authority — controlling fee quotes, note state,
- * chain identity, etc.
- *
- * Allow:
- * - `https:` for any host.
- * - `http:` ONLY for loopback hosts (`localhost`, `127.0.0.1`, `[::1]`).
- *   NOTE: WHATWG-URL preserves IPv6 brackets in `URL.hostname`, so the
- *   literal `[::1]` is correct — empirically verified by codex Round 2 B-3
- *   in both Bun 1.3.13 and Node v24.
- *
- * Reject everything else.
- *
- * Applied at:
- * - `NetworkEndpointSchema.rpcUrl` (rest-storage validation, including restore).
- * - `NetworkInfoSchema.rpcUrl` (runtime-snapshot validation).
- * - `addNetwork` / `addEndpoint` / `updateEndpoint` params (user-facing add).
- * - `aztec-runtime` adapter (defense-in-depth at the node-factory boundary).
+ * Runs on the popup client's params and results (`network/client.ts`), on the
+ * service's params, and on the backup-restore network filter
+ * (`account-state/service.ts`); not in the lax storage row codec. The
+ * node-factory adapter applies the transport rule on its own to every URL it
+ * dials.
  */
 export const RpcUrlSchema = z
 	.string()
@@ -159,20 +152,10 @@ export const RpcUrlSchema = z
 			} catch {
 				return false
 			}
-			// Reject userinfo (`user:pass@host`). WHATWG-URL parses
-			// `https://user@evil.com@safe.com` as username=`user@evil.com`,
-			// host=`safe.com` — the userinfo is the visible part of the URL
-			// and a known phishing vector. We always strip these endpoints.
+			// WHATWG parses `https://user@evil.com@safe.com` as username `user@evil.com` on host
+			// `safe.com`: the userinfo is the part a person reads, so it is a phishing vector.
 			if (parsed.username !== "" || parsed.password !== "") return false
-			const scheme = parsed.protocol.slice(0, -1) // strip trailing ":"
-			if (scheme === "https") return true
-			if (scheme === "http") {
-				const host = parsed.hostname.toLowerCase()
-				// WHATWG-URL keeps IPv6 brackets in hostname; "[::1]" is the
-				// literal form. Codex Round 2 B-3 verified empirically.
-				return host === "localhost" || host === "127.0.0.1" || host === "[::1]"
-			}
-			return false
+			return rpcTransportVerdict(parsed).allowed
 		},
 		{ message: "RPC URL must use https:// or http://localhost / http://127.0.0.1 / http://[::1] and contain no userinfo" },
 	)
