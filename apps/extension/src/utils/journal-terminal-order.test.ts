@@ -1,12 +1,12 @@
 /**
- * The terminal card's evaluation order: one token lookup, the amount formatted before the title
- * and the transfer type are read, and no token access at all on a dApp card. A Vue render tracks
- * whatever it reads before a throw, so the order is behaviour, not style.
+ * The journal cards' evaluation order. The terminal card makes one token lookup and formats the
+ * amount before it reads the title and the transfer type; neither card touches the token lookup
+ * for a dApp op. A Vue render tracks whatever it reads before a throw, so the order is behaviour.
  */
 
 import { describe, expect, test } from "vitest"
 import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
-import { buildJournalTerminalCardProps } from "./journal-state"
+import { buildJournalTerminalCardProps, journalCardTitle } from "./journal-state"
 
 const CARD_KEYS = new Set(["tokenId", "amountRaw", "transferType", "title", "subtitle"])
 
@@ -90,5 +90,19 @@ describe("buildJournalTerminalCardProps — evaluation order", () => {
 		expect(run()).toMatchObject({ title: "Swap", originLabel: "alpha.example", amount: null })
 		expect(lookups).toEqual([])
 		expect(log).toEqual(["op.title", "op.title", "op.subtitle"])
+	})
+})
+
+describe("journalCardTitle — the awaiting card's title", () => {
+	test("a dApp op never calls the token lookup; a transfer calls it once", () => {
+		const lookups: number[] = []
+		const tokenById = (id: number) => {
+			lookups.push(id)
+			return id === 42 ? { symbol: "USDC", decimals: 6 } : undefined
+		}
+		expect(journalCardTitle(terminal({ kind: "dapp_execute", origin: "dapp", tokenId: 42, title: "swap" }), tokenById)).toBe("Swap")
+		expect(lookups).toEqual([])
+		expect(journalCardTitle(terminal({ tokenId: 42 }), tokenById)).toBe("USDC")
+		expect(lookups).toEqual([42])
 	})
 })
