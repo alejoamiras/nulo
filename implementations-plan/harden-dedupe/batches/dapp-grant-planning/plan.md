@@ -9,7 +9,7 @@ eli5_mode: none (the program Artifact replaces per-batch ELI5 pages; see the pro
 branch: hd/06-dapp-grant-planning, stacked on harden-dedupe
 ---
 
-# dapp-grant-planning: one grant-matching rule, one sender rule, consent planning out of the dispatcher
+# dapp-grant-planning: one typed grant reader, one sender rule, consent planning out of the dispatcher
 
 Findings Q-19, Q-01 (c) and the non-widening part of Q-11, from `audit/quality/2026-09-30-dedup-high/`, in that order. This is the dApp consent path: every method name, argument, manifest, batch leg and `opts.from` below is attacker-controlled. For every request shape, the set of requests refused, the order in which checks refuse, and the error class and message a dApp's request ends with stay byte-identical. The batch refusal set stays exactly `{sendTx, registerToken}`.
 
@@ -17,30 +17,30 @@ Findings Q-19, Q-01 (c) and the non-widening part of Q-11, from `audit/quality/2
 
 - **For whom:** the next person who changes what a grant covers or how a sender is named. Today "does this grant reach that call" is written twice in `wallet-bridge` (consent coverage and enforcement), the NO_FROM rule three times across two packages, and 550 lines of pure consent planning share `dispatcher.ts` (1,802 lines) with routing and handlers.
 - **Excellent:**
-  - Coverage and enforcement call the same wildcard and address-list predicates, so a new wildcard form cannot reach one and not the other.
+  - Coverage and enforcement read grants through one typed `grantsOfType`. Coverage keeps its own match expressions, which mirror enforcement's clause for clause, because a malformed stored element must keep throwing the same text (Decisions, code review round 1).
   - The sender a request names is computed by one function, used where the journal files the request and where the dispatcher sends it.
   - The batch refusal set is a registry fact, pinned behaviourally over every registry method.
   - `dispatcher.ts` loses the pure planning block to `capability-negotiation.ts`, moved byte-for-byte.
   - A characterization suite, green on today's code and frozen before the refactor, pins every refusal, its order and its exact error for the coverage, enforcement, sender and batch paths, with wire-shaped values.
-- **Good enough:** the popup handlers keep their own scaffolds, `contractsRequestCovered` keeps its own address-list expression (see Decisions), and the enforcement-only empty-name guard stays where it is.
+- **Good enough:** the popup handlers keep their own scaffolds, the three coverage predicates keep their own expressions (see Decisions), and the enforcement-only empty-name guard stays where it is.
 
 ## Architecture & Implementation
 
 Lines read 2026-10-03 on `harden-dedupe` at `61260efc`. "Guard set" means every condition that can refuse or decide, in evaluation order.
 
-### Q-19: coverage reuses enforcement's matchers
+### Q-19: one typed grant reader; coverage keeps its expressions
 
-Enforcement's helpers in `packages/wallet-bridge/src/method-scope-checkers.ts` gain `export`; their bodies do not change. Coverage in `dispatcher.ts` calls them. No new module: `method-scope-checkers.ts` is already the leaf `dispatcher.ts` imports, and the package entry re-exports only five named members of it (`src/index.ts:25-31`).
+The typed `grantsOfType` in `packages/wallet-bridge/src/method-scope-checkers.ts` gains `export` and replaces the dispatcher's copy. The plan also had coverage call enforcement's matchers; code review round 1 reverted that (see Decisions), so `matchesPattern` and `inAddressList` stay private and the three coverage predicates keep their expressions, each with one line saying why. No new module: `method-scope-checkers.ts` is already the leaf `dispatcher.ts` imports, and the package entry re-exports only five named members of it (`src/index.ts:25-31`).
 
 | site | today | guard set (unchanged after) | after |
 |---|---|---|---|
-| `matchesPattern` `checkers:38-43` | private | contract: pattern `"*"`, else `sameFieldAddress(pattern, call)`; then function: pattern `"*"`, else `===` | exported, body untouched |
+| `matchesPattern` `checkers:38-43` | private | contract: pattern `"*"`, else `sameFieldAddress(pattern, call)`; then function: pattern `"*"`, else `===` | untouched, stays private (code review round 1) |
 | `matchesScope` `checkers:45-55` | private | `fn === ""` refuses first, then scope `"*"`, then any pattern | untouched, stays private: the empty-name guard stays enforcement-only |
-| `inAddressList` `checkers:57-60` | private | list `"*"`, else any `sameFieldAddress(String(item), address)` | exported, body untouched |
+| `inAddressList` `checkers:57-60` | private | list `"*"`, else any `sameFieldAddress(String(item), address)` | untouched, stays private (code review round 1) |
 | `grantsOfType` `checkers:62-64` and `dispatcher:692-694` | two copies, one untyped | `filter(type ===)` then `map(capability)` | one, the typed `<K extends Capability["type"]>` form, exported from checkers; the 12 checker calls (`:76, 101, 118, 136, 153, 182, 199, 225, 226, 273, 328, 356`) drop their explicit type argument (type-only) |
-| `scopeCovers` `dispatcher:225-235` | inline copy of the pattern rule | existing `"*"` covers; requested `"*"` is covered only by `"*"`; each requested pattern needs ONE existing pattern matching contract then function | `requested.every((rp) => existing.some((ep) => matchesPattern(String(rp.contract), rp.function, ep)))`, after the same two `"*"` returns |
-| `contractsRequestCovered` `dispatcher:210-219` | inline address-list copy | per flag: unflagged request covered; requested `"*"` needs a flagged `"*"` grant; else every address needs a grant with the flag AND a listing | **unchanged.** A held grant whose `contracts` is a truthy non-array throws `TypeError: e.contracts.some is not a function` today; through `inAddressList` the text would read `list.some`. Such a grant is storable (see Security), so the expression stays and Phase 1 pins its error |
-| `privateEventsCovered` `dispatcher:269-278` | inline address-list copy | no request covered; `"*"` needs a held `"*"`; else every address needs a held list that is `"*"` or an ARRAY containing it | `list === "*" \|\| (Array.isArray(list) && inAddressList(String(addr), list))`, with one line saying an address-book-only grant legitimately has no list. Inside the `Array.isArray` branch nothing can throw, so every outcome is unchanged |
+| `scopeCovers` `dispatcher:225-235` | inline copy of the pattern rule | existing `"*"` covers; requested `"*"` is covered only by `"*"`; each requested pattern needs ONE existing pattern matching contract then function | **unchanged** (code review round 1). A held `scope: [null]` throws `null is not an object (evaluating 'ep.contract')` on Bun; through `matchesPattern` it read `pattern.contract`. One line says why the expression stays |
+| `contractsRequestCovered` `dispatcher:210-219` | inline address-list copy | per flag: unflagged request covered; requested `"*"` needs a flagged `"*"` grant; else every address needs a grant with the flag AND a listing | **unchanged.** A held grant whose `contracts` is a truthy non-array throws `TypeError: e.contracts.some is not a function` today; through `inAddressList` the text would read `list.some`. Such a grant is storable (see Security), so the expression stays, with one line saying why, and Phase 1 pins its error |
+| `privateEventsCovered` `dispatcher:269-278` | inline address-list copy | no request covered; `"*"` needs a held `"*"`; else every address needs a held list that is `"*"` or an ARRAY containing it | **unchanged** (code review round 1), plus one line saying an address-book-only grant legitimately has no list and one on why the expression stays. A held element `String()` cannot convert throws `can't convert x to string` on Firefox; through `inAddressList` it read `item` |
 
 Argument order into `sameFieldAddress` is unchanged at every site (grant side first), and the function is symmetric anyway (`field-address.ts:26-29`). The `scopeCovers` comment that coverage mirrors enforcement's single-capability shape stays.
 
@@ -85,11 +85,11 @@ Every input maps identically: `args[1]` nullish gives `{}` on one side and `unde
 ## Security & Adversarial Considerations
 
 - **Who calls.** Any page holding an established wallet-sdk session, through the stock SDK or a raw protocol client that skips the SDK's Zod (so the batch pre-scan is the only server-side batch gate). It controls method names, every argument, the capability manifest, batch legs and nesting, and `opts.from`. Session rows are MAC-protected (`apps/extension/src/wallet/services/dapp-session/service.ts:88-97`), which proves integrity, not validity: the row schema checks each grant only as a non-null object (`spec.ts:69`), `applyCapabilityDecision` appends `grantRecords` without projection (`service.ts:364-368`), and `setCapabilityGrants` assigns directly (`:302-307`). Grants stored before projection landed (`da79ac34`, 2026-09-28) are never re-projected on read. So a malformed held grant is reachable, and this arc preserves today's behaviour on it rather than normalizing it.
-- **What coverage looseness could and could not do.** Coverage never grants authority: enforcement runs independently on every call, and a covered request writes nothing. A looser coverage would skip an honest prompt or tell the dApp it holds what enforcement then refuses. Coverage now calls the exact enforcement predicate, so it cannot be looser; the empty-name guard is unreachable in coverage because projection refuses `function: ""` first (`dispatcher.ts:335`).
+- **What coverage looseness could and could not do.** Coverage never grants authority: enforcement runs independently on every call, and a covered request writes nothing. A looser coverage would skip an honest prompt or tell the dApp it holds what enforcement then refuses. Coverage's expressions match enforcement's predicates clause for clause and the Phase 1 rows pin both sides on the same inputs, so it cannot be looser; the empty-name guard is unreachable in coverage because projection refuses `function: ""` first (`dispatcher.ts:335`).
 - **The refusal ladder this arc must not reorder** (`dispatch`, `dispatcher.ts:836-916`): session read; `assertKnownMethod` (`UnsupportedMethodError`); `argSchema` (`Invalid arguments for wallet method: X`); `assertAuthRelevantArgShape`; `enforceCapability` (exempt skip, else `CapabilityNotGrantedError`, missing session included); scope checkers and account-scope arrays (`ScopeViolationError`, or plain `Error` for shape faults); then the handler: network (`ChainNotSupportedError`), account resolution (`ScopeViolationError` "requested account not authorized", or the two plain errors), execution, unwrap. No guard moves.
 - **The batch path, fully.** `batch` passes `assertKnownMethod`, then its own `argsBatch` (a non-array, a non-record leg, a non-string name or non-array args refuse with `Invalid arguments for wallet method: batch` before the pre-scan), has no shape guard, is capability-exempt, and has no scope. `handleBatch` then scans every leg in order and refuses the FIRST refused name before any leg runs, even a refused leg listed last. Survivors dispatch sequentially through the full ladder with no hooks and a fresh session read per leg; the first failure aborts and later legs never run. The pre-scan sees only top-level legs: in `[getChainInfo, batch([sendTx])]` the first leg runs, then the inner batch refuses. Legs named `__proto__`, `constructor`, `hasOwnProperty`, `toString` or `SendTx` miss the refusal set and fail at their own `assertKnownMethod`. `grantPublicAuthwit` and a popup `createAuthWit` run inside a batch today and still do.
 - **What each consolidation could widen, and why it does not:**
-  - *Address lists:* `contractsRequestCovered` keeps today's expression; dropping `privateEventsCovered`'s `Array.isArray` guard would turn "re-prompt" into a thrown `TypeError`, so it is kept and pinned.
+  - *Address lists and patterns:* all three coverage predicates keep today's expressions, so a malformed stored element throws the same text; dropping `privateEventsCovered`'s `Array.isArray` guard would turn "re-prompt" into a thrown `TypeError`, so it is kept and pinned.
   - *Sender rule:* a unified rule that diverged from either copy would file a request under one account and send it from another, or honour a sender one side refuses. Both copies are the same predicate; the tables pin both sides on the same rows, including a coerced `Fr` that resolves and an object `String()` cannot convert.
   - *Batch set:* a derived set could widen (a routing-derived flag) or narrow (a typo in the field). The registry-wide table pins exactly two names.
   - *Move:* a re-export that leaks planning internals, or an import cycle that changes module evaluation order. Neither: the entry file is untouched, and the new module imports only leaves.
@@ -196,7 +196,21 @@ Its framing is adopted in Security: coverage looseness cannot widen authority, b
 1. `runPopupOperation`: dropped to the follow-ups. Handler order, hook arguments and execute arity, and `createAuthWit`'s fenced silent branch differ enough that a byte-preserving wrapper would be bigger than what it removes.
 2. The coverage empty-name guard: not added. Unreachable; a red-then-green test would need a test-only export.
 3. `refusedInBatch` with the derived `Set`: adopted.
-4. The matchers exported from `method-scope-checkers.ts`: adopted, no new leaf.
+4. The matchers exported from `method-scope-checkers.ts`: adopted, no new leaf. Superseded by code review round 1: no coverage site calls them, so they stay private.
+
+### Code review: Codex (GPT-6 Astra, xhigh), round 1: NOT CONVERGED
+
+1. **Should-fix, adopted: a malformed pattern changed the coverage error.** A stored transaction grant with `scope: [null]` passes the row schema; through `matchesPattern` its `TypeError` read `pattern.contract` instead of `ep.contract` on Bun. `scopeCovers` is back to its original expression. The same audit over every coverage site switched to a shared matcher, for a malformed element inside a stored list (`null`, a number, `{}`, an object `String()` cannot convert, an array, a string), probed on Bun, Chrome and Firefox:
+   - `scopeCovers`: differs on `null` (Bun names the variable; V8 does not). **Reverted to inline.**
+   - `privateEventsCovered`: `null`, numbers, `{}`, arrays and strings stringify on both forms; an element whose `toString` and `valueOf` are not callable throws, and Firefox names the variable (`can't convert x to string` against `item`). Bun and V8 word both alike. **Reverted to inline**, since the extension runs on Firefox.
+   - `contractsRequestCovered`: already inline (plan audit, Decision 1).
+   - `grantsOfType`: the typed and untyped bodies are the same expression; no element is touched. **Kept shared.**
+
+   With no consumer left, `matchesPattern` and `inAddressList` lose their `export`. Each inline site carries one sentence on why. The rows compute the expected text from a reference that binds the production variable name, so they hold on every engine; the null-pattern row goes red on Bun under the swap back to `matchesPattern`, the private-events row only on SpiderMonkey.
+2. **Should-fix, adopted:** the successful sender rows assert the answer: `{ ok: "0xsent" }` for sendTx, `{ ok: "0xran" }` for simulateTx and profileTx.
+3. **Nit, adopted:** the batch order control runs `getAddressBook` then `getChainInfo` and asserts that order in the answer and in the operations run.
+4. **Nit, adopted:** `collectNewGrants`' doc states the three-step fallback: the last differing answer entry of the type, else the last entry of the type, and only when there is none, the requested delta.
+5. **Nit, adopted:** dropped the narrating `grantsOfType` TSDoc and "in Phase 2" in `method-descriptors.ts`.
 
 ### Split, resolved
 

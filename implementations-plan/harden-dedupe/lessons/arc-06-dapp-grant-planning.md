@@ -35,3 +35,17 @@
 - `lint`, `typecheck:all`, `test:ci-gating` and `build` all exit 0.
 - `test:all` and `audit:vue` exit 0 after the store-note commit. Before it, each had the one `store-listing` failure above.
 - **Network e2e, local, at the code head:** the nine files (`batch-mixed`, `batch-partial-failure`, `meta-batch`, `cap-request-basic`, `cap-request-repeat-noPopup`, `cap-widening`, `scope-refusal`, `authwit-variants`, `tx-sendTx-noFrom`) ran through `bun run e2e:agent` with `NODE_OPTIONS=--dns-result-order=ipv4first`: 9 files and 12 tests green on Chrome, and the same on Firefox (`NULO_E2E_BROWSER=firefox`). CI's full lanes are still to run at the PR.
+
+## Codex code review round 1: NOT CONVERGED
+
+- **Restacked first.** Arc 7 landed ahead, so the arc was replayed onto `harden-dedupe` at `7450928c`. The one conflict was in `queued-journal.test.ts`, where arc 7's chain-id block and its `ActiveSession` import sit beside the sender table.
+- **Two should-fix findings, three nits, all adopted** (see the batch plan's Decisions). The material one: a stored `scope: [null]` changed the coverage `TypeError` from `ep.contract` to `pattern.contract` on Bun once `scopeCovers` called `matchesPattern`.
+- **Audit of every coverage site switched to a shared matcher.** A scratch Puppeteer probe (not committed) ran the original and shared expressions in-page on Firefox and Chrome against `null`, `5`, `{}`, `{ toString: 1 }`, `{ toString: 1, valueOf: 1 }`, `[]` and `"s"`:
+  - The pattern rule differs on `null` on Bun and on Firefox (`ep is null` against `pattern is null`); V8 words both alike.
+  - The address-list rule differs only on elements `String()` cannot convert, and only on Firefox (`can't convert x to string` against `item`). Bun and V8 never name the variable there.
+  - Both `scopeCovers` and `privateEventsCovered` are back to their original expressions, and `matchesPattern` and `inAddressList` are private again. What Q-19 still dedupes is the one typed `grantsOfType`.
+  - Lesson: a dedup that routes a throwing expression through a helper changes the error text on any engine that names the variable. Probe all three engines before calling a shared predicate equivalent; Bun alone hides the SpiderMonkey case.
+- **Engine-portable pins.** Each new row computes its expected error from a reference that binds the production variable name (`ep.contract` on a null `ep`, `String(x)` and `String(item)`), so the exact class and message hold on every engine.
+- **Order.** The test commit is red at its own commit on the null-pattern row, and green from the code commit on. After that commit the coverage block matches the pre-arc dispatcher exactly, comments aside (the move-check script, run against the Phase 1 commit, leaves only comment lines and the relocated `grantsOfType`).
+- **Mutation:** swapping `scopeCovers` back to `matchesPattern` turns the null-pattern row red on Bun (`'ep.contract'` expected, `'pattern.contract'` received). The private-events row can go red only on SpiderMonkey; on Bun the unit suite cannot tell the two forms apart.
+- **Gates at the code head:** `lint`, `typecheck:all`, `test:all`, `test:ci-gating` and `audit:vue` all exit 0. `wallet-bridge` has 596 tests, the extension 8,900. Network e2e was not rerun: the code change restores expressions the e2e already ran against before this arc.
