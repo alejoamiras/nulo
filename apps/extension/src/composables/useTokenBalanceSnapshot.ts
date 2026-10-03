@@ -98,7 +98,7 @@ export function useTokenBalanceSnapshot<T = TokenBalanceInfo>({
 	client.onConnected.add(onReconnected)
 
 	function dispose() {
-		void fence.begin()
+		fence.invalidate()
 		clearTimeout(retryTimer)
 		client.onConnected.remove(onReconnected)
 	}
