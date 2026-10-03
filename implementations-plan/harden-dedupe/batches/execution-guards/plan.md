@@ -45,7 +45,7 @@ Line numbers are read on `harden-dedupe` at `0faf26af`. Arc 7 edits none of the 
 
 | site | today (guard order) | after |
 |---|---|---|
-| `authwit-discoverer.ts:109-118` | collect effects; none → return `{[],[]}` with no fetch; `getNodeInfo()`; assert; literal | same order: `liveChainInfo(network, await node.getNodeInfo())` replaces assert and literal |
+| `authwit-discoverer.ts:109-118` | collect effects; none → return `{[],[]}` with no fetch; `getNodeInfo()`; assert; literal | same order: `const nodeInfo = await node.getNodeInfo()` stays its own statement, then `liveChainInfo(network, nodeInfo)` replaces assert and literal, so `network` is still read after the await (every site below keeps the fetch as its own statement too) |
 | `discovery-probe.ts:65-79` | `used` gate; collect effects; none → `[]` with no fetch; `getNodeInfo()`; assert; literal | same, via `liveChainInfo` |
 | `dapp-send-executor.ts:1000-1005` | collect effects; none → `[]` with no fetch; `getNodeInfo()`; assert; literal | same, via `liveChainInfo` |
 | `view-executor.ts:212-220` | `getNetwork`; `getNode`; `getNodeInfo()`; assert; return literal to the dApp | `return liveChainInfo(network, nodeInfo)` |
@@ -53,11 +53,19 @@ Line numbers are read on `harden-dedupe` at `0faf26af`. Arc 7 edits none of the 
 | `service.ts:1021-1029` | `getNode`; `getNodeInfo()`; assert; literal; then the intent branches (the raw-hash branch also passed the assert) | same, via `liveChainInfo` |
 | `helpers/batched-view-simulation.ts:357-366` | anchor read (missing → demote, no fetch); `getNodeInfo()` (propagates); assert; literal; `completeFeeOptions` in its own try | same, via `liveChainInfo` |
 | `helpers/batched-view-simulation.ts:202-206` | slow tuples with no fast-arm `chainInfo`: `getNodeInfo()`; assert; `chainInfoFrom` | same, via `liveChainInfo`. Not a literal, the same pair |
-| `authwit-discoverer.ts:172-175, 221-224, 235-238` | literal from a `nodeInfo` already asserted by the build | `chainInfoFrom(nodeInfo)`, with no second assert. The only caller is `TxRequestBuilder.resolveAuthwitMessageHash` (`tx-request-builder.ts:253-267`), fed by `resolveBuildContext`'s asserted `nodeInfo` (`:228-229`). Adding a re-assert would change these public methods' signatures |
+| `authwit-discoverer.ts:172-175, 221-224, 235-238` | literal from a `nodeInfo` already asserted by the build | `chainInfoFrom(nodeInfo)`, with no second assert. These methods never had a per-method assert, so the swap removes no protection. The only production caller is `TxRequestBuilder.resolveAuthwitMessageHash` (`tx-request-builder.ts:253-267`), fed by `resolveBuildContext`'s asserted `nodeInfo` (`:228-229`); `authwit-discoverer.real.test.ts:136,168` calls them directly. The class TSDoc states the precondition (a signing caller passes a `nodeInfo` already checked against the selected network), and `computeCallMessageHash`'s TSDoc loses its stale `service.ts:2060-2099` provenance |
 
 **Unchanged, on purpose:** `tx-request-builder.ts:228-229` and `:399-400` (the live pair also feeds `txsLimits`, `TxContext` and `chainIdentity`; `:303` already calls `chainInfoFrom`) and `service.ts:297-301` (it returns the raw pair, not a `ChainInfo`).
 
-**Comments this arc rewrites, because the change makes them wrong:** `authwit-discoverer.ts:115-116` (the false "noop for local" claim, owned here per arc 7's plan; it becomes one sentence: refuse to derive a hash from a drifted node); the method TSDoc at `:76-80`, which says the loop mirrors a `service.ts` range that no longer exists; and the probe header (`discovery-probe.ts:9-10`) and its catch comment (`:98`), which describe a byte-mirror that becomes a shared call. Finding tags (`F-012`, `A-01 V-01`) are dropped only from the comments this arc rewrites.
+**Comments this arc rewrites, because the change makes them wrong or the audit flagged them:**
+
+- `authwit-discoverer.ts:115-116`, the false "noop for local" claim, owned here per arc 7's plan. It becomes one sentence: refuse to derive a hash from a drifted node.
+- The method TSDoc at `:76-80`, which says the loop mirrors a `service.ts` range that no longer exists.
+- The probe header (`discovery-probe.ts:3-10`). It loses the "measurement arc … single-sim-estimates B1" provenance, and its byte-mirror claim becomes the shared call.
+- The probe's catch comment (`:98`).
+- The crypto-seam comment (`:37-38`). It says hashing is "e2e-only", but `authwit-discoverer.real.test.ts` runs the real hashes in a node-environment unit test.
+- `view-executor.ts:353-368`, shrunk to its invariants: authorization reads names, execution dispatches selectors; only `undefined` means absent; a malformed selector gets a controlled error.
+- Finding tags (`F-012`, `A-01 V-01`) are dropped only from the comments this arc rewrites.
 
 ### B. The authwit effect decode loop (Q-02 a)
 
@@ -104,7 +112,11 @@ Line numbers are read on `harden-dedupe` at `0faf26af`. Arc 7 edits none of the 
 | S6 `fast-path.ts:124-156` (simulate prefix) | per call: lookup inside `try`, any throw → `null` (standard path) | `:135-140`, outside the `try`: "Method not found", then "call name" with the name **required**, `on ${call.to}` | helper with `call`, `NAMED_CALL_BINDING`, still outside the `try` | not public-static → `null`; bound call from the ABI |
 
 - **Not a seventh site:** `helpers/batched-view-simulation.ts:627-629` looks up by selector with no name check, but its callers are wallet-internal reads (`gas-balance-reader.ts:173,185`, `token-balance/balance-projector.ts:238`, `token/service.ts:764`) that build calls from wallet-chosen ABIs, so no dApp-claimed name exists there to bind. It stays untouched.
-- **Comment:** the TSDoc on `validateEncodedCallFn` (`:581-586`) stays; the inline why-comments at S4 (`:1033-1037`) and S5 (`:353-368`) stay above the call.
+- **Where an absent name can arrive.** `FunctionCall.schema` requires `name: z.string()` (`@aztec-labs/stdlib` 6.0.0-rc.1, `dest/abi/function_call.js:42`).
+  - S1 parses with it at `:338`, so an absent name is refused by the schema before the lookup. The helper's "allowed" branch is unreachable there, and is kept only to match today's code.
+  - S6's wire input is parsed by `rehydrateOptimizablePrefix` (`fast-path.ts:109-114`): a missing name returns `null`, the standard-path fallback. Its required-name policy is reachable only through a direct `bindOptimizableCalls` call.
+  - S2 and S3 read the bridge's `EncodedCallPayload`, whose `name` is optional, so absent-name acceptance is live there. For S4 and S5 the rows call the method directly with an absent name.
+- **Comments:** the TSDoc on `validateEncodedCallFn` (`:581-586`) and the S4 why-comment (`:1033-1037`) stay. The S5 comment shrinks as listed in § A.
 
 ### D. Class-id integrity (Q-02 c)
 
@@ -112,7 +124,7 @@ Line numbers are read on `harden-dedupe` at `0faf26af`. Arc 7 edits none of the 
 
 - Its body is today's two lines verbatim: `const contractClass = await getContractClassFromArtifact(artifact)`, then `if (contractClass.id.toString() !== expected.toString()) throw new Error("Contract artifact doesn't match instance's current class id")`.
 - A recompute failure propagates as thrown; it is not converted.
-- The `README.md` row for the file gains "plus the throwing check registration uses".
+- The `README.md` row for the file gains "plus the throwing check registration uses". The module header, which today describes only the return-`undefined` contract, names both exports and when each applies.
 
 | site | guards before | today | guards after (unchanged) |
 |---|---|---|---|
@@ -133,8 +145,9 @@ Sharing more than the upstream call would need a flag per difference.
 
 - `ArtifactRegistry.verifiedClassIds` (`packages/aztec-runtime/src/pxe/artifact-registry.ts:43, 141-153`) is keyed by class id alone. Arc 1 recorded this as an out-of-scope lead.
 - This arc edits neither the registry, nor `verifyArtifactClassId`, nor `DefaultArtifactClassIdVerifier`.
-- `assertArtifactClassId` is stateless and recomputes on every call. It must never be routed through the registry or a cache. Both service sites recompute even an artifact the registry returned (`packages/aztec-runtime/src/pxe/service.ts:367-370`), and that recompute is what keeps a dApp-supplied artifact out of the cache lead's reach.
-- The lead stays a program follow-up.
+- `assertArtifactClassId` is stateless and recomputes on every call. It must never be routed through the registry or a cache.
+- Both service sites recompute even an artifact the registry returned (`packages/aztec-runtime/src/pxe/service.ts:367-370`).
+- The lead stays a program follow-up, recorded under Decisions with both legs' arguments.
 
 ### What stays, and layering
 
@@ -153,9 +166,11 @@ Sharing more than the upstream call would need a flag per difference.
 - **What each check stops.**
   - *Chain binding* stops an endpoint from making the user sign or prove against a chain they never selected. Without it, a signed authwit could be replayed across chains, and a dApp could be shown a fake chain id.
   - *Selector binding* stops a dApp scoped for a benign name from running or signing a different selector. Scope checks authorize by name, while execution dispatches by selector (`view-executor.ts:353-360`).
-  - *Class-id integrity* stops registration of code whose hash is not the class the instance claims. Otherwise every later decode and simulation of that contract would describe code that is not what runs.
+  - *Class-id integrity* refuses registration of an artifact whose hash is not the class the instance claims. Upstream's contract store already files each artifact under its own recomputed class id, first write wins (`@aztec-labs/pxe` 6.0.0-rc.1, `contract_store.js:85-95`), so a mismatched artifact would not be bound to the instance anyway. What the check buys is a clean refusal at the boundary and defence in depth if that keying ever changes.
 - **Consolidation hazards, and the guard against each.**
-  - *A looser policy reaching the fast path.* `NAMED_CALL_BINDING` is the only policy that refuses an absent name; Phase 1 pins S6's `undefined` refusal and S1–S5's `undefined` acceptance, so a swapped policy fails either way.
+  - *A looser policy reaching the fast path.* `NAMED_CALL_BINDING` is the only policy that refuses an absent name.
+    - Phase 1 pins S6's `undefined` refusal through a direct `bindOptimizableCalls` call, and its wire fallback (`null`) separately.
+    - It pins acceptance of an absent name at S2–S5, and S1's schema refusal of one, so a swapped policy fails either way.
   - *A truthiness test.* The helper compares with `!== undefined`, so `""` stays a mismatch; pinned at every site.
   - *A projection without the assert.* `liveChainInfo` is the only new way to a `ChainInfo` and has no skip parameter; drift rows at every clump site fail if the assert is dropped.
   - *A lost lazy fetch.* The `!effects.length` early return stays at each discovery site, above the fetch; the no-effects rows assert that `getNodeInfo` is never called.
@@ -169,7 +184,7 @@ Sharing more than the upstream call would need a flag per difference.
 **Facts** (read 2026-10-03 on `harden-dedupe` at `0faf26af`):
 
 1. The ten `ChainInfo` literals sit at the lines in § A; `git grep "new Fr(.*l1ChainId)"` finds no others outside `chain-identity.ts:74` and `wallet-crypto`.
-2. The six selector guards and their texts are as in § C. Only `fast-path.ts:138` requires a name. Only `tx-request-builder.ts:346` calls `.toString()` on `to` in its template. `AztecAddress` defines `toString()` and no `Symbol.toPrimitive` (`@aztec-labs/stdlib` 6.0.0-rc.1, `dest/aztec-address/index.js:146`).
+2. The six selector guards and their texts are as in § C. Only `fast-path.ts:138` requires a name. Only `tx-request-builder.ts:346` calls `.toString()` on `to` in its template. `AztecAddress` defines `toString()` and no `Symbol.toPrimitive` (`@aztec-labs/stdlib` 6.0.0-rc.1, `dest/aztec-address/index.js:146`). `FunctionCall.schema` requires `name: z.string()` (`dest/abi/function_call.js:42`).
 3. Both class-id sites use `getContractClassFromArtifact` and a `toString()` comparison, with no `try`. `verifyArtifactClassId` uses `.equals` inside a `try` (`artifact-class-id.ts:57-70`).
 4. The extension's vitest config inlines `@nulo/*` (`apps/extension/vitest.config.ts:84`), so a module mock of `@aztec-labs/stdlib/contract` reaches `aztec-runtime` source.
 5. Two test files mock `assertLiveChainIdentity` at the module boundary and assert calls on the mock: `dapp-send-executor.test.ts:52-56, 542-556` and `view-executor.test.ts:20-24, 228-237`. Their fixtures are not self-consistent (stored `chainId: 7`, no `l1ChainId`; live pair `(1, 2)`).
@@ -189,53 +204,82 @@ Sharing more than the upstream call would need a flag per difference.
 
 ### Phase 1: pin each site's guards (test only)
 
-Every row asserts the exact message string (`toThrowError("…")` with the full text, never a regex), the error's class, and that the effect named in § Security never ran, beside a positive control (lessons: a refusal test needs a success-path twin). Values are wire-shaped: addresses `0x` plus 64 hex characters, selectors derived from a real ABI entry, the createAuthWit intent as JSON-shaped plain values. Expected values are written out or computed independently in the test, never read from a production helper.
+**How every refusal row asserts.** Vitest 4's `toThrowError("text")` matches a substring (Chai's `compatibleMessage`), so a refusal row:
+
+- captures the rejection;
+- asserts `error.message` with `toBe(expected)`;
+- asserts the constructor separately (`error.constructor` `toBe` `Error`, or the typed class);
+- asserts that the effect named in § Security never ran;
+- sits beside a positive control (lessons: a refusal test needs a success-path twin).
+
+A propagated error is asserted with `toBe(originalError)`.
+
+**Values are wire-shaped:** addresses are `0x` plus 64 hex characters, selectors are derived from a real ABI entry, and the createAuthWit intent is JSON-shaped plain values. A row that calls an internal method with a value the wire schema cannot produce says so in its title. Expected values are written out or computed independently in the test, never read from a production helper.
 
 - **Chain binding:**
-  - **Discoverer:** in `authwit-discoverer.real.test.ts` (node environment, real crypto), a non-local network row whose composite matches still yields the KAT, and a drifted `rollupVersion` rejects with the full message after the discovery simulation. Same file: `computeCallMessageHash` and `computeEncodedCallMessageHash` equal `computeAuthWitMessageHash` over `{ chainId: Fr(l1ChainId), version: Fr(rollupVersion) }` with `l1ChainId ≠ rollupVersion`, so a swapped projection fails.
-  - **Probe:** `discovery-probe.test.ts:119`'s drift row is tightened to the full message.
-  - **Send executor and view executor:** in `dapp-send-executor.test.ts` and `view-executor.test.ts`, the module mock is deleted and each harness gets a self-consistent pair (the stored row gains `l1ChainId: 1`, and the node reports `rollupVersion: 6`, so the composite is `7`). The V-01 tests become:
-    - a drifted pair rejects with the full message and no authwit is created (no effects means no `getNodeInfo` call);
-    - `executeAztecGetChainInfo` returns an object whose keys are exactly `["chainId", "version"]`, both `Fr`, serialising to the 64-hex `0x…01` and `0x…06`;
-    - a drifted pair rejects.
-  - **Fast path:** `fast-path.test.ts` adds a drift row: rejects with the full message, `resolver.resolveInstance` and `simulateViaNode` not called. The positive row pins the `chainInfo` handed to `simulateViaNode`.
-  - **Batched view:** `batched-view-mixed-arm.pins.test.ts:144` is tightened to the full message, and a slow-only drift row is added.
-  - **`aztec_createAuthWit`:** a new `service.authwit-binding.test.ts` (node environment, real hashing, prototype call with a minimal `this` as in `register-token.test.ts`). A drifted pair rejects for both intent kinds and for a raw hash, before `getContractInstance` runs; a matching pair yields `computeAuthWitMessageHash` over the expected `Fr` pair.
-- **Selector binding, S1 to S6**, one table per file:
+  - **Discoverer:** in `authwit-discoverer.real.test.ts` (node environment, real crypto):
+    - a non-local network row whose composite matches still yields the KAT;
+    - a drifted `rollupVersion` rejects with the full message after the discovery simulation;
+    - `computeCallMessageHash` and `computeEncodedCallMessageHash` equal `computeAuthWitMessageHash` over `{ chainId: Fr(l1ChainId), version: Fr(rollupVersion) }` with `l1ChainId ≠ rollupVersion`, so a swapped projection fails.
+  - **Probe:** `discovery-probe.test.ts:119`'s drift row asserts the full message.
+  - **Send executor and view executor:** in `dapp-send-executor.test.ts` and `view-executor.test.ts`, the module mock is deleted and each harness gets a self-consistent pair. The stored row gains `l1ChainId: 1` and the node reports `rollupVersion: 6`, so the composite is `7`. The V-01 tests become:
+    - **send, drift:** with effects present, a drifted pair rejects with the full message and no authwit is created;
+    - **send, laziness:** today's one-fetch (effects) and zero-fetch (no effects) assertions are kept;
+    - **view:** `executeAztecGetChainInfo` returns an object whose keys are exactly `["chainId", "version"]`, both `Fr`, serialising to the 64-hex `0x…01` and `0x…06`, and a drifted pair rejects.
+  - **Fast path:** a drift row rejects with the full message, with `resolver.resolveInstance` and `simulateViaNode` not called. The positive row pins the `chainInfo` handed to `simulateViaNode`.
+  - **Batched view:** `batched-view-mixed-arm.pins.test.ts:144` asserts the full message, and a slow-only drift row is added.
+  - **`aztec_createAuthWit`:** a new `service.authwit-binding.test.ts` (node environment, real hashing, prototype call with a minimal `this` as in `register-token.test.ts`):
+    - a drifted pair rejects for both intent kinds and for a raw hash, before `getContractInstance` runs;
+    - a matching pair yields `computeAuthWitMessageHash` over the expected `Fr` pair.
+- **Selector binding, S1 to S6:**
   - **Files:** `tx-request-builder.pins.test.ts` (S1, S2), `authwit-discoverer.real.test.ts` (S3), `service.authwit-binding.test.ts` (S4), `view-executor.test.ts` (S5), `fast-path.test.ts` (S6).
-  - **Rows:**
-    - unknown selector → `"Method not found"`;
-    - mismatched name → the site's full message, including its label and its exact `to` text;
-    - `""` → the full message with `""`;
-    - `undefined`: proceeds at S1–S5 (positive control) and is refused at S6 with `"undefined"` in the message.
+  - **Every site:** an unknown selector refuses with `"Method not found"`; a mismatched name refuses with the site's full message, including its label and its exact `to` text; `""` refuses with the full message showing `""`. A matching name proceeds (the control).
+  - **Absent name, S2–S5:** proceeds.
+  - **Absent name, S1:** refused by `FunctionCall.schema` with today's error, before any lookup and with no effect. No parsing is mocked.
+  - **Absent name, S6, two tests:**
+    - the wire fallback: `rehydrateOptimizablePrefix` returns `null` for a call without a name;
+    - the guard policy: a direct `bindOptimizableCalls` call refuses with `"undefined"` in the full message.
   - Each row asserts the site's effect did not run (or ran, for the controls).
 - **Authwit decode:**
-  - **Probe:** a row where effect A fails in `toDiscoveredAuthwit` and a later effect B with the same hash is still collected (pins "enter `seen` only after the record").
+  - **Probe:** effect A fails in `toDiscoveredAuthwit`, and a later effect B with the same hash is still collected. This pins "enter `seen` only after the record".
   - **Send executor:** three effects with a malformed one in the middle yield two records, and `createAuthWit` runs in effect order.
 - **Class id:** a new `service.class-id.test.ts`, bb-free, mocks `@aztec-labs/stdlib/contract` at the module boundary as `register-contract-void-conformance.test.ts` does, with a controllable recompute. For each of C1 and C2:
   - a match registers once;
-  - a mismatch rejects with `Error` (not `ContractNotRegisteredError`) and the exact message; nothing is registered, and for C1 the address is not recomputed;
-  - a recompute throw rejects with the same error object and registers nothing;
+  - a mismatch rejects with an `Error` whose constructor is `Error` (not `ContractNotRegisteredError`) and whose message is exactly the expected text; nothing is registered, and for C1 the address is not recomputed;
+  - a recompute throw rejects with the same error object (`toBe`) and registers nothing;
   - a lookup-path artifact (none provided) is recomputed too;
   - two distinct id objects with equal `toString()` match.
-- **Comments:** three test comments repeat the false "noop for local" claim (`authwit-discoverer.real.test.ts:80`, `fast-path.test.ts:278-279`, `helpers/batched-view-simulation.test.ts:245-246`). They are corrected in this phase, in files it already edits or that sit beside them.
+- **Comments:** three test comments repeat the false "noop for local" claim (`authwit-discoverer.real.test.ts:80`, `fast-path.test.ts:278-279`, `helpers/batched-view-simulation.test.ts:245-246`). They are corrected in this phase.
 
 The phase passes on the unchanged code and is committed alone, freezing every test file before Phase 2.
 
 ### Phase 2: the four helpers
 
-Make § A to § D with no test file touched. Order within the phase: `liveChainInfo` and `assertArtifactClassId` in `aztec-runtime`, then `assertSelectorBinding`, then `decode-authwit-effects.ts`, then the site edits. Docs: the `aztec-runtime` README row, and the execution README's `contract-resolver.ts` row ("plus the selector binding guard").
+Make § A to § D with no test file touched.
 
-**Mutation check** (after the Phase 2 commit, on a clean tree; each mutant reverted with `git restore`, never committed; results logged in the arc's lessons file):
+- **Order within the phase:** `liveChainInfo` and `assertArtifactClassId` in `aztec-runtime`, then `assertSelectorBinding`, then `decode-authwit-effects.ts`, then the site edits.
+- **Docs:** the `aztec-runtime` README row, and the execution README's `contract-resolver.ts` row ("plus the selector binding guard").
 
-- drop the assert inside `liveChainInfo`;
-- swap `chainId` and `version` in `chainInfoFrom`;
-- make `CALL_BINDING` refuse an absent name, and `NAMED_CALL_BINDING` allow one;
-- change one label;
-- test the name for truthiness;
-- delete the helper call at each of S1 to S6, and the class-id call at C1 and at C2;
-- make `assertArtifactClassId` catch and convert;
-- move one discovery site's early return below the fetch.
+**Mutation check.**
+
+- **Procedure:** run after the Phase 2 commit, on a clean tree. Apply one mutant at a time, run the affected test files, and revert with `git restore`; nothing is committed. A kill counts only if a runtime assertion fails. A mutant that fails to compile, or a test file that fails to load, is fixed so it compiles and then rerun.
+- **Results** are logged in the arc's lessons file.
+
+The mutants:
+
+- `liveChainInfo` replaced by `chainInfoFrom` (dropping the assert) at each of the 8 call sites, one at a time;
+- the early return moved below the fetch, at each of the three discovery sites;
+- the probe's `seen` check dropped;
+- the probe's `used` gate dropped;
+- only the `!fn` branch removed from `assertSelectorBinding`;
+- `CALL_BINDING` refusing an absent name; `NAMED_CALL_BINDING` allowing one;
+- one label changed;
+- the name tested for truthiness;
+- the helper call deleted at each of S1 to S6, one at a time;
+- the class-id call deleted at C1, and separately at C2;
+- `assertArtifactClassId` catching and converting the recompute error;
+- `chainId` and `version` swapped in `chainInfoFrom`;
+- a prefix or suffix added to the scope-violation message, and separately to the class-id message.
 
 Each mutant must turn at least one Phase 1 row red.
 
@@ -247,6 +291,7 @@ Each mutant must turn at least one Phase 1 row red.
   - After Phase 2, `git diff --stat <phase-1 commit>` lists no `*.test.ts` file.
   - Every mutant above is red.
 - **Screenshots:** none; no `.vue` or CSS file changes.
+- **Local network e2e (Chrome), after Phase 2:** the files covering authwit, view and send execution, run with `NODE_OPTIONS=--dns-result-order=ipv4first bun run e2e:agent <files>`.
 - **Layers:** unit, composition and the real-crypto node-environment files locally; the smoke and network lanes (including both browsers' prover-on canaries, which sign authwits) run in CI per the program gates.
 
 ## Post-implementation
@@ -270,7 +315,36 @@ None. The per-site differences (two message labels, the fast path's required nam
 
 **Follow-ups for the program's final report, unchanged here:**
 
-- **The registry cache lead.** `ArtifactRegistry.verifiedClassIds` is keyed by class id alone; this was arc 1's lead.
-- **The `batched-view-simulation.ts:627-629` selector lookup has no name check.** That is correct for today's wallet-internal callers, but it must gain the binding if a dApp-supplied call is ever routed there.
+- **The registry cache lead** (`packages/aztec-runtime/src/pxe/artifact-registry.ts:143`). `ArtifactRegistry.verifiedClassIds` is keyed by class id alone; this was arc 1's lead. The legs split on its weight; see Decisions.
+- **The `batched-view-simulation.ts:627-629` selector lookup has no name check.** That is correct for today's wallet-internal callers, which build calls and selectors from wallet-chosen ABIs (`buildViewCall`). A future caller that routes a dApp-supplied call there must add the binding first.
+- **Backup restore registers contracts unchecked.** `apps/extension/src/wallet/services/account-state/service.ts:411` registers a backup-supplied instance and artifact with no class-id check. Backups are attacker-controlled; the impact is low because of upstream's store keying.
 
 ## Decisions (delegated)
+
+### Plan audit, Codex round 1 (GPT-6 Astra, xhigh): REVISE
+
+The design was found sound: every guard, its order, its error bytes and its position before the effect are preserved, and the fast-path reorder is safe. All four findings were adopted:
+
+1. **Should-fix: an absent name cannot reach S1's guard.** `FunctionCall.schema` requires `name`, and S6's wire input falls back to `null`. Adopted: S1 pins the schema refusal; S6 splits into its wire fallback and a direct guard-policy test; nothing mocks parsing.
+2. **Should-fix: `toThrowError("text")` is a substring match.** Adopted: messages are compared with `toBe`, the constructor is asserted separately, propagation uses `toBe(originalError)`, and a prefix/suffix mutant proves it.
+3. **Nit: "only caller" means only production caller.** Adopted: the methods never had a per-method assert, so the precondition is documented, and the stale provenance in `computeCallMessageHash`'s TSDoc goes.
+4. **Nit: retained comments.** Adopted: the S5 comment shrinks to its invariants, the probe header loses its provenance, the "e2e-only" claim is corrected, and the `artifact-class-id.ts` header names both exports.
+
+Its mutant advice (one substitution per site, runtime failures only) was adopted with the Opus pass's list.
+
+### Plan audit, Opus pass: REVISE
+
+The Opus pass agreed the design preserves every guard and its order. Adopted:
+
+- the S1 absent-name row, the same finding as Codex 1;
+- the per-site mutants;
+- splitting the send-executor drift row from its no-effects row, since a drift refusal needs effects to reach the fetch;
+- keeping the `await` on its own statement, so `network` is read after it as today;
+- softer class-id wording: upstream's store already keys artifacts by their recomputed id, so the check buys a clean refusal and defence in depth;
+- the backup-restore follow-up.
+
+### The registry cache lead: the legs split
+
+- **Codex:** a real cache defect. Once a class id is cached, a later artifact claimed for it is returned unchecked. Exploitability is not established; C1 and C2's unconditional recompute protects registration.
+- **Opus:** not reachable by a dApp. Upstream's contract store files every artifact under its own recomputed class id, first write wins (`@aztec-labs/pxe` 6.0.0-rc.1, `contract_store.js:85-95`), so the PXE-local lookup cannot return a different artifact for a cached id.
+- **Call:** recorded as a lead for the final report with both arguments. The cache is not touched here; any change to it is a behaviour change.
