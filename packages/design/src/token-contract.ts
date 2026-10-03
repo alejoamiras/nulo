@@ -43,6 +43,14 @@ export const tokenGroups = {
 	borders: {
 		default: "--border",
 		hovered: "--border-hovered",
+		hairlineSoft: "--hairline-soft",
+		hairlineStrong: "--hairline-strong",
+	},
+	scrims: {
+		popup: "--scrim-popup",
+		sheet: "--scrim-sheet",
+		loader: "--scrim-loader",
+		barrier: "--scrim-barrier",
 	},
 	colors: {
 		white: "--white",

@@ -24,6 +24,8 @@ const OWNED_PREFIXES = [
 	"--base-",
 	"--nav-",
 	"--border",
+	"--hairline-",
+	"--scrim-",
 	"--bezier",
 	"--surface-",
 	"--warn",

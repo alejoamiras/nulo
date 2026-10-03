@@ -35,6 +35,15 @@ export const text = {
 export const borders = {
 	default: "--border",
 	hovered: "--border-hovered",
+	hairlineSoft: "--hairline-soft",
+	hairlineStrong: "--hairline-strong",
+} as const
+
+export const scrims = {
+	popup: "--scrim-popup",
+	sheet: "--scrim-sheet",
+	loader: "--scrim-loader",
+	barrier: "--scrim-barrier",
 } as const
 
 export const colors = {

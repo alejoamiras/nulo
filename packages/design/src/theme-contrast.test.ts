@@ -1,5 +1,9 @@
+/// <reference types="node" />
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { describe, expect, test } from "vitest"
 import { contrast, resolveColor, themeMap } from "./theme-contrast"
+import { borders, brand, colors, easings, fonts, layout, scrims, surfaces, text } from "./tokens"
 
 /**
  * WCAG-AA contrast gate (asserted token-pairing table — see theme-contrast.ts for why it is NOT a
@@ -95,6 +99,65 @@ describe("resolveColor rgb() parsing", () => {
 		expect(resolveColor("rgba(124, 116, 104, 0.3)", {})).toEqual({ r: 124, g: 116, b: 104, a: 0.3 })
 		expect(resolveColor("rgb(255 255 255 / 50%)", {})).toEqual({ r: 255, g: 255, b: 255, a: 0.5 })
 		expect(resolveColor("#a8480c", {})).toEqual({ r: 168, g: 72, b: 12, a: 1 })
+	})
+})
+
+const COLOR_TOKENS = [surfaces, brand, text, borders, scrims, colors].flatMap((group) => Object.values(group))
+const VALUE_TOKENS = [fonts, easings, layout].flatMap((group) => Object.values(group))
+
+/** A non-color value with its `var(--x, fallback)` chain followed, fallbacks included; undefined when unresolvable. */
+function resolveValue(value: string | undefined, map: Record<string, string>, depth = 0): string | undefined {
+	const alias = value?.match(/^var\(\s*(--[a-z0-9-]+)\s*(?:,\s*(.+))?\)$/i)
+	if (!alias) return value
+	if (depth > 8) return undefined
+	return resolveValue(map[alias[1]] ?? alias[2]?.trim(), map, depth + 1)
+}
+
+/** Contract tokens an unthemed root and a dark root resolve differently, or that one of them lacks. */
+function paletteDrift(css?: string): string[] {
+	const unthemed = themeMap(null, css)
+	const dark = themeMap("dark", css)
+	const drifted: string[] = VALUE_TOKENS.filter((name) => {
+		const value = resolveValue(unthemed[name], unthemed)
+		return value === undefined || value !== resolveValue(dark[name], dark)
+	})
+	for (const name of COLOR_TOKENS) {
+		try {
+			if (JSON.stringify(resolveColor(name, unthemed)) !== JSON.stringify(resolveColor(name, dark))) drifted.push(name)
+		} catch {
+			drifted.push(name)
+		}
+	}
+	return drifted
+}
+
+// The landing renders an unthemed root and the wallet sets theme="dark": the two must read one palette.
+describe("dark palette, unthemed vs explicit", () => {
+	const css = readFileSync(join(process.cwd(), "src/base.css"), "utf8")
+
+	test("every contract token resolves the same on both roots", () => {
+		expect(paletteDrift()).toEqual([])
+	})
+	test("a token the unthemed root loses is drift", () => {
+		expect(paletteDrift(css.replace(':root,\n[theme="dark"] {', '[theme="dark"] {'))).toContain("--app-bg")
+	})
+	test("a token resolving through a theme-only variable is drift", () => {
+		const viaLog = css.replace("--nulo-surface: #141312;", "--nulo-surface: var(--log-background, #141312);")
+		expect(paletteDrift(viaLog)).toContain("--nulo-surface")
+	})
+	test("a size resolving through a theme-only variable is drift", () => {
+		const viaDark = `${css.replace("--base-width: 360px;", "--base-width: var(--dark-width, 360px);")}\n[theme="dark"] { --dark-width: 400px; }`
+		expect(paletteDrift(viaDark)).toContain("--base-width")
+	})
+	test("a size resolving through a nested fallback is drift", () => {
+		const nested = css.replace("--base-width: 360px;", "--base-width: var(--preferred-width, var(--dark-width, 360px));")
+		expect(paletteDrift(`${nested}\n[theme="dark"] { --dark-width: 400px; }`)).toContain("--base-width")
+	})
+	test("a token rule nested in an at-rule is refused", () => {
+		expect(() => themeMap("dark", `${css}\n@media not all { :root { --app-bg: #333; } }`)).toThrow(/at-rule/)
+	})
+	test("a comma inside an attribute selector does not split the list", () => {
+		expect(themeMap(null, '[data-x=",:root,"] { --app-bg: #333; }')).toEqual({})
 	})
 })
 
