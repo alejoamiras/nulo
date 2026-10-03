@@ -374,3 +374,39 @@ describe("an unknown priority keeps its throw (an owner lead, not absorbed)", ()
 		expect(normalized((error as Error).message)).toBe(normalized(expected.message))
 	})
 })
+
+describe("a failed fee read under a known priority misses (a fixed reason, never the node's message)", () => {
+	// A replaced implementation records no trace step, so the read is counted on the mock instead.
+	const FJ_LADDER_TO_THE_READ = FULL_LADDER.filter((step) => step !== "getFpcInfo" && step !== "predictedWorstMinFees")
+	const replies: Array<[string, () => void]> = [
+		["a rejected read", () => predicted.mockRejectedValueOnce(new Error("block not found"))],
+		["an undefined reply", () => predicted.mockResolvedValueOnce(undefined as never)],
+		["a null reply", () => predicted.mockResolvedValueOnce(null as never)],
+		["a bare-object reply", () => predicted.mockResolvedValueOnce({ feePerDaGas: 2n, feePerL2Gas: 3n } as never)],
+	]
+	const priorities = [undefined, "normal", "fast", "urgent"] as const
+
+	for (const priorityLevel of priorities) {
+		test.each(replies)(`priority ${String(priorityLevel)}: %s`, async (_name, arrange) => {
+			arrange()
+			const fj = { paymentMethod: { kind: "fj" }, priorityLevel } as FeeSettings
+			const { reuse, logDebug } = harness()
+			expect(await consumeOnce(reuse, entry(fj, { fpcIdentity: undefined }))).toBeUndefined()
+			expect(calls).toEqual(FJ_LADDER_TO_THE_READ)
+			expect(predicted).toHaveBeenCalledTimes(1)
+			expect(logDebug.mock.calls).toEqual([[`${REASON}base fee fetch failed`]])
+		})
+	}
+
+	test("an unknown priority with a bare-object reply still throws the composition's own TypeError", async () => {
+		const bare = { feePerDaGas: 2n, feePerL2Gas: 3n }
+		const expected = await compositionError(bare, undefined)
+		predicted.mockResolvedValueOnce(bare as never)
+		const bogus = { paymentMethod: { kind: "fj" }, priorityLevel: "bogus" } as unknown as FeeSettings
+		const { reuse } = harness()
+		reuse.stash("id-1", entry(bogus, { fpcIdentity: undefined }))
+		const error = await reuse.tryConsume("id-1", input(bogus), FENCE).catch((e: unknown) => e as Error)
+		expect(error).toBeInstanceOf(TypeError)
+		expect(normalized((error as Error).message)).toBe(normalized(expected.message))
+	})
+})

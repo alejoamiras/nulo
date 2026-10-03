@@ -28,6 +28,7 @@ import { DappSendExecutor, type DappSendExecutorDeps } from "./dapp-send-executo
 import { DiscoveryAwareEstimator } from "./discovery-aware-estimator"
 import type { ProveAndSendContext } from "./execution-coordinator"
 import { AUTHWITS_CHANGED_MESSAGE, ESTIMATE_INCOMPLETE_MESSAGE, PREVIEW_FOREIGN_MESSAGE, PreviewSnapshots } from "./preview-snapshots"
+import { OperationEstimateReuse } from "./operation-estimate-reuse"
 import { fingerprintOperation } from "./operation-fingerprint"
 import { ExecutionService } from "./service"
 
@@ -2088,5 +2089,74 @@ describe("DappSendExecutor: each estimate cancel checkpoint", () => {
 		})
 		await expectCancelled(executor.previewOperationAuthwits(NO_FROM(), PREVIEW as never, controller.signal))
 		expect(stash).not.toHaveBeenCalled()
+	})
+})
+
+describe("DappSendExecutor — a confirm whose reuse fee read fails", () => {
+	const FPC_SETTINGS = { paymentMethod: { kind: "fpc", fpcId: "fpc-1" } }
+	const PREVIEW = { interactionId: "i-1", index: 0 }
+
+	/** A real reuse cache over the harness's own lookups, whose node's min-fee prediction rejects. The
+	 *  folded pipeline (fpc's discovery) reports `0xa` at the estimate and `confirmDiscovered` on the rebuild. */
+	function failingReadHarness(confirmDiscovered: string[]) {
+		const reuseLog = vi.fn()
+		const feeNode = {
+			getPredictedMinFees: vi.fn(async () => {
+				throw new Error("block not found")
+			}),
+			getCurrentMinFees: vi.fn(),
+		}
+		const deps: { current?: DappSendExecutorDeps } = {}
+		const reuse = new OperationEstimateReuse({
+			getNetwork: (id) => (deps.current as DappSendExecutorDeps).getNetwork(id),
+			getNode: async () => feeNode as never,
+			getLiveChainIdentity: async () => ({ l1ChainId: 1, rollupVersion: 6 }),
+			getFpcInfo: (id) => (deps.current as DappSendExecutorDeps).getFpcInfo(id),
+			getPendingForAccount: (account) => (deps.current as DappSendExecutorDeps).getPendingForAccount(account),
+			logDebug: reuseLog,
+		})
+		const built: { current?: unknown } = {}
+		const perBuild = [["0xa"], confirmDiscovered]
+		const buildAndEstimateFolded = vi.fn(async (...args: unknown[]) => {
+			const probe = args[3] as { collected: unknown[]; discovered: unknown[] }
+			for (const messageHash of perBuild.shift() ?? []) {
+				probe.collected.push({ kind: "add_private_authwit", content: { kind: "message_hash", messageHash } })
+				probe.discovered.push({ messageHash })
+			}
+			return built.current
+		})
+		const h = makeHarness({ operationEstimateReuse: reuse, buildAndEstimateFolded })
+		deps.current = h.deps
+		built.current = Object.assign(h.built, { chainIdentity: { l1ChainId: 1, rollupVersion: 6 } })
+		return { ...h, feeNode, reuseLog }
+	}
+
+	test("the read rejects: the reuse misses, and the confirm rebuilds through discovery and sends", async () => {
+		const h = failingReadHarness(["0xa"])
+		const op = () => makeAztecOp({ feeSettings: FPC_SETTINGS })
+		const { estimateId } = await h.executor.estimateOperationFee(op(), FPC_SETTINGS as never, undefined, PREVIEW as never)
+		expect(estimateId).toBeDefined()
+
+		await h.executor.executeAztecSendTx(op(), ORIGIN, undefined, undefined, FENCE, APPROVAL(estimateId as string))
+
+		expect(h.feeNode.getPredictedMinFees).toHaveBeenCalledTimes(1)
+		expect(h.reuseLog.mock.calls).toEqual([["operation estimate reuse rejected: base fee fetch failed"]])
+		expect(h.buildAndEstimateFolded).toHaveBeenCalledTimes(2)
+		expect(h.proveAndSend).toHaveBeenCalledTimes(1)
+		expect(h.deps.addTransaction).toHaveBeenCalledTimes(1)
+	})
+
+	test("the rebuild is held to the preview: an authorization the preview never showed is refused unsent", async () => {
+		const h = failingReadHarness(["0xa", "0xb"])
+		const op = () => makeAztecOp({ feeSettings: FPC_SETTINGS })
+		const { estimateId } = await h.executor.estimateOperationFee(op(), FPC_SETTINGS as never, undefined, PREVIEW as never)
+
+		await expect(
+			h.executor.executeAztecSendTx(op(), ORIGIN, undefined, undefined, FENCE, APPROVAL(estimateId as string)),
+		).rejects.toThrow(AUTHWITS_CHANGED_MESSAGE)
+
+		expect(h.reuseLog.mock.calls).toEqual([["operation estimate reuse rejected: base fee fetch failed"]])
+		expect(h.proveAndSend).not.toHaveBeenCalled()
+		expect(h.deps.addTransaction).not.toHaveBeenCalled()
 	})
 })
