@@ -72,3 +72,11 @@
   - **The forced head moves nothing else.** The three feed empty states, both no-results lines and the empty token feed stay identical.
   - **The feed diffs are the separator dots alone:** 17 to 84 px in every browser and theme, with no non-colour computed-style leaf. The first forced run's Firefox chip wrap does not recur, which bears out the price explanation. There was no cascade or `composes` defect.
 - **Round 1, before the price pin:** stability and base vs `7b0f13c6` were ALL IDENTICAL on both browsers, but those captures had no price control.
+
+## Restack
+
+- Rebased with `git rebase --onto 1745400b eb06c37d`, onto arc 11 (#777), which sits on arc 15 (#776) and harden-dedupe `3964f68a`. Arcs 10 and 12 had landed by then. All ten commits applied with no conflicts. No lockfile or manifest changed upstream, so no install was needed.
+- `gates.sh` at the restacked head: all PASS. The tree was clean after `audit:vue`'s build, so the generated auto-import files match a rebuild.
+- **Shots at the restack, Chrome and Firefox:**
+  - base `1745400b` vs code head `e739b2de`: ALL IDENTICAL (132 entries);
+  - `--stability` on `1745400b`: ALL IDENTICAL (132 entries).
