@@ -165,7 +165,8 @@ declare global {
   const isRef: typeof import('vue').isRef
   const isRepeatOrComposing: typeof import('../composables/usePopupEntity').isRepeatOrComposing
   const isShallow: typeof import('vue').isShallow
-  const isUnknownRow: typeof import('../utils/token-order').isUnknownRow
+  const isUnknownParsedRow: typeof import('../utils/token-amount').isUnknownParsedRow
+  const isUnknownRow: typeof import('../utils/token-amount').isUnknownRow
   const isValidDecimals: typeof import('../utils/token-amount').isValidDecimals
   const isValidHex: typeof import('../utils/string').isValidHex
   const journalCardIcon: typeof import('../utils/journal-state').journalCardIcon
@@ -701,7 +702,8 @@ declare module 'vue' {
     readonly isRef: UnwrapRef<typeof import('vue')['isRef']>
     readonly isRepeatOrComposing: UnwrapRef<typeof import('../composables/usePopupEntity')['isRepeatOrComposing']>
     readonly isShallow: UnwrapRef<typeof import('vue')['isShallow']>
-    readonly isUnknownRow: UnwrapRef<typeof import('../utils/token-order')['isUnknownRow']>
+    readonly isUnknownParsedRow: UnwrapRef<typeof import('../utils/token-amount')['isUnknownParsedRow']>
+    readonly isUnknownRow: UnwrapRef<typeof import('../utils/token-amount')['isUnknownRow']>
     readonly isValidDecimals: UnwrapRef<typeof import('../utils/token-amount')['isValidDecimals']>
     readonly isValidHex: UnwrapRef<typeof import('../utils/string')['isValidHex']>
     readonly journalCardIcon: UnwrapRef<typeof import('../utils/journal-state')['journalCardIcon']>

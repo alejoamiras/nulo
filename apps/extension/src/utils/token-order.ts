@@ -6,7 +6,7 @@
  * decided before the row's numbers are parsed, so a malformed pinned row keeps its slot.
  */
 import { stringCompare } from "@/utils/string"
-import { type FiatOf, isValidDecimals, parseRawBalance } from "@/utils/token-amount"
+import { type FiatOf, isUnknownRow, parseRawBalance } from "@/utils/token-amount"
 
 /** Home's row budget AND the pin cap — one number by design. */
 export const HOME_TOKEN_ROWS = 3
@@ -35,11 +35,6 @@ const CLASS_RANK: Record<RowClass, number> = {
 	unknown: 3,
 	unsynced: 4,
 	empty: 4,
-}
-
-/** A row whose numbers cannot be trusted: a malformed side or a `decimals` outside 0..77. */
-export function isUnknownRow(tb: OrderableRow): boolean {
-	return parseRawBalance(tb) === undefined || !isValidDecimals(tb.token.decimals)
 }
 
 export function classifyRow<T extends OrderableRow>(tb: T, ctx: OrderCtx<T>): RowClass {

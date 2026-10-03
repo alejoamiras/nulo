@@ -322,6 +322,7 @@
     "isRef": true,
     "isRepeatOrComposing": true,
     "isShallow": true,
+    "isUnknownParsedRow": true,
     "isUnknownRow": true,
     "isValidDecimals": true,
     "isValidHex": true,

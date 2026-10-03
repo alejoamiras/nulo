@@ -3,7 +3,7 @@
  * exactly $0.00 whether priced or not, so it is neither a holding nor a pricing gap; a malformed
  * row IS a holding with no price, so the total reads as partial rather than complete.
  */
-import { type FiatOf, isValidDecimals, parseRawBalance } from "@/utils/token-amount"
+import { type FiatOf, isUnknownParsedRow, parseRawBalance } from "@/utils/token-amount"
 
 export type Aggregate = { micro: bigint; priced: number; holdings: number; partial: boolean }
 
@@ -17,7 +17,7 @@ export function aggregateFiat<T extends { publicBalance?: string; privateBalance
 	for (const tb of rows) {
 		const raw = parseRawBalance(tb)
 		// Invalid decimals make the row unreadable even when its raw balance parses to zero.
-		const malformed = raw === undefined || !isValidDecimals(tb.token?.decimals)
+		const malformed = isUnknownParsedRow(raw, tb)
 		if (raw === 0n && !malformed) continue
 		holdings += 1
 		if (malformed) continue
