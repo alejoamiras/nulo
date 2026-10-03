@@ -371,7 +371,7 @@ describe("AuthRegistryService revoke and registry toggle — refusals, settlemen
 		const log = instrument(h)
 		const tooMany = Array.from({ length: 29 }, (_, i) => i)
 		await expect(h.service.revokeAuthwits("net-1", A, tooMany, FEE)).rejects.toThrow(
-			/^Cannot revoke more than \d+ authwits per single tx$/,
+			/^Cannot revoke more than 28 authwits per single tx$/,
 		)
 		for (const id of [2, 3, 4, 99]) {
 			await expect(h.service.revokeAuthwits("net-1", A, [id], FEE)).rejects.toThrow(new RegExp(`^Authwit #${id} doesn't exist$`))
