@@ -115,6 +115,7 @@ watch(
 					type="button"
 					@click="isDecryptionPasswordType = !isDecryptionPasswordType"
 					tabindex="-1" :class="$style.visibility_btn"
+					data-testid="import-full-backup-decrypt-password-input-visibility-toggle"
 					:aria-label="isDecryptionPasswordType ? 'Show password' : 'Hide password'"
 				>
 					<MaterialIcon
@@ -143,6 +144,7 @@ watch(
 						type="button"
 						@click="isPasswordType = !isPasswordType"
 						tabindex="-1" :class="$style.visibility_btn"
+						data-testid="import-full-backup-password-input-visibility-toggle"
 						:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
 					>
 						<MaterialIcon

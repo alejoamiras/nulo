@@ -133,6 +133,7 @@ onBeforeUnmount(() => {
 							tabindex="-1"
 							:class="$style.visibility_btn"
 							:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
+							data-testid="current-password-input-visibility-toggle"
 						>
 							<MaterialIcon
 								:name="isPasswordType ? 'visibility' : 'visibility_off'"
@@ -175,6 +176,7 @@ onBeforeUnmount(() => {
 							tabindex="-1"
 							:class="$style.visibility_btn"
 							:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
+							data-testid="new-password-input-visibility-toggle"
 						>
 							<MaterialIcon
 								:name="isPasswordType ? 'visibility' : 'visibility_off'"

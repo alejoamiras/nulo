@@ -33,6 +33,7 @@ const isPasswordType = ref(true)
 						tabindex="-1"
 						@click="isPasswordType = !isPasswordType"
 						:class="$style.visibility_btn"
+						data-testid="register-password-input-visibility-toggle"
 						:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
 					>
 						<MaterialIcon

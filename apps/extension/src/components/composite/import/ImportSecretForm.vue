@@ -45,6 +45,7 @@ const passwordHint = computed(() => newPasswordHint(password.value ?? "", repeat
 					type="button"
 					@click="hideCredentials = !hideCredentials"
 					tabindex="-1" :class="$style.visibility_btn"
+					data-testid="import-seed-input-visibility-toggle"
 					:aria-label="hideCredentials ? 'Show recovery phrase' : 'Hide recovery phrase'"
 				>
 					<MaterialIcon
@@ -80,6 +81,7 @@ const passwordHint = computed(() => newPasswordHint(password.value ?? "", repeat
 						type="button"
 						@click="isPasswordType = !isPasswordType"
 						tabindex="-1" :class="$style.visibility_btn"
+						data-testid="import-password-input-visibility-toggle"
 						:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
 					>
 						<MaterialIcon
