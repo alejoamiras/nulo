@@ -732,3 +732,173 @@ describe("decrypt publication race — the last await seam (codex impl-review HI
 		expect(c.parsedBackupName.value).not.toBe("RaceName")
 	})
 })
+
+/** The message a native throw carries in THIS engine. Callers bind the production expression's
+ *  local names, since JavaScriptCore and SpiderMonkey quote them in the text. */
+function nativeMessage(run: () => unknown): string {
+	try {
+		run()
+	} catch (err) {
+		return (err as Error).message
+	}
+	throw new Error("reference expression did not throw")
+}
+
+describe("restore wiring handoffs", () => {
+	it("hands the account restore exactly the remapped account rows, as its only argument", async () => {
+		happyWiring()
+		const { c } = await mountWithBackup()
+		await c.restoreBackup()
+		expect(accountClient.restore.mock.calls).toEqual([
+			[
+				[
+					{
+						profileId: "new-id",
+						chainId: 1,
+						address: "0xaaaa",
+						index: 0,
+						type: 0,
+						l1ChainId: 1,
+						name: "Account 1",
+						visible: true,
+					},
+				],
+			],
+		])
+	})
+
+	it("hands the token restore exactly the token rows, as its only argument", async () => {
+		happyWiring()
+		const { c } = await mountWithBackup({ data: { token: [{ id: 1, chainId: 1, contract: "0xT" }] } })
+		await c.restoreBackup()
+		expect(tokenClient.restore.mock.calls).toEqual([[[{ id: 1, chainId: 1, contract: "0xT" }]]])
+	})
+
+	it("re-links balances only for a non-empty token-balance slice", async () => {
+		happyWiring()
+		const absent = await mountWithBackup()
+		await absent.c.restoreBackup()
+		expect(absent.opts.completeImport).toHaveBeenCalledTimes(1)
+		expect(absent.c.restoreErrorLog.value).not.toHaveProperty("token-balance")
+		expect(tokenBalanceClient.restore).not.toHaveBeenCalled()
+
+		// An undefined token result throws inside the re-link, so an empty slice must never reach it.
+		tokenClient.restore.mockResolvedValue(undefined)
+		const empty = await mountWithBackup({ data: { "token-balance": [] } })
+		await empty.c.restoreBackup()
+		expect(empty.opts.completeImport).toHaveBeenCalledTimes(1)
+		expect(empty.c.restoreErrorLog.value).not.toHaveProperty("token-balance")
+		expect(tokenBalanceClient.restore.mock.calls).toEqual([[[], "new-id"]])
+	})
+
+	it("records errors in stage order, the re-link's drops before the token rows, in the token stage's tick", async () => {
+		happyWiring()
+		accountClient.restore.mockResolvedValue([
+			{ address: "0xaaaa", chainId: 1 },
+			{ address: "0xbbbb", chainId: 1, restoreError: "account broke" },
+		])
+		accountClient.restoreImportedKeys.mockResolvedValueOnce([{ chainId: 1, restoreError: "key broke" }] as never)
+		tokenClient.restore.mockResolvedValue([
+			{ id: "n1", chainId: 1, contract: "0xT" },
+			{ id: 2, chainId: 1, contract: "0xU", restoreError: "token broke" },
+		])
+		tokenBalanceClient.restore.mockResolvedValue([{ id: 10, restoreError: "balance broke" }])
+		transactionClient.restore.mockResolvedValue([{ chainId: 1, restoreError: "tx broke" }])
+		let keysAfterTokenDisconnect: string[] | undefined
+		const { c } = await mountWithBackup({
+			data: {
+				"imported-account-keys": [{ profileId: "src-profile-id", chainId: 1, address: "0xaaaa" }],
+				token: [
+					{ id: 1, chainId: 1, contract: "0xT" },
+					{ id: 2, chainId: 1, contract: "0xU" },
+				],
+				"token-balance": [
+					{ id: 10, token: 1, account: "0xaaaa" },
+					{ id: 11, token: 999, account: "0xaaaa" },
+				],
+				transaction: [{ account: "0xaaaa", chainId: 1, hash: "h1" }],
+			},
+		})
+		tokenClient.disconnect.mockImplementation(() =>
+			queueMicrotask(() => {
+				keysAfterTokenDisconnect = Object.keys(c.restoreErrorLog.value)
+			}),
+		)
+		await c.restoreBackup()
+
+		expect(Object.keys(c.restoreErrorLog.value)).toEqual(["account", "imported-account-keys", "token-balance", "token", "transaction"])
+		const balanceRows = c.restoreErrorLog.value["token-balance"] as Array<Record<string, unknown>>
+		expect(balanceRows).toHaveLength(2)
+		expect(balanceRows[0]).toEqual({ row: 1, restoreError: "Token balance could not be re-linked to a restored token" })
+		expect(balanceRows[1]).toMatchObject({ row: 0, restoreError: "balance broke" })
+		expect(keysAfterTokenDisconnect).toEqual(["account", "imported-account-keys", "token-balance", "token"])
+	})
+
+	it("an undefined account result fails the import with the engine's own text for its loop", async () => {
+		happyWiring()
+		accountClient.restore.mockResolvedValue(undefined)
+		const { c, opts } = await mountWithBackup()
+		await c.restoreBackup()
+		const newAccounts = undefined as unknown as unknown[]
+		const expected = nativeMessage(() => {
+			for (const a of newAccounts) if (a) break
+		})
+		expect(profileClient.deleteProfile).toHaveBeenCalledWith("new-id")
+		expect(c.restoreStage.value).toBe("rolled-back")
+		expect(opts.fillError).toHaveBeenCalledWith("full_backup", "Import failed", expected)
+	})
+
+	it("an undefined token result with balances to re-link fails with the engine's own text", async () => {
+		happyWiring()
+		tokenClient.restore.mockResolvedValue(undefined)
+		const { c, opts } = await mountWithBackup({
+			data: { token: [{ id: 1, chainId: 1, contract: "0xT" }], "token-balance": [{ id: 9, token: 1, account: "0xaaaa" }] },
+		})
+		await c.restoreBackup()
+		const newTokens = undefined as unknown as unknown[]
+		const expected = nativeMessage(() => newTokens.length)
+		expect(profileClient.deleteProfile).toHaveBeenCalledWith("new-id")
+		expect(c.restoreStage.value).toBe("rolled-back")
+		expect(opts.fillError).toHaveBeenCalledWith("full_backup", "Import failed", expected)
+	})
+
+	it("hands each slice client its own surviving rows and the created profile id", async () => {
+		happyWiring()
+		tokenClient.restore.mockResolvedValue([{ id: "n1", chainId: 1, contract: "0xT" }])
+		const { c, opts } = await mountWithBackup({
+			data: {
+				token: [{ id: 1, chainId: 1, contract: "0xT" }],
+				transaction: [{ account: "0xaaaa", chainId: 1, hash: "tx-marker" }],
+				"token-balance": [{ id: 10, token: 1, account: "0xaaaa", publicBalance: "7" }],
+				"auth-registry": [{ id: 1, account: "0xaaaa", chainId: 1, hash: "authwit-marker" }],
+				contact: [{ id: "c1", legacyName: "contact-marker", address: "0x01" }],
+				config: [{ key: "k", value: "config-marker" }],
+			},
+		})
+		await c.restoreBackup()
+		expect(opts.fillError).not.toHaveBeenCalled()
+		expect(transactionClient.restore.mock.calls).toEqual([
+			[[{ account: "0xaaaa", chainId: 1, hash: "tx-marker", networkId: "new-net-1" }], "new-id"],
+		])
+		expect(tokenBalanceClient.restore.mock.calls).toEqual([
+			[[{ id: 10, token: "n1", account: "0xaaaa", publicBalance: "7" }], "new-id"],
+		])
+		expect(authRegistryClient.restore.mock.calls).toEqual([
+			[[{ id: 1, account: "0xaaaa", chainId: 1, hash: "authwit-marker" }], "new-id"],
+		])
+		expect(contactClient.restore.mock.calls).toEqual([[[{ id: "c1", name: "contact-marker", address: "0x01" }], "new-id"]])
+		expect(configClient.restore.mock.calls).toEqual([[[{ key: "k", value: "config-marker" }], "new-id"]])
+	})
+
+	it("a duplicate-account rollback finishes every delete attempt before the account client closes", async () => {
+		happyWiring()
+		accountClient.restore.mockRejectedValue(new Error("Duplicate account"))
+		profileClient.deleteProfile.mockRejectedValueOnce(new Error("t1")).mockResolvedValueOnce(undefined)
+		const { c, opts } = await mountWithBackup()
+		await c.restoreBackup()
+		expect(profileClient.deleteProfile).toHaveBeenCalledTimes(2)
+		const lastDelete = profileClient.deleteProfile.mock.invocationCallOrder[1]
+		expect(accountClient.disconnect.mock.invocationCallOrder[0]).toBeGreaterThan(lastDelete)
+		expect(opts.fillError).toHaveBeenCalledWith("full_backup", "Can't import", "An account from this backup is already in your wallet")
+	})
+})
