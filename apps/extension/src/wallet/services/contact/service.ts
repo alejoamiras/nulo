@@ -6,7 +6,7 @@ import type { ILogger } from "@/wallet/logger"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
-import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
+import { assertRestoreEpoch, captureRestoreEpochs, restoreRowProfileId } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { nextRandomId, preferOrReallocId } from "@/wallet/services/id-allocators"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
@@ -284,10 +284,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 		// park (including an injected gate) rejects every subsequent row write
 		// instead of landing orphans post-purge.
 		const deletion = this.profileService.getDeletionState()
-		const epochs = captureRestoreEpochs(
-			deletion,
-			contacts.map((c) => (c as { profileId?: unknown } | null)?.profileId),
-		)
+		const epochs = captureRestoreEpochs(deletion, contacts.map(restoreRowProfileId))
 		// E2e hold point: "service-restore" parks a PRE-finalize import RPC here
 		// (this service restores inside the per-service loop, before
 		// finalizeRestore), so a crash test can kill the worker at a known

@@ -12,7 +12,7 @@ import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
 import { nextNumericId } from "@/wallet/services/id-allocators"
-import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
+import { assertRestoreEpoch, captureRestoreEpochs, restoreRowProfileId } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { AccountService } from "@/wallet/services/account/service"
 import { DEFAULT_SHALLOW_PXE_CLIENT_FACTORY, type ShallowPxeClient, type ShallowPxeClientFactory } from "@/wallet/services/pxe/shallow-port"
@@ -855,10 +855,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		// Deletion fence captured at entry (see restore-fence.ts): rows written
 		// after a mid-restore deleteProfile must reject, not orphan.
 		const deletion = this.profiles.getDeletionState()
-		const epochs = captureRestoreEpochs(
-			deletion,
-			tokens.map((t) => (t as { profileId?: unknown } | null)?.profileId),
-		)
+		const epochs = captureRestoreEpochs(deletion, tokens.map(restoreRowProfileId))
 
 		return await this.lock.withLock(async () => {
 			return await restoreRows(tokens, async (token) => {

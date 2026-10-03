@@ -9,6 +9,20 @@
  */
 import type { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 
+/** Refuses a restore whose threaded created-profile id is not a non-empty string. Dispatch does
+ *  not validate parameters, and the threaded id is the only one allowed to anchor the fence. */
+export function requireRestoreProfileId(profileId: unknown): asserts profileId is string {
+	if (typeof profileId !== "string" || profileId.length === 0) {
+		throw new Error("restore requires the created profile id")
+	}
+}
+
+/** A backup row's claimed profile id, for `captureRestoreEpochs`. Never throws: rows are
+ *  attacker-shaped and may be `null` or a primitive. */
+export function restoreRowProfileId(row: unknown): unknown {
+	return (row as { profileId?: unknown } | null)?.profileId
+}
+
 /**
  * Capture the current deletion epoch for every profile id a restore intends to
  * write under. Non-string/empty ids and profiles already mid-deletion

@@ -1,5 +1,5 @@
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
-import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
+import { assertRestoreEpoch, captureRestoreEpochs, restoreRowProfileId } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { deriveAccountSeed, deriveSigningKeyFromSeed } from "@nulo/wallet-crypto"
 import { LogLevel, type ILogger } from "@/wallet/logger"
@@ -671,10 +671,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		// Deletion fence captured at entry (see restore-fence.ts): rows written
 		// after a mid-restore deleteProfile must reject, not orphan.
 		const deletion = this.profileService.getDeletionState()
-		const epochs = captureRestoreEpochs(
-			deletion,
-			accounts.map((a) => (a as { profileId?: unknown } | null)?.profileId),
-		)
+		const epochs = captureRestoreEpochs(deletion, accounts.map(restoreRowProfileId))
 
 		// Serialise the whole restore: the intersection check + the writes must be
 		// atomic w.r.t. a concurrent restore, or two imports of the same address
@@ -763,10 +760,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		// Deletion fence captured at entry (see restore-fence.ts) — the rewrap
 		// awaits are long enough for a rollback deleteProfile to complete.
 		const deletion = this.profileService.getDeletionState()
-		const epochs = captureRestoreEpochs(
-			deletion,
-			rows.map((r) => (r as { profileId?: unknown } | null)?.profileId),
-		)
+		const epochs = captureRestoreEpochs(deletion, rows.map(restoreRowProfileId))
 		return await this.restoreLock.withLock(async () => {
 			// One context per restore (normalizeAllIds remapped every row to the new profile id).
 			const profileIds = [...new Set(rows.map((r) => (typeof r?.profileId === "string" ? r.profileId : "")))].filter(Boolean)

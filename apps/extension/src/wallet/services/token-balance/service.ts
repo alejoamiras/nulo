@@ -1,6 +1,6 @@
 import type { ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
+import { assertRestoreEpoch, captureRestoreEpochs, requireRestoreProfileId } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { getTokenInfo } from "@/wallet/services/token/utils"
@@ -677,10 +677,8 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		await this.ensureInitialized()
 		// Deletion fence keyed on the composable's authoritative created-profile id —
 		// blob-carried identity fields are overridden below, so only the threaded id
-		// may anchor it. Fail closed: dispatch has no schema validation.
-		if (typeof profileId !== "string" || profileId.length === 0) {
-			throw new Error("restore requires the created profile id")
-		}
+		// may anchor it.
+		requireRestoreProfileId(profileId)
 		const deletion = this.profileService.getDeletionState()
 		const epochs = captureRestoreEpochs(deletion, [profileId])
 		// ONE hold for the whole batch — restore allocates from the same key space
