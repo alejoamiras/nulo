@@ -15,7 +15,7 @@ import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/clien
 
 /** Utils */
 import { parseRawBalance, safeFiatOf } from "@/utils/token-amount"
-import { HOME_TOKEN_ROWS, forChain, orderTokenRows } from "@/utils/token-order"
+import { HOME_TOKEN_ROWS, forChain, isActiveScopeRow, orderTokenRows } from "@/utils/token-order"
 import { matchesQuery } from "@/utils/token-search"
 
 /** Composables */
@@ -67,7 +67,7 @@ const activeScope = () => {
 	const chainId = appStore.network?.chainId
 	return account && chainId !== undefined ? { account, chainId } : undefined
 }
-const inActiveScope = (tb) => tb.account === appStore.account?.address && tb.token?.chainId === appStore.network?.chainId
+const inActiveScope = (tb) => isActiveScopeRow(appStore, tb)
 
 const tokenBalanceService = new TokenBalanceServiceClient()
 tokenBalanceService.onTokenBalanceAdded.add(onBalanceAdded)

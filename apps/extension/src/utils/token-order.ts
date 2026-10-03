@@ -90,3 +90,18 @@ export function forChain<T extends { token: { chainId: number } }>(rows: readonl
 	if (chainId === undefined) return []
 	return rows.filter((tb) => tb.token.chainId === chainId)
 }
+
+/** The live identity a token row is matched against; the app store itself. */
+export type LiveTokenScope = {
+	account?: { address: string } | null
+	network?: { chainId: number } | null
+}
+
+/**
+ * The event-side twin of {@link forChain}: whether a live balance row belongs to the active account
+ * on the active chain. It reads `live.network` only once the account matches, so a computed calling
+ * it tracks no network on a foreign row.
+ */
+export function isActiveScopeRow(live: LiveTokenScope, tb: { account?: unknown; token?: { chainId?: unknown } | null }): boolean {
+	return tb.account === live.account?.address && tb.token?.chainId === live.network?.chainId
+}
