@@ -20,6 +20,7 @@ import { NetworkService } from "@/wallet/services/network/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { TaskService } from "@/wallet/services/task/service"
+import { recordWrites } from "@/wallet/services/storage-write-log"
 import { TokenService } from "./service"
 import type { TokenInterface } from "./spec"
 
@@ -204,6 +205,12 @@ describe("TokenService.restore — per-row allocation (N-20 boundary)", () => {
 
 describe("TokenService.restore — deletion fence (N-14)", () => {
 	const mk = (contract: string) => ({ id: 0, profileId: "p1", chainId: 1, contract, name: "T", symbol: "T", decimals: 9 })
+
+	test("null, primitive and empty rows are per-row restoreErrors; the valid row still lands", async () => {
+		const { tokenService } = await makeHarness()
+		const restored = await tokenService.restore([null, 5, {}, mk("0xaaa")] as never)
+		expect(restored.map((r) => typeof r.restoreError)).toEqual(["string", "string", "string", "undefined"])
+	})
 
 	test("a deleteProfile beginning DURING the restore rejects every later row write", async () => {
 		const { tokenService, api, deletionState } = await makeHarness()
@@ -438,13 +445,16 @@ describe("TokenService.addToken — creation fences", () => {
 		const gate = _deferred<[string, string, number]>()
 		fetchStub.mockReturnValueOnce(gate.promise)
 
+		const writes = recordWrites(api.storage.local, "nulo:core:tokens@")
 		const run = tokenService.addToken("p1", NETWORK.id, "0xacc", ti("0xdead"), { origin: "popup" })
 		await new Promise((r) => setTimeout(r, 0))
 		deletionState.beginDeletion("p1")
 		deletionState.release("p1")
 		gate.resolve(["Name", "SYM", 9])
 
-		await expect(run).rejects.toThrow(/deleted|not current/i)
+		await expect(run).rejects.toThrow(/^profile p1 is being deleted — write rejected \(epoch 0 → 1\)$/)
+		writes.restore()
+		expect(writes.log).toEqual([])
 		expect(await tokenRowCount(api)).toBe(0)
 	})
 
@@ -467,17 +477,14 @@ describe("TokenService.addToken — creation fences", () => {
 		const { tokenService, api, deletionState } = await makeHarness()
 		const emitted: unknown[] = []
 		tokenService.onTokenAdded.add((t) => emitted.push(t))
-		const realSet = api.storage.local.set.bind(api.storage.local)
-		let fired = false
-		api.storage.local.set = (async (items: Record<string, unknown>) => {
-			await realSet(items)
-			if (!fired && Object.keys(items).some((k) => k.startsWith("nulo:core:tokens@"))) {
-				fired = true
-				deletionState.beginDeletion("p1")
-			}
-		}) as typeof api.storage.local.set
+		const writes = recordWrites(api.storage.local, "nulo:core:tokens@", () => deletionState.beginDeletion("p1"))
 
-		await expect(tokenService.addToken("p1", NETWORK.id, "0xacc", ti("0xbeef"), { origin: "popup" })).rejects.toThrow(/deleted/)
+		await expect(tokenService.addToken("p1", NETWORK.id, "0xacc", ti("0xbeef"), { origin: "popup" })).rejects.toThrow(
+			/^profile p1 deleted$/,
+		)
+		writes.restore()
+		expect(writes.log).toHaveLength(2)
+		expect(writes.log[1]).toBe(writes.log[0]?.replace(/^set:/, "remove:"))
 		expect(await tokenRowCount(api)).toBe(0)
 		expect(emitted).toHaveLength(0)
 	})
@@ -493,8 +500,14 @@ describe("TokenService.addToken — creation fences", () => {
 			if (checks === 2) deletionState.beginDeletion("p1")
 			return networkLive.value
 		}
+		const writes = recordWrites(api.storage.local, "nulo:core:tokens@")
 
-		await expect(tokenService.addToken("p1", NETWORK.id, "0xacc", ti("0xbeef"), { origin: "popup" })).rejects.toThrow(/deleted/)
+		await expect(tokenService.addToken("p1", NETWORK.id, "0xacc", ti("0xbeef"), { origin: "popup" })).rejects.toThrow(
+			/^profile p1 deleted$/,
+		)
+		writes.restore()
+		expect(writes.log).toHaveLength(2)
+		expect(writes.log[1]).toBe(writes.log[0]?.replace(/^set:/, "remove:"))
 		expect(checks).toBe(2)
 		expect(await tokenRowCount(api)).toBe(0)
 		expect(emitted).toHaveLength(0)
@@ -533,7 +546,7 @@ describe("TokenService.addToken — creation fences", () => {
 			expect(`nulo:core:tokens@${restored.id}`).toBe(addKey)
 			lastCheck.resolve()
 
-			expect(await run).toEqual(expect.objectContaining({ message: expect.stringMatching(/deleted/) }))
+			expect(await run).toEqual(expect.objectContaining({ message: "profile p1 deleted" }))
 		} finally {
 			vi.useRealTimers()
 		}

@@ -171,6 +171,18 @@ describe("AccountService restore writers — deletion fence (N-14)", () => {
 		expect(typeof restored[1].restoreError).toBe("string")
 	})
 
+	test("null, primitive and empty rows are per-row restoreErrors in both writers; the valid row still lands", async () => {
+		const h = await makeHarness()
+		const hostile = [null, 5, {}] as never[]
+		const accounts = await h.service.restore([...hostile, mkAccount("0xr1")])
+		expect(accounts.map((r) => typeof r.restoreError)).toEqual(["string", "string", "string", "undefined"])
+		const keys = await h.service.restoreImportedKeys([
+			...hostile,
+			{ profileId: "p1", chainId: 1, address: "0xk1", encryptedSigningKey: "sealed-src" },
+		])
+		expect(keys.map((r) => typeof r.restoreError)).toEqual(["string", "string", "string", "undefined"])
+	})
+
 	test("positive control: no deletion → all rows land through both writers", async () => {
 		const h = await makeHarness()
 		const accounts = await h.service.restore([mkAccount("0xr1"), mkAccount("0xr2")])
@@ -598,5 +610,36 @@ describe("AccountService keyed reads bind the row body to the requested address"
 		expect(await service.getAccount("p1", 1, "0xA")).toBeUndefined()
 		await expect(service.getAccountContract("p1", 1, "0xA")).rejects.toThrow("unknown account address")
 		await expect(service.exportAccount("p1", 1, "0xA", "pw", false)).rejects.toThrow("unknown account address")
+	})
+
+	test.each([
+		["profileId", { profileId: "p2" }],
+		["chainId", { chainId: 2 }],
+		["address", { address: "0xB" }],
+	])("a row body differing only in %s reads as absent", async (_field, over) => {
+		const { api, service } = await makeHarness()
+		await api.storage.local.set({ [`nulo:core:accounts@${accountRowId("p1", 1, "0xA")}`]: JSON.stringify(mkAccount("0xA", over)) })
+		expect(await service.getAccount("p1", 1, "0xA")).toBeUndefined()
+	})
+
+	test("an omitted profile id with no row throws the engine's own TypeError, naming the local `account`", async () => {
+		// RPC arguments are spread unvalidated, so `undefined === undefined` passes the first check
+		// and the second read throws; the text is whatever this engine says for that expression.
+		const reference = (() => {
+			// Read through `Reflect.get` so no transpiler folds the local into `(void 0)`.
+			const account = Reflect.get({}, "absent") as { chainId: number }
+			try {
+				return String(account.chainId)
+			} catch (err) {
+				return (err as Error).message
+			}
+		})()
+		const { service } = await makeHarness()
+		const missing = undefined as unknown as string
+		await expect(service.getAccount(missing, 1, "0xA")).rejects.toThrow(reference)
+		await expect(service.getAccountContract(missing, 1, "0xA")).rejects.toThrow(reference)
+		await expect(service.exportAccount(missing, 1, "0xA", "pw", false)).rejects.toThrow(reference)
+		await expect(service.changeAccountName(missing, 1, "0xA", "x")).rejects.toThrow(reference)
+		await expect(service.getAccount(missing, 1, "0xA")).rejects.toBeInstanceOf(TypeError)
 	})
 })

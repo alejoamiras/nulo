@@ -266,6 +266,17 @@ describe("SessionManager", () => {
 			expect(typeof persisted.since).toBe("number")
 		})
 
+		test("getDek hands out a fresh copy per call, so a caller's wipe never reaches the session's DEK", async () => {
+			const { manager } = setup()
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)), dekBuffer())
+			const first = await manager.getDek("pid")
+			const second = await manager.getDek("pid")
+			expect(first).not.toBe(second)
+			first?.fill(0)
+			expect(Array.from(second ?? [])).toEqual(Array.from(dekBuffer()))
+			expect(Array.from((await manager.getDek("pid")) ?? [])).toEqual(Array.from(dekBuffer()))
+		})
+
 		test("getActive returns undefined when nothing is open", async () => {
 			const { manager } = setup()
 			await expect(manager.getActive()).resolves.toBeUndefined()

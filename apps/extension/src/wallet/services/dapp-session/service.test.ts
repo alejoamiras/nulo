@@ -19,6 +19,7 @@ import { LoggerStore } from "@/wallet/logger"
 import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/service"
 import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { beforeEach, describe, expect, test, vi } from "vitest"
+import { recordWrites } from "../storage-write-log"
 import { DappSessionService } from "./service"
 import { RecoveryModeError } from "@nulo/extension-messaging/errors"
 import { asImportedKeysDek, asMasterSecretBytes, deriveDappSessionMacKey } from "@nulo/wallet-crypto"
@@ -177,16 +178,34 @@ describe("DappSessionService active-profile guards (Q19 preservation pins)", () 
 			return realGet(key as never)
 		}) as typeof browserApi.storage.local.get
 
+		const writes = recordWrites(browserApi.storage.local, `${ROW_ROOT}@`)
 		const run = svc.addDappSession({ url: "https://dapp.example" } as never, [], [], 0 as never, "1")
 		await new Promise((r) => setTimeout(r, 0))
 		profileStub.deletionState.beginDeletion("p1")
 		profileStub.deletionState.release("p1")
 		;(parked as (() => void) | null)?.()
 
-		await expect(run).rejects.toThrow(/deleted|not current/i)
+		await expect(run).rejects.toThrow(/^profile p1 is being deleted — write rejected \(epoch 0 → 1\)$/)
 		browserApi.storage.local.get = realGet as typeof browserApi.storage.local.get
+		writes.restore()
+		expect(writes.log).toEqual([])
 		const raw = await browserApi.storage.local.get(null)
 		expect(Object.keys(raw as Record<string, unknown>).some((k) => k.startsWith("nulo:core:dappSessions@"))).toBe(false)
+	})
+
+	test("addDappSession: a deletion landing DURING the row write is compensated away before any emit", async () => {
+		const { service: svc, profileStub, browserApi } = await makeService()
+		const emitted: unknown[] = []
+		svc.onDappSessionAdded.add((s) => emitted.push(s))
+		const writes = recordWrites(browserApi.storage.local, `${ROW_ROOT}@`, () => profileStub.deletionState.beginDeletion("p1"))
+
+		await expect(svc.addDappSession({ url: "https://dapp.example" } as never, [], [], 0 as never, "1")).rejects.toThrow(
+			/^profile p1 deleted$/,
+		)
+		writes.restore()
+		expect(writes.log).toHaveLength(2)
+		expect(writes.log[1]).toBe(writes.log[0]?.replace(/^set:/, "remove:"))
+		expect(emitted).toHaveLength(0)
 	})
 })
 
