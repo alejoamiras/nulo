@@ -5,6 +5,7 @@
  */
 import type { ContractsCapability, SimulationCapability, TransactionCapability } from "@nulo/wallet-bridge"
 import { authorizationsEffective, coversAnyContract, isAnyContractScope } from "@nulo/wallet-bridge"
+import { isObjectLike } from "@nulo/wallet-core/utils"
 
 export type RowKey =
 	| "account-address"
@@ -212,7 +213,7 @@ export function transactionRow(cap: TransactionCapability): PermissionRowEntry {
 export function isBroadRequest(caps: readonly unknown[]): boolean {
 	return (
 		coversAnyContract(caps) ||
-		caps.some((cap) => isRecord(cap) && cap.type === "simulation" && simulationRow(cap as SimulationCapability).flagged)
+		caps.some((cap) => isObjectLike(cap) && cap.type === "simulation" && simulationRow(cap as SimulationCapability).flagged)
 	)
 }
 
@@ -220,14 +221,14 @@ export function isBroadRequest(caps: readonly unknown[]): boolean {
  *  is ever covered, so every authorization opens the confirmation window. */
 export function holdsCallScope(caps: readonly unknown[]): boolean {
 	return caps.some((cap) => {
-		if (!isRecord(cap)) return false
+		if (!isObjectLike(cap)) return false
 		if (cap.type === "transaction") return true
-		return cap.type === "simulation" && isRecord(cap.transactions) && Boolean(cap.transactions.scope)
+		return cap.type === "simulation" && isObjectLike(cap.transactions) && Boolean(cap.transactions.scope)
 	})
 }
 
 export function holdsCanCreateAuthWit(caps: readonly unknown[]): boolean {
-	return caps.some((cap) => isRecord(cap) && cap.type === "accounts" && Boolean(cap.canCreateAuthWit))
+	return caps.some((cap) => isObjectLike(cap) && cap.type === "accounts" && Boolean(cap.canCreateAuthWit))
 }
 
 /**
@@ -248,8 +249,4 @@ export function consentLostOnWidening(consent: unknown, held: readonly unknown[]
 
 export function privateEventsDefault(contracts: "*" | readonly string[]): boolean {
 	return contracts !== "*"
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null
 }

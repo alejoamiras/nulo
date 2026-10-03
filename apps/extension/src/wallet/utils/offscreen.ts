@@ -1,5 +1,6 @@
 // Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 import { isSenderAtUrl, isTrustedInternalSender } from "@nulo/extension-messaging/offscreen"
+import { createSerialQueue } from "@nulo/wallet-core/utils"
 
 export const OFFSCREEN_READY_MESSAGE = "OFFSCREEN_READY"
 export const OFFSCREEN_PING = "OFFSCREEN_PING"
@@ -125,11 +126,10 @@ const onOffscreenTimeout = () => {
  *  order and a successor that joins `pendingClose` waits for ALL of them before
  *  probing/creating. Identity-guarded so an earlier link settling doesn't null a
  *  newer one. */
-let closeTail: Promise<void> = Promise.resolve()
+const closeQueue = createSerialQueue({ onError: () => {} })
 let pendingClose: Promise<void> | null = null
 function trackedClose(): Promise<void> {
-	const link = closeTail.then(() => closeOffscreen()).catch(() => {})
-	closeTail = link
+	const link = closeQueue.run(() => closeOffscreen())
 	pendingClose = link
 	void link.finally(() => {
 		if (pendingClose === link) pendingClose = null

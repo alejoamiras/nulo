@@ -56,6 +56,7 @@ describe("readConsent", () => {
 		["an empty object", {}, undefined],
 		["an extra field", { broad: true, scope: "*" }, undefined],
 		["an array", [true], undefined],
+		["an array carrying broad", Object.assign([], { broad: true }), undefined],
 	])("%s", (_name, value, expected) => {
 		expect(readConsent(value)).toEqual(expected)
 	})

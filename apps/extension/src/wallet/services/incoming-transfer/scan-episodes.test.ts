@@ -210,6 +210,69 @@ describe("ScanEpisodeStore", () => {
 		expect(await stored()).toBeUndefined()
 	})
 
+	test("writes run one at a time: a removal starts only after the write queued before it has landed", async () => {
+		const calls: string[] = []
+		let release!: () => void
+		const area = {
+			get: api.storage.session.get,
+			set: vi.fn(async (items: Record<string, unknown>) => {
+				calls.push("set-start")
+				await new Promise<void>((r) => {
+					release = r
+				})
+				await api.storage.session.set(items)
+				calls.push("set-done")
+			}),
+			remove: vi.fn(async (key: string) => {
+				calls.push("remove")
+				await api.storage.session.remove(key)
+			}),
+		}
+		const store = new ScanEpisodeStore(area as never, vi.fn())
+		store.record(KEY, "failed", NOW)
+		store.deleteWhere(() => true)
+		await vi.waitFor(() => expect(calls).toEqual(["set-start"]))
+		release()
+		await store.settled()
+		expect(calls).toEqual(["set-start", "set-done", "remove"])
+		expect(await stored()).toBeUndefined()
+	})
+
+	test("hydrate resolves only after its repair write has landed", async () => {
+		await seed({ [KEY]: { failures: 4, failingSince: NOW - 20 * MIN, nextAttemptAt: NOW + 1_000 * MIN } })
+		let release!: () => void
+		const area = {
+			get: (key: string) => api.storage.session.get(key),
+			set: vi.fn(async (items: Record<string, unknown>) => {
+				await new Promise<void>((r) => {
+					release = r
+				})
+				await api.storage.session.set(items)
+			}),
+			remove: (key: string) => api.storage.session.remove(key),
+		}
+		const store = new ScanEpisodeStore(area as never, vi.fn())
+		let hydrated = false
+		const hydrating = store.hydrate(NOW).then(() => {
+			hydrated = true
+		})
+		await vi.waitFor(() => expect(area.set).toHaveBeenCalledTimes(1))
+		await new Promise((r) => setTimeout(r, 0))
+		expect(hydrated).toBe(false)
+		release()
+		await hydrating
+		expect(await stored()).toMatchObject({ [KEY]: { nextAttemptAt: NOW + BACKOFF_CAP_MS } })
+	})
+
+	test("an episodes field stored as an array is not a map: its entries are never adopted", async () => {
+		await api.storage.session.set({
+			[SCAN_EPISODES_KEY]: { episodes: [{ failures: 2, failingSince: NOW - MIN, nextAttemptAt: 0 }], announced: [] },
+		})
+		const store = makeStore()
+		await store.hydrate(NOW)
+		expect(store.has("0")).toBe(false)
+	})
+
 	test("a storage failure is reported and never thrown; memory keeps working", async () => {
 		const onError = vi.fn()
 		const area = { ...api.storage.session, get: api.storage.session.get, set: vi.fn().mockRejectedValue(new Error("quota")) }

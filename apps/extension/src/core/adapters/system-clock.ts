@@ -4,6 +4,7 @@
  */
 
 import type { ClockPort, TimerHandle } from "@nulo/wallet-core/ports"
+import { sleep } from "@nulo/wallet-core/utils"
 
 export class SystemClock implements ClockPort {
 	public now(): number {
@@ -11,7 +12,7 @@ export class SystemClock implements ClockPort {
 	}
 
 	public sleep(ms: number): Promise<void> {
-		return new Promise((resolve) => setTimeout(resolve, ms))
+		return sleep(ms)
 	}
 
 	public setTimeout(fn: () => void, ms: number): TimerHandle {

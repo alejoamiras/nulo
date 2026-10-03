@@ -1,5 +1,5 @@
 import type { ConfigProp, IConfig } from "@/wallet/config"
-import { EventHandler } from "@nulo/wallet-core/utils"
+import { EventHandler, createSerialQueue } from "@nulo/wallet-core/utils"
 import { type ILoggerStore, type Log, LogLevel, CircularBufferIterable, print, trim } from "."
 
 export class LoggerStore implements ILoggerStore {
@@ -17,7 +17,7 @@ export class LoggerStore implements ILoggerStore {
 	 * pending, and a purge awaiting only the latest promise can still be overtaken by the earlier
 	 * write. Chaining every `set` and `remove` through one queue makes the ordering total.
 	 */
-	private storageOps: Promise<void> = Promise.resolve()
+	private readonly storageOps = createSerialQueue({ onError: () => {} })
 	private persistEnabled: boolean
 
 	private readonly config: IConfig
@@ -126,9 +126,7 @@ export class LoggerStore implements ILoggerStore {
 	 * runtime — so one bad operation never wedges the queue for the rest of the worker's life.
 	 */
 	private enqueueStorageOp(op: () => Promise<void>): Promise<void> {
-		const next = this.storageOps.then(op, op).catch(() => {})
-		this.storageOps = next
-		return next
+		return this.storageOps.run(op)
 	}
 
 	/**

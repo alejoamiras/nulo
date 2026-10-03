@@ -217,6 +217,16 @@ describe("LoggerStore", () => {
 
 			expect(session.remove).toHaveBeenCalledWith("nulo:logs")
 		})
+
+		test("a removal that fails still resolves clear(), and the next one still runs", async () => {
+			const session = mockSessionStorage()
+			session.remove.mockRejectedValueOnce(new Error("quota"))
+			const store = new LoggerStore(mockConfig(true, true))
+
+			await expect(store.clear()).resolves.toBeUndefined()
+			await expect(store.clear()).resolves.toBeUndefined()
+			expect(session.remove).toHaveBeenCalledTimes(2)
+		})
 	})
 
 	describe("circular buffer behavior", () => {

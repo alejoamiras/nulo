@@ -1,3 +1,4 @@
+import { createSerialQueue, isRecord } from "@nulo/wallet-core/utils"
 import { UI_STORAGE_KEYS } from "@/popup/constants/storage-keys"
 import { storageLocalGet, storageLocalRemove, storageLocalSet } from "@/utils/storage"
 import type { SavedRecord, TransferSide } from "./fee-privacy"
@@ -11,8 +12,7 @@ type Blob = Record<string, unknown>
 const MAX_NAME = 64
 
 /** Extension storage is writable by anything that reaches the profile dir: every shape is checked before use. */
-const asObject = (value: unknown): Blob | undefined =>
-	typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Blob) : undefined
+const asObject = (value: unknown): Blob | undefined => (isRecord(value) ? value : undefined)
 
 function asRecord(value: unknown): SavedRecord | undefined {
 	const obj = asObject(value)
@@ -72,21 +72,14 @@ export function withoutFpc(raw: unknown, fpcId: string): Blob {
 	return all
 }
 
-let chain: Promise<void> = Promise.resolve()
-
-/** One link per call; the chain continues past a rejected link so a storage error cannot wedge later writes. */
-function enqueue(step: () => Promise<void>): Promise<void> {
-	const link = chain.then(step, step)
-	chain = link.catch(() => undefined)
-	return link
-}
+const chain = createSerialQueue()
 
 /**
  * The ONLY writer of the Send picks key. Read-modify-write on one module-scoped chain, so two
  * writers in one document cannot interleave their read and their write.
  */
 export function mutateSendSelections(update: (raw: unknown) => Blob): Promise<void> {
-	return enqueue(async () => {
+	return chain.run(async () => {
 		const stored = await storageLocalGet(KEY)
 		await storageLocalSet({ [KEY]: update(stored[KEY]) })
 	})
@@ -94,7 +87,7 @@ export function mutateSendSelections(update: (raw: unknown) => Blob): Promise<vo
 
 /** Removal rides the same chain: a pick queued before a reset must not land after it and resurrect the key. */
 export function clearSendSelections(): Promise<void> {
-	return enqueue(() => storageLocalRemove(KEY))
+	return chain.run(() => storageLocalRemove(KEY))
 }
 
 export async function loadSendSelections(): Promise<unknown> {

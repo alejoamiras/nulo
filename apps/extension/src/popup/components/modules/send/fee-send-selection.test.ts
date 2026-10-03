@@ -84,6 +84,11 @@ describe("slot parsing", () => {
 		expect(raw).toEqual({ "0xOk": { public: { type: "fj" } }, "0xA": { private: { type: "fj" } } })
 	})
 
+	test("a stored map that is an array is not a map: its entries are never carried forward", () => {
+		const raw = withSendSlot([{ private: { type: "fj" } }], "0xA", "public", { type: "fj" })
+		expect(raw).toEqual({ "0xA": { public: { type: "fj" } } })
+	})
+
 	test("withoutFpc prunes both slots on every account and leaves the rest", () => {
 		const raw = {
 			"0xA": { private: { type: "fpc", fpc: { id: "s1" } }, public: { type: "fj" } },

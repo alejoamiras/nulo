@@ -239,6 +239,41 @@ describe("useEntityCrud", () => {
 		scope.stop()
 	})
 
+	it("a superseded fetch that fails sets no error, and only the latest run clears loading", async () => {
+		let rejectFirst: (e: unknown) => void = () => {}
+		let resolveSecond: (v: Item[]) => void = () => {}
+		const onError = vi.fn()
+		const fetch = vi
+			.fn(async (): Promise<Item[]> => [])
+			.mockImplementationOnce(
+				() =>
+					new Promise<Item[]>((_res, rej) => {
+						rejectFirst = rej
+					}),
+			)
+			.mockImplementationOnce(
+				() =>
+					new Promise<Item[]>((res) => {
+						resolveSecond = res
+					}),
+			)
+		const scope = effectScope()
+		const result = scope.run(() => useEntityCrud<Item>({ fetch, added, updated, deleted, mode: "resync", onError }))!
+		await flush()
+		added.invoke({ id: "x", name: "x" })
+		await flush()
+		rejectFirst(new Error("stale failure"))
+		await flush()
+		expect(result.error.value).toBeNull()
+		expect(onError).not.toHaveBeenCalled()
+		expect(result.isLoading.value).toBe(true)
+		resolveSecond([{ id: "fresh", name: "fresh" }])
+		await flush()
+		expect(result.isLoading.value).toBe(false)
+		expect(result.entities.value.map((e) => e.id)).toEqual(["fresh"])
+		scope.stop()
+	})
+
 	it("dispose unsubscribes from all three hooks", async () => {
 		const scope = effectScope()
 		const result = scope.run(() =>

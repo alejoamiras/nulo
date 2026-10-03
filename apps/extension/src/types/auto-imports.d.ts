@@ -216,7 +216,6 @@ declare global {
   const readBackupFile: typeof import('../utils/full-backup-helpers').readBackupFile
   const readLiveness: typeof import('../utils/background-liveness').readLiveness
   const readonly: typeof import('vue').readonly
-  const realSleep: typeof import('../composables/importPreflight').realSleep
   const receivedLabel: typeof import('../utils/received-display').receivedLabel
   const ref: typeof import('vue').ref
   const refreshBalances: typeof import('../utils/core').refreshBalances
@@ -743,7 +742,6 @@ declare module 'vue' {
     readonly readBackupFile: UnwrapRef<typeof import('../utils/full-backup-helpers')['readBackupFile']>
     readonly readLiveness: UnwrapRef<typeof import('../utils/background-liveness')['readLiveness']>
     readonly readonly: UnwrapRef<typeof import('vue')['readonly']>
-    readonly realSleep: UnwrapRef<typeof import('../composables/importPreflight')['realSleep']>
     readonly receivedLabel: UnwrapRef<typeof import('../utils/received-display')['receivedLabel']>
     readonly ref: UnwrapRef<typeof import('vue')['ref']>
     readonly refreshBalances: UnwrapRef<typeof import('../utils/core')['refreshBalances']>

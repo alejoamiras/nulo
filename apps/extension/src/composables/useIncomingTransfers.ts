@@ -1,5 +1,6 @@
 import { onScopeDispose, ref, watch, type Ref } from "vue"
 import type { EventHandler } from "@nulo/wallet-core/utils"
+import { createRunFence } from "@/composables/runFence"
 import type { ConfigProp } from "@/wallet/config"
 import type { IncomingTransferRecord } from "@/wallet/services/incoming-transfer/spec"
 import { ADDED_COALESCE, coalesce } from "@/utils/coalesce"
@@ -71,26 +72,26 @@ export function useIncomingTransfers(options: UseIncomingTransfersOptions): UseI
 	// reset-on-switch watcher and the stale-fetch / foreign-event rejection.
 	const scopeKey = (s: IncomingScope | undefined): string => (s ? `${s.profileId} ${s.networkId} ${s.account}` : "")
 
-	// Bumped per refresh so a late fetch for a superseded scope (A→B→A) is
+	// One run per refresh: a late fetch for a superseded scope (A→B→A) is
 	// dropped instead of clobbering the current one.
-	let refreshSeq = 0
+	const fence = createRunFence()
 	// Dropped if disposed, a newer refresh started, or the active scope changed
 	// during an await — never assign a stale/foreign snapshot.
-	const isStale = (seq: number, key: string) => disposed || seq !== refreshSeq || scopeKey(scope()) !== key
+	const isStale = (isCurrent: () => boolean, key: string) => disposed || !isCurrent() || scopeKey(scope()) !== key
 	// Ids deleted while each read is in flight: its rows can predate the delete, taken by the
 	// service before it or held across `afterRead`, and assigning them would bring the row back.
 	const deletedDuringRead = new Set<Set<string>>()
 
-	const readRows = async (s: IncomingScope, seq: number, key: string, deleted: Set<string>): Promise<void> => {
+	const readRows = async (s: IncomingScope, isCurrent: () => boolean, key: string, deleted: Set<string>): Promise<void> => {
 		const rows = await incomingTransferService.getIncomingTransfers(s.profileId, s.networkId, s.account)
-		if (isStale(seq, key)) return
+		if (isStale(isCurrent, key)) return
 		if (afterRead) {
 			try {
 				await afterRead(s)
 			} catch {
 				// The rows are the feed; a judge that failed must not hide them.
 			}
-			if (isStale(seq, key)) return
+			if (isStale(isCurrent, key)) return
 		}
 		incomingTransfers.value = deleted.size ? rows.filter((x) => !deleted.has(x.id)) : rows
 	}
@@ -101,7 +102,7 @@ export function useIncomingTransfers(options: UseIncomingTransfersOptions): UseI
 		const deleted = new Set<string>()
 		deletedDuringRead.add(deleted)
 		try {
-			await readRows(s, ++refreshSeq, scopeKey(s), deleted)
+			await readRows(s, fence.begin(), scopeKey(s), deleted)
 		} finally {
 			deletedDuringRead.delete(deleted)
 		}

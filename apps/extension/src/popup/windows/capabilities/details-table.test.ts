@@ -177,3 +177,15 @@ describe("the Details table and the scope check", () => {
 		}
 	})
 })
+
+describe("the Details table's object check accepts arrays", () => {
+	test("an array carrying a transaction grant's fields reaches the table", () => {
+		const disguised = Object.assign([], { type: "transaction", scope: "*" })
+		expect(buildDetailsTable([disguised], []).anyContract).toEqual({
+			name: "Any contract",
+			simulate: [],
+			add: false,
+			transact: ["Any function"],
+		})
+	})
+})

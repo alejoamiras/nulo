@@ -1,3 +1,5 @@
+import { createSerialQueue } from "@nulo/wallet-core/utils"
+
 export type NetworkActivationResult = "activated" | "blocked" | "unconfirmed" | "stale"
 
 type ScopeStore<N> = {
@@ -15,7 +17,7 @@ type ScopeStore<N> = {
  * (Cross-window: realms don't share this chain; each view converges to the
  * durable pointer on its own bootstrap — recorded follow-up, not attempted.)
  */
-let tail: Promise<unknown> = Promise.resolve()
+const activations = createSerialQueue()
 
 /**
  * Activate a network without letting the durable pointer escape the in-flight-
@@ -41,14 +43,7 @@ export async function activateNetworkGuarded<N extends { id: string }>(
 	target: N,
 ): Promise<NetworkActivationResult> {
 	const enqueuedProfileId = store.profile?.id
-	const run = tail.then(() => runActivation(store, persistActiveNetwork, readActiveNetwork, target, enqueuedProfileId))
-	// Rejection-proof tail: the NEXT activation must run whether this one
-	// resolved or threw. The thrown error still reaches this run's caller.
-	tail = run.then(
-		() => undefined,
-		() => undefined,
-	)
-	return run
+	return activations.run(() => runActivation(store, persistActiveNetwork, readActiveNetwork, target, enqueuedProfileId))
 }
 
 async function runActivation<N extends { id: string }>(

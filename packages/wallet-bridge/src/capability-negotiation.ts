@@ -20,6 +20,7 @@ import { isFieldAddress, sameFieldAddress } from "./field-address"
 import { coversAnyContract, effectiveGrants, grantsOfType } from "./method-scope-checkers"
 import type { IDappSessionRef } from "./session-types"
 import { ValidationError } from "@nulo/extension-messaging/errors"
+import { isRecord } from "@nulo/wallet-core/utils"
 
 /** Whether every address+flag the request needs is already covered by the UNION of stored
  *  contracts grants. NOT equality: shrinking requests must not re-prompt; growing ones must
@@ -129,10 +130,6 @@ const KNOWN_CAPABILITY_TYPES: Record<Capability["type"], true> = {
 
 function isKnownCapabilityType(type: string): type is Capability["type"] {
 	return Object.hasOwn(KNOWN_CAPABILITY_TYPES, type)
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 function knownTypeOf(cap: unknown): Capability["type"] | undefined {

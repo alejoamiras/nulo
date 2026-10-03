@@ -214,6 +214,22 @@ describe("useIncomingSyncHealth", () => {
 		expect(health.retrying.value).toBe(false)
 	})
 
+	test("a retry outlived by a scope change neither clears the new scope's flag nor refetches", async () => {
+		const { client, health, setScope } = setup(STALLED)
+		await health.refresh()
+		let finish!: () => void
+		client.retryIncomingScan.mockImplementationOnce(() => new Promise<undefined>((resolve) => (finish = () => resolve(undefined))))
+		const oldRetry = health.retry()
+		setScope({ profileId: "p1", networkId: "n2" })
+		await health.refresh()
+		const reads = client.getIncomingSyncHealth.mock.calls.length
+		finish()
+		await oldRetry
+		await flushPromises()
+		expect(client.getIncomingSyncHealth.mock.calls.length).toBe(reads)
+		expect(health.retrying.value).toBe(false)
+	})
+
 	test("dispose unsubscribes, cancels the pending hide and ignores an in-flight answer", async () => {
 		const { client, health, answer } = setup(STALLED)
 		await health.refresh()

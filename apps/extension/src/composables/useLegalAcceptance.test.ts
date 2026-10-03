@@ -90,6 +90,23 @@ describe("useLegalAcceptance", () => {
 		expect(legal.error.value).toBe(boom)
 	})
 
+	test("a superseded read that fails sets neither the error nor missing", async () => {
+		const first = deferred<LegalStatus>()
+		const second = deferred<LegalStatus>()
+		const { service, client } = makeService()
+		service.getStatus.mockImplementationOnce(() => first.promise).mockImplementationOnce(() => second.promise)
+		const legal = useLegalAcceptance(client)
+		const older = legal.refresh()
+		const newer = legal.refresh()
+		first.reject(new Error("port closed"))
+		await older
+		expect(legal.status.value).toBe("loading")
+		expect(legal.error.value).toBeUndefined()
+		second.resolve("current")
+		await newer
+		expect(legal.status.value).toBe("current")
+	})
+
 	test("accept stays not-current until the background has stored the record", async () => {
 		const write = deferred<object>()
 		const { service, client } = makeService(async () => "missing")

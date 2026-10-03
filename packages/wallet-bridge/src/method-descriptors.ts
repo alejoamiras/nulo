@@ -22,6 +22,7 @@
  */
 
 import { UnsupportedMethodError } from "@nulo/extension-messaging/errors"
+import { isRecord } from "@nulo/wallet-core/utils"
 import type { OperationKind } from "./operation"
 import {
 	type ScopeCheck,
@@ -115,8 +116,6 @@ export interface MethodDescriptor {
 // dispatcher throws the "invalid arguments" rejection when one returns false.
 // Named (not inline) so the registry reads as a table of guarded methods.
 
-const isPlainRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v)
-
 /** requestCapabilities(manifest?): the handler optional-chains the manifest
  *  (`manifest?.capabilities ?? []`) then `.filter`s the list, reading `cap.type`
  *  on each entry. The guard mirrors that tolerance for OBJECT manifests and
@@ -133,7 +132,7 @@ const isPlainRecord = (v: unknown): v is Record<string, unknown> => typeof v ===
 export function argsRequestCapabilities(args: readonly unknown[]): boolean {
 	const manifest = args[0]
 	if (manifest == null) return true
-	if (!isPlainRecord(manifest)) return false
+	if (!isRecord(manifest)) return false
 	const caps = manifest.capabilities
 	if (caps == null) return true
 	return Array.isArray(caps) && caps.every((cap) => cap != null)
@@ -144,7 +143,7 @@ export function argsRequestCapabilities(args: readonly unknown[]): boolean {
 export function argsBatch(args: readonly unknown[]): boolean {
 	const legs = args[0]
 	if (!Array.isArray(legs)) return false
-	return legs.every((leg) => isPlainRecord(leg) && typeof leg.name === "string" && Array.isArray(leg.args))
+	return legs.every((leg) => isRecord(leg) && typeof leg.name === "string" && Array.isArray(leg.args))
 }
 
 /** createAuthWit(from, messageHashOrIntent): both positions are read; there is

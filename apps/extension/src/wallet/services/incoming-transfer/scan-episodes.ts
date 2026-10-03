@@ -1,4 +1,5 @@
 import type { StorageArea } from "@nulo/wallet-core/ports"
+import { createSerialQueue, isRecord } from "@nulo/wallet-core/utils"
 import { BACKOFF_CAP_MS, isScanFailure, isStalled, nextBackoffMs, type ScanEpisode, type ScanOutcome } from "./scan-health"
 
 export const SCAN_EPISODES_KEY = "nulo:incoming:scan-episodes"
@@ -29,7 +30,6 @@ export function scanEpisodeNetworkPrefix(profileId: string, networkId: string): 
 
 const isCount = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0
 const isTime = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value)
 
 /** Validate one stored episode field by field. A streak that cannot be trusted (`failures`,
  *  `failingSince`) drops the entry — a fresh episode under-reports, it never invents a stall. A bad
@@ -57,7 +57,7 @@ export function parseStoredEpisode(raw: unknown, now: number): StoredScanEpisode
 export class ScanEpisodeStore {
 	private readonly episodes = new Map<string, StoredScanEpisode>()
 	private readonly announced = new Set<string>()
-	private writeChain: Promise<void> = Promise.resolve()
+	private readonly writes = createSerialQueue({ onError: (error) => this.onPersistError(error) })
 
 	public constructor(
 		private readonly area: StorageArea,
@@ -86,7 +86,7 @@ export class ScanEpisodeStore {
 		}
 		if (JSON.stringify(this.snapshot()) === JSON.stringify(blob)) return
 		this.persist()
-		await this.writeChain
+		await this.writes.tail
 	}
 
 	public has(key: string): boolean {
@@ -156,8 +156,8 @@ export class ScanEpisodeStore {
 	}
 
 	/** Resolves once every queued write has landed. */
-	public settled(): Promise<void> {
-		return this.writeChain
+	public settled(): Promise<unknown> {
+		return this.writes.tail
 	}
 
 	private hasEpisodeUnder(prefix: string): boolean {
@@ -173,6 +173,6 @@ export class ScanEpisodeStore {
 		const snapshot = this.snapshot()
 		const isEmpty = this.episodes.size === 0 && this.announced.size === 0
 		const write = () => (isEmpty ? this.area.remove(SCAN_EPISODES_KEY) : this.area.set({ [SCAN_EPISODES_KEY]: snapshot }))
-		this.writeChain = this.writeChain.then(write).catch((error) => this.onPersistError(error))
+		void this.writes.run(write)
 	}
 }

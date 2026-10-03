@@ -10,6 +10,7 @@
  * whole preflight — later attempts only get the remainder.
  */
 
+import { sleep } from "@nulo/wallet-core/utils"
 import { NodeStatus } from "@/wallet/services/network/spec"
 
 export type PreflightVerdict = "go" | "unreachable" | "wrong-network"
@@ -28,8 +29,6 @@ export interface PreflightOptions {
 	deadlineAt: number
 }
 
-export const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
-
 async function probeOneNetwork(networkId: string, opts: Pick<PreflightOptions, "probe" | "deadlineAt">): Promise<PreflightVerdict> {
 	const attempts = PREFLIGHT_BACKOFF_WAITS_MS.length + 1
 	for (let attempt = 0; attempt < attempts; attempt++) {
@@ -43,7 +42,7 @@ async function probeOneNetwork(networkId: string, opts: Pick<PreflightOptions, "
 				.probe(networkId, budget)
 				.then((status) => ({ kind: "status" as const, status }))
 				.catch(() => ({ kind: "failed" as const })),
-			realSleep(budget).then(() => ({ kind: "timeout" as const })),
+			sleep(budget).then(() => ({ kind: "timeout" as const })),
 		])
 
 		if (outcome.kind === "status") {
@@ -58,7 +57,7 @@ async function probeOneNetwork(networkId: string, opts: Pick<PreflightOptions, "
 
 		const wait = PREFLIGHT_BACKOFF_WAITS_MS[attempt]
 		if (wait !== undefined && opts.deadlineAt - Date.now() > wait) {
-			await realSleep(wait)
+			await sleep(wait)
 		}
 	}
 	return "unreachable"

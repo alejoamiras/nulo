@@ -310,6 +310,107 @@ describe("ensureOffscreenRunning (cold-start single-flight)", () => {
 			vi.useRealTimers()
 		}
 	})
+
+	test("an earlier close settling does not release a successor while a later close is still pending", async () => {
+		vi.useFakeTimers()
+		try {
+			createDocument
+				.mockRejectedValueOnce(new Error("Offscreen document closed before fully loading."))
+				.mockImplementation(async () => {})
+			let resolveRetryClose!: () => void
+			let resolveTimeoutClose!: () => void
+			closeDocument
+				.mockImplementationOnce(
+					() =>
+						new Promise<void>((r) => {
+							resolveRetryClose = r
+						}),
+				)
+				.mockImplementationOnce(
+					() =>
+						new Promise<void>((r) => {
+							resolveTimeoutClose = r
+						}),
+				)
+				.mockImplementation(async () => {})
+
+			const pA = ensureOffscreenRunning().catch((e) => String(e))
+			await vi.advanceTimersByTimeAsync(10_000)
+			expect(await pA).toBe("Offscreen is not responding")
+			const createsAfterA = createDocument.mock.calls.length
+
+			resolveRetryClose()
+			await vi.advanceTimersByTimeAsync(0)
+			expect(closeDocument).toHaveBeenCalledTimes(2) // the timeout close is now in flight
+
+			const pB = ensureOffscreenRunning()
+			await vi.advanceTimersByTimeAsync(0)
+			expect(createDocument.mock.calls.length).toBe(createsAfterA) // still joined on the timeout close
+
+			resolveTimeoutClose()
+			await vi.advanceTimersByTimeAsync(0)
+			deliver(OFFSCREEN_READY_MESSAGE)
+			await pB
+			expect(createDocument.mock.calls.length).toBeGreaterThan(createsAfterA)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("a successor joined on a close that succeeds resumes on the close tail's swallowing link, not before it", async () => {
+		vi.useFakeTimers()
+		const CAP = 200
+		let ticks = 0
+		let stopped = false
+		let exhausted = false
+		const spin = () => {
+			if (stopped) return
+			if (++ticks >= CAP) {
+				exhausted = true
+				return
+			}
+			queueMicrotask(spin)
+		}
+		try {
+			createDocument.mockImplementationOnce(() => new Promise(() => {}))
+			let resolveCloseA!: () => void
+			closeDocument.mockImplementationOnce(
+				() =>
+					new Promise<void>((r) => {
+						resolveCloseA = r
+					}),
+			)
+			const pA = ensureOffscreenRunning().catch((e) => String(e))
+			await vi.advanceTimersByTimeAsync(10_000)
+			expect(await pA).toBe("Offscreen is not responding")
+
+			createDocument.mockImplementation(async () => {})
+			const pB = ensureOffscreenRunning()
+			await vi.advanceTimersByTimeAsync(0)
+			let probedAt = -1
+			getContexts.mockImplementation(async () => {
+				probedAt = ticks
+				return []
+			})
+
+			// The probe is the first thing the successor does after `await pendingClose`, so its
+			// stamp is the microtask at which the joined link settled and the caller resumed.
+			queueMicrotask(spin)
+			resolveCloseA()
+			while (probedAt < 0 && !exhausted) await Promise.resolve()
+			stopped = true
+
+			// Finish the pass before asserting, so a failure here leaves no pass in flight for the next test.
+			await vi.advanceTimersByTimeAsync(0)
+			deliver(OFFSCREEN_READY_MESSAGE)
+			await pB
+			expect(exhausted).toBe(false)
+			expect(probedAt).toBe(4)
+		} finally {
+			stopped = true
+			vi.useRealTimers()
+		}
+	})
 })
 
 describe("ensureOffscreenRunning — Firefox background-page frame", () => {

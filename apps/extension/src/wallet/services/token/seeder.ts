@@ -1,6 +1,7 @@
 import type { MinimalStorageArea } from "@nulo/wallet-core/storage"
 import { ValueStorage } from "@/wallet/storage"
 import { LogLevel } from "@nulo/wallet-core/logger"
+import { createSerialQueue } from "@nulo/wallet-core/utils"
 import type { ILogger } from "@/wallet/logger"
 import type { DefaultTokenSeed } from "./default-tokens"
 import type { SeedScope, SeedStatus, SeedStatusEntry, SeedStatusSnapshot, TokenInterface } from "./spec"
@@ -165,7 +166,7 @@ export class TokenSeeder {
 	private readonly logger: ILogger
 	private readonly getVersion: () => string
 	private inflight: Promise<void> | undefined
-	private markerLock: Promise<void> = Promise.resolve()
+	private readonly markerLock = createSerialQueue()
 	/** Bumped by every external purge (profile deletion, chain purge). An
 	 *  in-flight pass re-checks it before every write and aborts on change —
 	 *  a pass captured against state that a purge since erased must not
@@ -310,12 +311,7 @@ export class TokenSeeder {
 	 * later write would resurrect the tombstone.
 	 */
 	private withMarkerLock<T>(fn: () => Promise<T>): Promise<T> {
-		const run = this.markerLock.then(fn)
-		this.markerLock = run.then(
-			() => undefined,
-			() => undefined,
-		)
-		return run
+		return this.markerLock.run(fn)
 	}
 
 	/**
