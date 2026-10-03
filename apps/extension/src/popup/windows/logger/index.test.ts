@@ -1,7 +1,3 @@
-/**
- * The logger window closes itself when the active profile goes away, and only a current window that
- * has an id is removed.
- */
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
 
@@ -40,8 +36,7 @@ async function mountWindow(): Promise<(profile: unknown) => void> {
 beforeEach(() => {
 	onProfile = undefined
 	currentWindow = { id: 7 }
-	// biome-ignore lint/suspicious/noExplicitAny: chrome runtime stub for tests
-	;(globalThis as any).chrome = { windows: { getCurrent, remove } }
+	vi.stubGlobal("chrome", { windows: { getCurrent, remove } })
 })
 afterEach(() => {
 	for (const w of wrappers.splice(0)) w.unmount()
