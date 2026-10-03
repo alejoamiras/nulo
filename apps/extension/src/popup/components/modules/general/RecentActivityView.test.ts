@@ -796,3 +796,137 @@ describe("RecentActivityView — arrivals", () => {
 		expect(arrivals.present).not.toHaveBeenCalled()
 	})
 })
+
+describe("RecentActivityView — the awaiting card's fields", () => {
+	const FIELDS = ["title", "icon", "originLabel", "amount", "amountSymbol", "transferTypeLabel"] as const
+	const inFlight = (id: string, createdAt: number, over: Record<string, unknown>) => ({
+		id,
+		accountAddress: ACCT_A,
+		profileId: "p1",
+		networkId: "net-1",
+		terminalAt: null,
+		createdAt,
+		progress: { stage: "proving", enteredProveAt: 1 },
+		...over,
+	})
+
+	test("each in-flight op's card reads its title, icon, chips and amount from the record and its token", async () => {
+		H.getTokens.mockResolvedValue([
+			{ id: 42, symbol: "USDC", decimals: 6 },
+			{ id: 43, symbol: "", decimals: 6 },
+		])
+		// Newest first: the table's order is the cards' order.
+		const table: [Record<string, unknown>, Record<(typeof FIELDS)[number], unknown>][] = [
+			[
+				{ kind: "transfer", tokenId: 42, amountRaw: "1500000", transferType: 0 },
+				{
+					title: "USDC",
+					icon: "arrow-narrow-up-right",
+					originLabel: null,
+					amount: "1.5",
+					amountSymbol: "USDC",
+					transferTypeLabel: "Private → Private",
+				},
+			],
+			[
+				{ kind: "transfer", tokenId: 42, amountRaw: "" },
+				{
+					title: "USDC",
+					icon: "arrow-narrow-up-right",
+					originLabel: null,
+					amount: "0",
+					amountSymbol: "USDC",
+					transferTypeLabel: null,
+				},
+			],
+			[
+				{ kind: "transfer", tokenId: 42 },
+				{
+					title: "USDC",
+					icon: "arrow-narrow-up-right",
+					originLabel: null,
+					amount: null,
+					amountSymbol: "USDC",
+					transferTypeLabel: null,
+				},
+			],
+			[
+				{ kind: "transfer", tokenId: 43, amountRaw: "2000000" },
+				{
+					title: "Transfer",
+					icon: "arrow-narrow-up-right",
+					originLabel: null,
+					amount: "2",
+					amountSymbol: null,
+					transferTypeLabel: null,
+				},
+			],
+			[
+				{ kind: "transfer", amountRaw: "2000000", transferType: 1 },
+				{
+					title: "Transfer",
+					icon: "arrow-narrow-up-right",
+					originLabel: null,
+					amount: null,
+					amountSymbol: null,
+					transferTypeLabel: "Private → Public",
+				},
+			],
+			[
+				{
+					kind: "dapp_execute",
+					title: "swap_tokens_for_exact_tokens",
+					subtitle: "alpha.example",
+					tokenId: 42,
+					amountRaw: "1500000",
+					transferType: 0,
+				},
+				{
+					title: "Swap Tokens For Exact Tokens",
+					icon: "zap",
+					originLabel: "alpha.example",
+					amount: null,
+					amountSymbol: null,
+					transferTypeLabel: null,
+				},
+			],
+			[
+				{ kind: "dapp_execute", title: "swap", subtitle: "https://evil.example" },
+				{
+					title: "Swap",
+					icon: "zap",
+					originLabel: "[https://evil.example]",
+					amount: null,
+					amountSymbol: null,
+					transferTypeLabel: null,
+				},
+			],
+			[
+				{ kind: "dapp_execute" },
+				{ title: "Transaction", icon: "zap", originLabel: null, amount: null, amountSymbol: null, transferTypeLabel: null },
+			],
+		]
+		H.getOperations.mockResolvedValue(table.map(([over], i) => inFlight(`op-${i}`, 100 - i, over)))
+		const w = mount(RecentActivityView, { shallow: true, global: { plugins: [makeRouter()] } })
+		await flushPromises()
+		const cards = w.findAllComponents({ name: "TransactionAwaitingCard" })
+		expect(cards.map((c) => c.props("jobId"))).toEqual(table.map((_, i) => `op-${i}`))
+		cards.forEach((card, i) => {
+			expect(Object.fromEntries(FIELDS.map((f) => [f, card.props(f)]))).toEqual(table[i][1])
+		})
+	})
+
+	test("the token feed hides an op of another token, by the journal's own token check", async () => {
+		H.getOperations.mockResolvedValue([
+			inFlight("mine", 2, { kind: "transfer", tokenId: 7 }),
+			inFlight("other", 1, { kind: "transfer", tokenId: 8 }),
+		])
+		const w = mount(RecentActivityView, {
+			shallow: true,
+			props: { token: { id: 7, contract: "0xtok", symbol: "TOK" } },
+			global: { plugins: [makeRouter()] },
+		})
+		await flushPromises()
+		expect(w.findAllComponents({ name: "TransactionAwaitingCard" }).map((c) => c.props("jobId"))).toEqual(["mine"])
+	})
+})
