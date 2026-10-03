@@ -134,12 +134,11 @@ const spokenName = (entry: { row: Row; named: boolean }) => {
 
 <style module>
 .table {
-	--hairline-soft: rgba(74, 70, 63, 0.2);
-
 	display: flex;
 	flex-direction: column;
 }
 
+/* Overrides the shared token: light draws this table's hairlines in its own, warmer hue. */
 :global([theme="light"]) .table {
 	--hairline-soft: rgba(124, 116, 104, 0.2);
 }

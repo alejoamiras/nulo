@@ -195,7 +195,7 @@ function hasActionsContent() {
 	height: 40px;
 
 	background: var(--nulo-surface-low);
-	border: 1px solid rgba(74, 70, 63, 0.3);
+	border: 1px solid var(--hairline-strong);
 }
 
 .badge {

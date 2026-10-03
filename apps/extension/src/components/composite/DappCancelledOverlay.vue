@@ -30,7 +30,7 @@ const emit = defineEmits(["dismiss"])
 	left: 0;
 	width: 100%;
 	height: 100%;
-	background: rgba(10, 9, 8, 0.8);
+	background: var(--scrim-popup);
 	z-index: 1000;
 }
 

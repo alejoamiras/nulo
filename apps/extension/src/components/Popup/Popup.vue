@@ -145,6 +145,6 @@ onBeforeUnmount(() => {
 	right: 0;
 	bottom: 0;
 
-	background: rgba(10, 9, 8, 0.8);
+	background: var(--scrim-popup);
 }
 </style>

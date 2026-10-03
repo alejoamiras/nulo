@@ -185,7 +185,7 @@ onBeforeUnmount(() => {
 	max-width: 280px;
 	margin: 0 auto;
 	padding-top: 12px;
-	border-top: 1px solid rgba(74, 70, 63, 0.2);
+	border-top: 1px solid var(--hairline-soft);
 }
 
 .refreshing_dot {

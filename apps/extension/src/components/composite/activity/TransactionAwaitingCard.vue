@@ -147,7 +147,7 @@ const showCancel = computed(() => props.cancellable && Boolean(props.jobId) && p
 	text-transform: uppercase;
 	color: var(--nulo-secondary);
 	background: var(--nulo-surface-low);
-	border: 1px solid rgba(74, 70, 63, 0.2);
+	border: 1px solid var(--hairline-soft);
 	padding: 1px 4px;
 }
 

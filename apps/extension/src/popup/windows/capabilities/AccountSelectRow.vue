@@ -137,7 +137,7 @@ const startRename = async () => {
 		display: block;
 		height: 1px;
 
-		background: rgba(74, 70, 63, 0.3);
+		background: var(--hairline-strong);
 
 		content: " ";
 	}
