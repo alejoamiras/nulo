@@ -56,18 +56,17 @@ The awaiting card's getters (`RecentActivityView.vue:337-392`) re-derive what th
 | `journalCardIcon(op)` | `arrow-narrow-up-right` | `zap` |
 | `journalCardOriginLabel(op)` | `null` | `sanitizeJournalSubtitle(op.subtitle)` |
 | `journalCardTransferTypeLabel(op)` | `formatTransferType(op.transferType)`, or `null` when undefined (`TransferType.Private` is 0) | `null` |
-| `journalCardAmount(amountRaw, token)` | `balanceFormatted(amountRaw, token.decimals \|\| 0, 8, { compact: true }).value` | — |
 
 **Home awaiting card.**
 
 - The template keeps its eleven bindings separate and in order (`:822-834`). `:title`, `:icon`, `:originLabel` and `:transferTypeLabel` call the helpers directly, so field evaluation still runs title → `cardSubtitleFor` → icon → origin → amount → symbol → transfer type.
-- `cardAmountFor` and `cardAmountSymbolFor` stay in the SFC with today's gates (`amountRaw !== undefined`; a symbol without an amount; `symbol || null`). The amount getter calls `journalCardAmount` for its last line only.
+- `cardAmountFor` and `cardAmountSymbolFor` stay in the SFC with today's gates (`amountRaw !== undefined`; a symbol without an amount; `symbol || null`). The compact `balanceFormatted` call stays inline in both places: `amount.callers.test.ts` pins how many compact calls each file makes, so a shared formatter would change a frozen test (decided during the build, see the lessons file).
 - `cardTitleFor`, `cardIconFor`, `cardOriginLabelFor`, `cardTransferTypeFor` and the `formatTransferType` import leave the SFC. Their `!op` / `op?.` guards are dead: `renderedInFlightOps` comes from a filter that reads `op.terminalAt` first (`:284`), so a null op throws there before any getter runs.
 
 **Terminal builder.**
 
 - `buildJournalTerminalCardProps` keeps its signature, its feed-kind and display gates, and today's key order: title, icon, origin, type, amount and symbol, then the display.
-- Its fields come from the helpers. The amount pair comes from a module-private `terminalAmount(op, tokenById)`: kind first, then `amountRaw` truthy and token found, then `journalCardAmount` and `symbol ?? null`.
+- Its fields come from the helpers. The amount pair comes from a module-private `terminalAmount(op, tokenById)`: kind first, then `amountRaw` truthy and token found, then today's inline `balanceFormatted` call and `symbol ?? null`.
 - `transferCardFields` and `dappCardFields` go.
 
 **Reads and error precedence.** Characterized before claiming equivalence, and pinned in Phase 1.
@@ -176,7 +175,7 @@ The counts are fixed now, from the 5-row budget (in-flight cards count) and the 
 | home-feed-dapp | the two transfer journal rows swapped for the proving and cancelled dApp rows | `tx-awaiting-card` 1 and `tx-terminal-card` 1, each with an origin chip; `tx-card` 1; `tx-incoming-card` 1 |
 | token-feed | `#/popup/tokens/<id>`, all six seeds | `tx-awaiting-card` 1, `tx-terminal-card` 1, `tx-card` 1, `tx-incoming-card` 1 |
 | activity-page, activity-page-end | `#/popup/activity`, all six seeds | `tx-terminal-card` 2, `tx-card` 1, `tx-incoming-card` 1, `activity-date-label` 1 |
-| ls-tokens, ls-contacts, ls-notes, ls-authwits, ls-contracts, ls-senders | each settings page's empty `ListStatusMessage`: no token rows, no contacts, and port stubs answering `[]` for notes, authwits, contracts and senders, each stub's served-call count asserted | the empty block = 1 |
+| ls-tokens, ls-contacts, ls-notes, ls-authwits, ls-contracts, ls-senders | each settings page's empty `ListStatusMessage`: no token rows, no contacts, no authwits (a fresh profile stores none, so no stub), and port stubs answering `[]` for notes, contracts and senders, each stub's served-call count asserted | the empty block = 1 |
 | ls-no-results | Holdings search with a term that matches nothing | `holdings-no-results` = 1 |
 | select-token-no-results | Send → token picker, searched with a term that matches nothing (`components/popups/SelectTokenPopup.vue:173`) | `select-token-no-results` = 1 |
 
@@ -246,11 +245,14 @@ Commit `test: pin the activity feed's row scope and journal card fields` on its 
 | 14 | `terminalAmount` looks the token up before the kind check |
 | 15 | Home's amount gate becomes truthy |
 | 16 | the terminal amount gate becomes `!== undefined` |
-| 17 | `\|\|` and `??` swapped in either symbol |
-| 18 | the transfer-type gate becomes truthy |
-| 19 | `sanitizeJournalSubtitle` is dropped |
-| 20 | the icons are swapped |
-| 21 | a route is swapped |
+| 17 | Home's symbol `\|\|` becomes `??` |
+| 18 | the terminal symbol `??` becomes `\|\|` |
+| 19 | the title's `\|\|` becomes `??` |
+| 20 | the transfer-type gate becomes truthy |
+| 21 | `sanitizeJournalSubtitle` is dropped |
+| 22 | the icons are swapped |
+| 23 | a route is swapped |
+| 24 | History's list drops a row's route |
 
 A survivor gets a test or a probe showing an identical outcome, never an "equivalent" label.
 
