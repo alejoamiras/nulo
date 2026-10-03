@@ -101,6 +101,9 @@ export interface MethodDescriptor {
 	readonly scopeCheck?: ScopeCheck
 	/** Arg-shape guard (see {@link ArgGuard}). Omitted = no arg validation (historical tolerance). */
 	readonly argSchema?: ArgGuard
+	/** Refused as a batch leg before any leg runs. Named for the refusal, not for popup routing, so
+	 *  routing a new method through a popup never widens the set by itself. */
+	readonly refusedInBatch?: true
 	/** Preserved F-/AUDIT markers paired with security tests. */
 	readonly audit?: string
 	/** Rationale migrated verbatim from the old inline comments. */
@@ -208,6 +211,7 @@ const METHOD_REGISTRY_SOURCE = {
 		capability: "accounts",
 		routing: { via: "handler" },
 		argSchema: argsTwoRequired,
+		refusedInBatch: true,
 		// D8: NOT a missing scope checker. registerToken's session-account authz
 		// is enforced inline in handleRegisterToken(); it has no METHOD_SCOPE_CHECKER
 		// entry by design.
@@ -280,6 +284,7 @@ const METHOD_REGISTRY_SOURCE = {
 		capability: "transaction",
 		routing: { via: "handler" },
 		scopeCheck: checkSendTx,
+		refusedInBatch: true,
 		note: "popup-routed via DappInteractionService (fee selection); no METHOD_TO_KIND entry",
 	},
 	grantPublicAuthwit: {
@@ -388,3 +393,4 @@ export const METHOD_TO_KIND: Record<string, OperationKind> = deriveMethodToKind(
 export const NETWORK_ONLY_KINDS: Set<OperationKind> = deriveNetworkOnlyKinds(METHOD_REGISTRY)
 export const ACCOUNT_KINDS: Set<OperationKind> = deriveAccountKinds(METHOD_REGISTRY)
 export const METHOD_SCOPE_CHECKER: Record<string, ScopeCheck> = deriveScopeCheckerMap(METHOD_REGISTRY)
+export const BATCH_REFUSED_METHODS: ReadonlySet<string> = deriveSet(METHOD_REGISTRY, (method, d) => (d.refusedInBatch ? method : undefined))

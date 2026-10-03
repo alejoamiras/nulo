@@ -67,6 +67,7 @@ import type {
 import { getRequiredCapability, isCapabilityExempt } from "./capability-map"
 import { isFieldAddress, sameFieldAddress } from "./field-address"
 import {
+	BATCH_REFUSED_METHODS,
 	METHOD_REGISTRY,
 	METHOD_TO_KIND,
 	NETWORK_ONLY_KINDS,
@@ -1058,12 +1059,8 @@ export class WalletSdkDispatcher {
 		// Zod-blocks these on the dApp side. But a raw protocol client could
 		// bypass the SDK and send the leg directly; we close that hole here
 		// so the README's "not in batch" contract is enforced server-side.
-		//
-		// `sendTx` and `registerToken` are the popup-gated methods. Both
-		// require user interaction (fee selection / token metadata review)
-		// that isn't representable in a batch result.
 		for (const method of methods) {
-			if (method.name === "sendTx" || method.name === "registerToken") {
+			if (BATCH_REFUSED_METHODS.has(method.name)) {
 				throw new Error(`Method "${method.name}" cannot be used inside batch — it requires a confirmation popup`)
 			}
 		}
