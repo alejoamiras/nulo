@@ -37,9 +37,7 @@ export async function decodeAuthwitEffects(
 				chainInfo,
 			)
 			decoded.push({ record: toDiscoveredAuthwit(effect.contractAddress, authRequest, messageHash), messageHash })
-		} catch {
-			// Not a CallAuthorizationRequest, or not one that decodes: skip it.
-		}
+		} catch {}
 	}
 	return decoded
 }

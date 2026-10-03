@@ -76,7 +76,7 @@ export type BuildTxRequestFn = (
 	paymentMethod: AccountFeePaymentMethodOptions,
 ) => Promise<DiscoverContext>
 
-/** The `compute*MessageHash` methods hash over the `nodeInfo` they are given and check nothing:
+/** The `compute*MessageHash` methods hash over the `nodeInfo` they are given and do not validate chain identity:
  *  a signing caller passes one already checked against the selected network. */
 export class AuthwitDiscoverer {
 	public constructor(readonly _logger: ILogger) {}

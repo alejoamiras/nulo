@@ -211,8 +211,7 @@ export async function runFastPath(deps: FastPathDeps): Promise<TxSimulationResul
 
 	// `getNodeInfo` shares fate with the standard PXE path — let it propagate.
 	const nodeInfo = await node.getNodeInfo()
-	// Refuse to simulate against a drifted node. The projection is pure once checked, so taking it
-	// before the bind changes nothing observable.
+	// Refuse to simulate against a drifted node. Once checked, the projection is pure and cannot throw.
 	const chainInfo: ChainInfo = liveChainInfo(network, nodeInfo)
 	// Outside the infrastructure `try` below on purpose: a scope violation must reach the dApp,
 	// not be swallowed into the standard-path fallback.

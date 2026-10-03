@@ -59,21 +59,38 @@ function makeService() {
 	return { internals, pxe }
 }
 
+// The smallest artifact the real `ContractArtifactSchema` accepts.
+const SUPPLIED = {
+	name: "Fixture",
+	functions: [],
+	nonDispatchPublicFunctions: [],
+	outputs: { structs: {}, globals: {} },
+	storageLayout: {},
+	fileMap: {},
+}
+
 const SITES = [
 	{
 		site: "registerContract (C1)",
 		accountsRegistered: 0,
-		run: (s: ReturnType<typeof makeService>["internals"]) =>
-			s.executeRegisterContract({ kind: "register_contract", networkId: NETWORK.id, address: ADDRESS, instance: instance() }),
+		run: (s: ReturnType<typeof makeService>["internals"], artifact?: unknown) =>
+			s.executeRegisterContract({
+				kind: "register_contract",
+				networkId: NETWORK.id,
+				address: ADDRESS,
+				instance: instance(),
+				artifact,
+			}),
 	},
 	{
 		site: "aztec_registerContract (C2)",
 		accountsRegistered: 1,
-		run: (s: ReturnType<typeof makeService>["internals"]) =>
+		run: (s: ReturnType<typeof makeService>["internals"], artifact?: unknown) =>
 			s.executeAztecRegisterContract({
 				kind: "aztec_registerContract",
 				networkId: NETWORK.id,
 				instance: instance(),
+				artifact,
 				secretKey: "0x05",
 			}),
 	},
@@ -113,6 +130,17 @@ describe.each(SITES)("$site: the artifact must hash to the instance's class id",
 		expect(pxe.registerContract).not.toHaveBeenCalled()
 		expect(pxe.registerAccount).not.toHaveBeenCalled()
 		expect(stdlib.computeAddress).not.toHaveBeenCalled()
+	})
+
+	test("a supplied artifact that mismatches is refused without a lookup, before anything is registered", async () => {
+		stdlib.recompute.mockImplementation(async () => ({ id: { toString: () => "0xother" } }))
+		const { internals, pxe } = makeService()
+		const refused = (await rejectionOf(run(internals, SUPPLIED))) as Error
+		expect(refused.message).toBe(MISMATCH)
+		expect(stdlib.recompute).toHaveBeenCalledWith(expect.objectContaining({ name: "Fixture" }))
+		expect(pxe.getContractArtifact).not.toHaveBeenCalled()
+		expect(pxe.registerContract).not.toHaveBeenCalled()
+		expect(pxe.registerAccount).not.toHaveBeenCalled()
 	})
 
 	test("a recompute failure propagates as the same error, never as a mismatch, and registers nothing", async () => {
