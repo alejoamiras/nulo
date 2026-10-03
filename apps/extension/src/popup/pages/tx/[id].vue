@@ -20,6 +20,7 @@ import { TokenServiceClient } from "@/wallet/services/token/client"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Utils */
+import { DETAIL_TIME_FORMAT } from "../detail-page"
 import { balanceFormatted } from "@/utils/amount.js"
 import { displaySymbol, txAmount } from "@/utils/tx-amount"
 import { copyWithToast } from "@/utils/clipboard"
@@ -88,7 +89,7 @@ const showFeeBreakdown = ref(false)
 
 const txTime = computed(() => {
 	if (!tx.value?.updatedAt) return null
-	return DateTime.fromMillis(tx.value.updatedAt).toFormat("MMM dd, yyyy 'at' HH:mm")
+	return DateTime.fromMillis(tx.value.updatedAt).toFormat(DETAIL_TIME_FORMAT)
 })
 
 const handleCopy = (target) => {
@@ -356,14 +357,11 @@ onBeforeUnmount(() => {
 
 <style module>
 .wrapper {
-	flex: 1;
-	overflow: auto;
-	scrollbar-gutter: stable;
-	background: var(--app-bg);
+	composes: wrapper from "../detail-page.module.css";
 }
 
 .content {
-	padding: 4px 20px var(--nav-clearance) 20px;
+	composes: content from "../detail-page.module.css";
 }
 
 .amount_fiat {
@@ -379,51 +377,16 @@ onBeforeUnmount(() => {
 }
 
 .meta_sep {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	color: var(--nulo-outline);
+	composes: meta_sep from "../detail-page.module.css";
 }
 
 .hero_link {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-
-	font-family: var(--font-headline);
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-	/* Was --nulo-outline (#4a463f on dark) — too dim to read. Bumped to
-	   --txt-secondary (#999187 on dark) so the link is legibly above the
-	   timestamp meta but still subordinate to primary text. */
-	color: var(--txt-secondary);
-	text-decoration: none;
-	cursor: pointer;
-
-	transition: color 0.2s var(--bezier);
-
-	& svg {
-		transition: fill 0.2s var(--bezier);
-	}
-
-	&:hover {
-		color: var(--nulo-accent);
-		& svg {
-			fill: var(--nulo-accent);
-		}
-	}
+	composes: hero_link from "../detail-page.module.css";
 }
 
 .detail_link {
+	composes: detail_link from "../detail-page.module.css";
 	color: var(--txt-secondary);
-	text-decoration: none;
-	cursor: pointer;
-	transition: color 0.2s var(--bezier);
-
-	&:hover {
-		color: var(--nulo-accent);
-	}
 }
 
 .amount_value {
@@ -435,52 +398,19 @@ onBeforeUnmount(() => {
 }
 
 .amount_caption {
-	font-family: var(--font-headline);
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
+	composes: caption from "../detail-page.module.css";
 }
 
 .transfer_type_chip {
-	align-self: center;
-
-	padding: 5px 12px;
-	border: 1px solid var(--nulo-border);
-	background: transparent;
-
-	font-family: var(--font-headline);
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 0.15em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
+	composes: type_chip from "../detail-page.module.css";
 }
 
 .address_card {
-	width: 100%;
-
-	padding: 12px;
-	border: 1px solid var(--nulo-border);
-	background: transparent;
-
-	cursor: pointer;
-
-	transition: background 0.2s var(--bezier);
-
-	&:hover {
-		background: var(--nulo-surface-low);
-	}
+	composes: address_card from "../detail-page.module.css";
 }
 
 .address_label {
-	font-family: var(--font-headline);
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
+	composes: caption from "../detail-page.module.css";
 }
 
 .details_box {
@@ -506,9 +436,7 @@ onBeforeUnmount(() => {
 }
 
 .detail_value_aux {
-	font-family: var(--font-mono);
-	font-size: 10px;
-	color: var(--nulo-outline);
+	composes: detail_value_aux from "../detail-page.module.css";
 }
 
 .calls_box {

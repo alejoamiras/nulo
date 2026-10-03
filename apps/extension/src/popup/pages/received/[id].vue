@@ -40,6 +40,7 @@ import { useToast } from "@/composables/toast"
 import { usePrices } from "@/composables/usePrices"
 
 /** Utils */
+import { DETAIL_TIME_FORMAT } from "../detail-page"
 import { balanceFormatted } from "@/utils/amount.js"
 import { copyReceivedValue } from "./received-copy"
 import { trimAddress } from "@/utils/string"
@@ -118,8 +119,8 @@ const isPublic = computed(() => received.value?.kind === "public-event")
 const receivedTime = computed(() => {
 	const inc = received.value
 	if (!inc) return null
-	if (inc.blockTimestamp) return DateTime.fromSeconds(inc.blockTimestamp).toFormat("MMM dd, yyyy 'at' HH:mm")
-	if (inc.discoveredAt) return DateTime.fromMillis(inc.discoveredAt).toFormat("MMM dd, yyyy 'at' HH:mm")
+	if (inc.blockTimestamp) return DateTime.fromSeconds(inc.blockTimestamp).toFormat(DETAIL_TIME_FORMAT)
+	if (inc.discoveredAt) return DateTime.fromMillis(inc.discoveredAt).toFormat(DETAIL_TIME_FORMAT)
 	return null
 })
 const explorerUrl = computed(() => {
@@ -339,14 +340,11 @@ onBeforeUnmount(() => {
 
 <style module>
 .wrapper {
-	flex: 1;
-	overflow: auto;
-	scrollbar-gutter: stable;
-	background: var(--app-bg);
+	composes: wrapper from "../detail-page.module.css";
 }
 
 .content {
-	padding: 4px 20px var(--nav-clearance) 20px;
+	composes: content from "../detail-page.module.css";
 }
 
 .hero_meta {
@@ -358,37 +356,11 @@ onBeforeUnmount(() => {
 }
 
 .meta_sep {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	color: var(--nulo-outline);
+	composes: meta_sep from "../detail-page.module.css";
 }
 
 .hero_link {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-
-	font-family: var(--font-headline);
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-	color: var(--txt-secondary);
-	text-decoration: none;
-	cursor: pointer;
-
-	transition: color 0.2s var(--bezier);
-
-	& svg {
-		transition: fill 0.2s var(--bezier);
-	}
-
-	&:hover {
-		color: var(--nulo-accent);
-		& svg {
-			fill: var(--nulo-accent);
-		}
-	}
+	composes: hero_link from "../detail-page.module.css";
 }
 
 .amount_value {
@@ -404,37 +376,15 @@ onBeforeUnmount(() => {
 }
 
 .transfer_type_chip {
-	align-self: center;
-
-	padding: 5px 12px;
-	border: 1px solid var(--nulo-border);
-	background: transparent;
-
-	font-family: var(--font-headline);
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 0.15em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
+	composes: type_chip from "../detail-page.module.css";
 }
 
 .address_card {
-	width: 100%;
-
-	padding: 12px;
-	border: 1px solid var(--nulo-border);
-	background: transparent;
-
-	cursor: pointer;
-
-	transition: background 0.2s var(--bezier);
-
-	&:hover {
-		background: var(--nulo-surface-low);
-	}
+	composes: address_card from "../detail-page.module.css";
 }
 
-.card_static {
+/* Outranks shared card rules reintroduced by later-loaded detail chunks. */
+.address_card.card_static {
 	cursor: default;
 
 	&:hover {
@@ -443,12 +393,7 @@ onBeforeUnmount(() => {
 }
 
 .address_label {
-	font-family: var(--font-headline);
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
+	composes: caption from "../detail-page.module.css";
 }
 
 .details_box {
@@ -470,19 +415,11 @@ onBeforeUnmount(() => {
 }
 
 .detail_value_aux {
-	font-family: var(--font-mono);
-	font-size: 10px;
-	color: var(--nulo-outline);
+	composes: detail_value_aux from "../detail-page.module.css";
 }
 
 .detail_link {
-	text-decoration: none;
-	cursor: pointer;
-	transition: color 0.2s var(--bezier);
-
-	&:hover {
-		color: var(--nulo-accent);
-	}
+	composes: detail_link from "../detail-page.module.css";
 }
 
 .fee_shimmer {
