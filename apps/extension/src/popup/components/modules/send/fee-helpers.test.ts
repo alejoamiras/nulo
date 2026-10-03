@@ -8,7 +8,10 @@ import {
 	type FeeMethodOption,
 	feeDisplay,
 	feeLine,
+	feeScopeKey,
 	formatGasBalance,
+	isLiveFeeScope,
+	liveFeeScope,
 	menuOrder,
 	resolveSavedSelection,
 	settingsForMethod,
@@ -378,5 +381,47 @@ describe("fee-helpers/feeDisplay + feeLine", () => {
 		expect(feeLine(feeDisplay(estimate, 0))).toBe("~0.000105 FJ")
 		expect(feeDisplay(null, 0.004)).toBeNull()
 		expect(feeLine(null)).toBeUndefined()
+	})
+})
+
+describe("fee-helpers/fee scope", () => {
+	test("feeScopeKey renders every field, chain id 0 included", () => {
+		expect(feeScopeKey({ profileId: "p1", networkId: "n1", chainId: 0, accountAddress: "0xabc" })).toBe("p1|n1|0|0xabc")
+	})
+
+	test("an absent identity keys as the literal undefined in every segment", () => {
+		expect(feeScopeKey(liveFeeScope({}))).toBe("undefined|undefined|undefined|undefined")
+	})
+
+	test("isLiveFeeScope stops reading the live props at the first mismatched field", () => {
+		const reads: string[] = []
+		const recording = <T extends object>(name: string, value: T): T =>
+			new Proxy(value, {
+				get: (target, key) => {
+					reads.push(`${name}.${String(key)}`)
+					return Reflect.get(target, key)
+				},
+			})
+		const live = {
+			get profile() {
+				return recording("profile", { id: "p1" })
+			},
+			get network() {
+				return recording("network", { id: "n1", chainId: 7 })
+			},
+			get account() {
+				return recording("account", { address: "0xabc" })
+			},
+		}
+		const scope = { profileId: "p1", networkId: "n1", chainId: 8, accountAddress: "0xabc" }
+		expect(isLiveFeeScope(live, scope)).toBe(false)
+		expect(reads).toEqual(["profile.id", "network.id", "network.chainId"])
+		expect(isLiveFeeScope(live, { ...scope, chainId: 7 })).toBe(true)
+	})
+
+	test("isLiveFeeScope compares strictly: a chain id of another type is another chain", () => {
+		const live = { profile: { id: "p1" }, network: { id: "n1", chainId: 7 }, account: { address: "0xabc" } }
+		const scope = { profileId: "p1", networkId: "n1", chainId: "7" as unknown as number, accountAddress: "0xabc" }
+		expect(isLiveFeeScope(live, scope)).toBe(false)
 	})
 })

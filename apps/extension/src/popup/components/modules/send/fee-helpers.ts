@@ -293,3 +293,43 @@ function privateFeeJuiceOption(privateFpc: RegisteredFpc | undefined, gasBalance
  */
 export const FEE_JUICE_BRIDGE_URL: string =
 	(import.meta.env.VITE_FEE_JUICE_BRIDGE_URL as string | undefined) ?? "https://testnet.app.unleashed.systems"
+
+/** The identity a fee card's balance snapshot belongs to. Fields stay in this order everywhere. */
+export interface FeeScope {
+	profileId: string | undefined
+	networkId: string | undefined
+	chainId: number | undefined
+	accountAddress: string | undefined
+}
+
+/** The card's identity props, any of which may be absent. */
+export interface LiveFeeIdentity {
+	profile?: { id: string } | null
+	network?: { id: string; chainId: number } | null
+	account?: { address: string } | null
+}
+
+export function liveFeeScope(live: LiveFeeIdentity): FeeScope {
+	return {
+		profileId: live.profile?.id,
+		networkId: live.network?.id,
+		chainId: live.network?.chainId,
+		accountAddress: live.account?.address,
+	}
+}
+
+/** A missing field renders as `undefined`, so an absent identity has a key of its own. */
+export function feeScopeKey(scope: FeeScope): string {
+	return `${scope.profileId}|${scope.networkId}|${scope.chainId}|${scope.accountAddress}`
+}
+
+/** Whether `scope` is still the live identity. Reads `live` lazily, stopping at the first
+ *  mismatch, so a computed calling it tracks only the props it actually read. */
+export function isLiveFeeScope(live: LiveFeeIdentity, scope: FeeScope): boolean {
+	return (
+		live.profile?.id === scope.profileId &&
+		live.network?.id === scope.networkId &&
+		live.network?.chainId === scope.chainId &&
+		live.account?.address === scope.accountAddress
+	)
+}
