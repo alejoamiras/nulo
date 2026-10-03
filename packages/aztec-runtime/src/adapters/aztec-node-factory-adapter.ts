@@ -43,11 +43,8 @@ export const SILENT_RPC_LOG: Logger = {
 	getBindings: () => ({}),
 }
 
-/**
- * Stand-alone allowlist check used by the adapter (and exportable for
- * other call sites that need to verify before persisting). Returns
- * `{ ok: true }` or `{ ok: false, reason: string }`.
- */
+/** The transport rule on the raw string; each refusal `reason` embeds the URL, host or scheme it
+ *  refused. */
 export function isAllowedRpcUrl(rpcUrl: string): { ok: true } | { ok: false; reason: string } {
 	let parsed: URL
 	try {

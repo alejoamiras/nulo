@@ -736,37 +736,32 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async getNodeStatus(networkId: string): Promise<NodeStatus> {
 		validateParams(NetworkMethodSchemas.getNodeStatus.params, [networkId], "getNodeStatus")
 		await this.ensureInitialized()
-		return this.primaryEndpointStatus(networkId, (url, hint) => this._getChainId(url, hint), "ignored")
-	}
-
-	public async probeNodeStatus(networkId: string, timeoutMs: number): Promise<NodeStatus> {
-		validateParams(NetworkMethodSchemas.probeNodeStatus.params, [networkId, timeoutMs], "probeNodeStatus")
-		await this.ensureInitialized()
-		return this.primaryEndpointStatus(
-			networkId,
-			async (url, hint) => {
-				const probed = await this.nodeFactory.probeChainId(url, timeoutMs)
-				return isLocalNetworkTarget(url, hint) ? 0 : probed
-			},
-			"applied",
-		)
-	}
-
-	/** `network`'s primary endpoint against its chain id. Only the probe is caught: a missing
-	 *  profile or row still rejects. `localKind` says whether a local network's kind zeroes the
-	 *  probed composite, as the seed URL always does. */
-	private async primaryEndpointStatus(
-		networkId: string,
-		chainIdAt: (rpcUrl: string, kindHint: ChainKind | undefined) => Promise<number>,
-		localKind: "applied" | "ignored",
-	): Promise<NodeStatus> {
 		const profile = await requireActiveProfile(this.profileService)
 		const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
 		const primary = findPrimaryEndpoint(network)
 		if (!primary) return NodeStatus.Inactive
 		try {
-			const probed = await chainIdAt(primary.rpcUrl, localKind === "applied" ? network.kind : undefined)
-			return probed === network.chainId ? NodeStatus.Active : NodeStatus.InvalidChain
+			// No kind hint, unlike probeNodeStatus: a local network off the seed URL reads InvalidChain.
+			const probedChainId = await this._getChainId(primary.rpcUrl)
+			if (probedChainId !== network.chainId) return NodeStatus.InvalidChain
+			return NodeStatus.Active
+		} catch {
+			return NodeStatus.Inactive
+		}
+	}
+
+	public async probeNodeStatus(networkId: string, timeoutMs: number): Promise<NodeStatus> {
+		validateParams(NetworkMethodSchemas.probeNodeStatus.params, [networkId, timeoutMs], "probeNodeStatus")
+		await this.ensureInitialized()
+		const profile = await requireActiveProfile(this.profileService)
+		const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
+		const primary = findPrimaryEndpoint(network)
+		if (!primary) return NodeStatus.Inactive
+		try {
+			const probed = await this.nodeFactory.probeChainId(primary.rpcUrl, timeoutMs)
+			const effective = isLocalNetworkTarget(primary.rpcUrl, network.kind) ? 0 : probed
+			if (effective !== network.chainId) return NodeStatus.InvalidChain
+			return NodeStatus.Active
 		} catch {
 			return NodeStatus.Inactive
 		}

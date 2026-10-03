@@ -1,12 +1,5 @@
-/**
- * Component tests for NewEndpointPopup — pins the popup's wiring onto the
- * shared `usePopupEntity` lifecycle: Enter submits ONLY while an
- * input/textarea is focused (a global Enter must not), the listener dies with
- * the popup, and show resets the fields. The composable's own mechanics are
- * covered in `usePopupEntity.test.ts`; these pins prove THIS popup is wired
- * through it and that its submit guard still gates the Enter path. The error
- * copy per rejection is pinned at the end, byte for byte.
- */
+/** NewEndpointPopup's wiring onto `usePopupEntity` (Enter submits only from a focused input) and
+ *  its error copy per rejection, byte for byte. */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils"
