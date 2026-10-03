@@ -354,27 +354,56 @@ export function buildJournalTerminalCardProps(op: OperationRecord, ctx: JournalT
 	const display = journalTerminalDisplay(op)
 	if (!display) return null
 
+	const fields = op.kind === "transfer" ? transferCardFields(op, ctx) : dappCardFields(op)
+	return { ...fields, ...display }
+}
+
+type JournalCardFields = Pick<
+	JournalTerminalCardProps,
+	"title" | "activityIcon" | "originLabel" | "transferTypeLabel" | "amount" | "amountSymbol"
+>
+
+/** One token lookup, and the amount formatted before the title and the transfer type are read. */
+function transferCardFields(op: OperationRecord, ctx: JournalTerminalCardCtx): JournalCardFields {
+	const token = op.tokenId !== undefined ? ctx.tokenById(op.tokenId) : undefined
+
+	// An empty or missing `amountRaw` would format as "0", a fake "0 USDC" on the card.
+	let amount: string | null = null
+	let amountSymbol: string | null = null
+	if (op.amountRaw && token) {
+		amount = balanceFormatted(op.amountRaw, token.decimals || 0, 8, { compact: true }).value
+		amountSymbol = token.symbol ?? null
+	}
+
 	return {
-		title: journalCardTitle(op, ctx.tokenById),
-		activityIcon: journalCardIcon(op),
-		originLabel: journalCardOriginLabel(op),
-		transferTypeLabel: journalCardTransferTypeLabel(op),
-		...terminalAmount(op, ctx.tokenById),
-		...display,
+		title: transferTitle(token),
+		activityIcon: "arrow-narrow-up-right",
+		originLabel: null,
+		transferTypeLabel: transferTypeLabel(op),
+		amount,
+		amountSymbol,
+	}
+}
+
+function dappCardFields(op: OperationRecord): JournalCardFields {
+	return {
+		title: dappTitle(op),
+		activityIcon: "zap",
+		originLabel: sanitizeJournalSubtitle(op.subtitle),
+		transferTypeLabel: null,
+		amount: null,
+		amountSymbol: null,
 	}
 }
 
 /*
- * The fields the awaiting and terminal cards share, so a journal op reads the same across its
- * lifecycle. Each checks the kind before reading anything else: a dApp card reads no token.
+ * The awaiting card's fields, built from the same leaves as the terminal card's so a journal op
+ * reads the same across its lifecycle. Each checks the kind before reading anything else.
  */
 
 export function journalCardTitle(op: OperationRecord, tokenById: JournalTerminalCardCtx["tokenById"]): string {
-	if (op.kind === "transfer") {
-		const token = op.tokenId !== undefined ? tokenById(op.tokenId) : undefined
-		return token?.symbol || "Transfer"
-	}
-	return op.title ? humanizeMethodName(op.title) : "Transaction"
+	if (op.kind === "transfer") return transferTitle(op.tokenId !== undefined ? tokenById(op.tokenId) : undefined)
+	return dappTitle(op)
 }
 
 export function journalCardIcon(op: OperationRecord): string {
@@ -390,18 +419,18 @@ export function journalCardOriginLabel(op: OperationRecord): string | null {
 
 export function journalCardTransferTypeLabel(op: OperationRecord): string | null {
 	if (op.kind !== "transfer") return null
-	// `TransferType.Private` is 0, so a truthy check would drop the Private → Private chip.
-	if (op.transferType === undefined) return null
-	return formatTransferType(op.transferType)
+	return transferTypeLabel(op)
 }
 
-function terminalAmount(
-	op: OperationRecord,
-	tokenById: JournalTerminalCardCtx["tokenById"],
-): Pick<JournalTerminalCardProps, "amount" | "amountSymbol"> {
-	if (op.kind !== "transfer") return { amount: null, amountSymbol: null }
-	const token = op.tokenId !== undefined ? tokenById(op.tokenId) : undefined
-	// An empty or missing `amountRaw` would format as "0", a fake "0 USDC" on the card.
-	if (!op.amountRaw || !token) return { amount: null, amountSymbol: null }
-	return { amount: balanceFormatted(op.amountRaw, token.decimals || 0, 8, { compact: true }).value, amountSymbol: token.symbol ?? null }
+function transferTitle(token: TokenForCardProps | undefined): string {
+	return token?.symbol || "Transfer"
+}
+
+function dappTitle(op: OperationRecord): string {
+	return op.title ? humanizeMethodName(op.title) : "Transaction"
+}
+
+function transferTypeLabel(op: OperationRecord): string | null {
+	// `TransferType.Private` is 0, so a truthy check would drop the Private → Private chip.
+	return op.transferType !== undefined ? formatTransferType(op.transferType) : null
 }
