@@ -99,6 +99,18 @@ async function outcome(pending: Promise<unknown>): Promise<Outcome> {
 	}
 }
 
+/** The engine's own wording for what `run` throws. A malformed stored element throws inside a
+ *  coverage or checker expression and some engines name the variable that held it, so a caller
+ *  binds the same name the production expression uses. */
+function thrownBy(run: () => unknown): { threw: unknown; message: string } {
+	try {
+		run()
+	} catch (error) {
+		return { threw: (error as Error).constructor, message: (error as Error).message }
+	}
+	throw new Error("the reference did not throw")
+}
+
 /** "covered" when the request answers with no window, "window" when one opened, else the throw. */
 async function coverage(grant: unknown, requested: unknown): Promise<unknown> {
 	const h = harness([grant])
@@ -218,6 +230,22 @@ describe("grant coverage agrees with enforcement", () => {
 			refused("Scope violation: getPrivateEvents contract not permitted by granted data.privateEvents scope"),
 		)
 	})
+
+	test("transaction scope: a held null pattern throws the coverage predicate's own TypeError", async () => {
+		const ep = null as unknown as { contract: unknown }
+		const expected = thrownBy(() => ep.contract)
+		const grant = { type: "transaction", scope: [null] }
+		expect(await coverage(grant, { type: "transaction", scope: [{ contract: TOKEN, function: "transfer" }] })).toEqual(expected)
+	})
+
+	test("private events: a held element String() cannot convert throws each path's own TypeError", async () => {
+		const element = { toString: 1 }
+		const grant = { type: "data", privateEvents: { contracts: [element] } }
+		const x = element
+		expect(await coverage(grant, { type: "data", privateEvents: { contracts: [TOKEN] } })).toEqual(thrownBy(() => String(x)))
+		const item = element
+		expect(await enforcement(grant, "getPrivateEvents", [{}, { contractAddress: TOKEN }])).toEqual(thrownBy(() => String(item)))
+	})
 })
 
 const SEND_LEG = { name: "sendTx", args: [{ calls: [] }, {}] }
@@ -268,14 +296,15 @@ describe("batch refusal", () => {
 	})
 
 	test("runnable legs run in order and an empty batch answers empty (success controls)", async () => {
-		expect(await runBatch([CHAIN_LEG, CHAIN_LEG])).toEqual({
+		const bookLeg = { name: "getAddressBook", args: [] }
+		expect(await runBatch([bookLeg, CHAIN_LEG], [{ type: "data", addressBook: true }])).toEqual({
 			result: {
 				ok: [
-					{ name: "getChainInfo", result: "0xran" },
+					{ name: "getAddressBook", result: "0xran" },
 					{ name: "getChainInfo", result: "0xran" },
 				],
 			},
-			ran: ["aztec_getChainInfo", "aztec_getChainInfo"],
+			ran: ["aztec_getAddressBook", "aztec_getChainInfo"],
 			sent: [],
 		})
 		expect((await runBatch([])).result).toEqual({ ok: [] })
@@ -316,12 +345,7 @@ type SenderRow = [label: string, tail: unknown[], expected: string | { threw: un
 
 /** The engine's own wording for converting an object whose `toString` is not callable. */
 function stringConversionError(value: unknown): { threw: unknown; message: string } {
-	try {
-		String(value)
-	} catch (error) {
-		return { threw: (error as Error).constructor, message: (error as Error).message }
-	}
-	throw new Error("String() converted the value")
+	return thrownBy(() => String(value))
 }
 
 const notAuthorized = refused("Scope violation: requested account not authorized for this dApp session")
@@ -360,6 +384,7 @@ describe("the sender a request names", () => {
 			expect(h.seen.sent).toEqual([])
 			return
 		}
+		expect(result).toEqual({ ok: "0xsent" })
 		const noFrom = label === "NO_FROM"
 		const [op] = h.seen.sent
 		expect({ account: op?.account, executionMode: op?.executionMode, from: op?.opts?.from }).toEqual({
@@ -379,6 +404,7 @@ describe("the sender a request names", () => {
 				expect(h.seen.executed).toEqual([])
 				return
 			}
+			expect(result).toEqual({ ok: "0xran" })
 			const [op] = h.seen.executed as Array<Operation & { accountAddress?: string; opts?: { from?: unknown } }>
 			expect({ account: op?.accountAddress, from: op?.opts?.from }).toEqual({ account: expected, from: expected })
 		},
