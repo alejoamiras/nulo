@@ -61,6 +61,33 @@ import {
 
 export * from "./spec"
 
+/** What a legacy (rc.2-era, pre-OPFS) IndexedDB delete does when an open connection blocks it. */
+type BlockedDeletePolicy =
+	/** Best-effort sweep: a blocked delete is skipped (resolves false), so the sweep never hangs. */
+	| { onBlocked: "skip"; warnArgs: (name: string) => unknown[] }
+	/** Verified erasure: wait for the blocker to close, then reject — never a false "deleted",
+	 *  and never a null rejection reason. */
+	| { onBlocked: "wait"; timeoutMs: number; warnArgs: (name: string) => unknown[] }
+
+const LEGACY_SWEEP: BlockedDeletePolicy = {
+	onBlocked: "skip",
+	warnArgs: (name) => ["deleteDatabase blocked (DB still in use):", name],
+}
+const LEGACY_SWEEP_KEYVAL: BlockedDeletePolicy = {
+	onBlocked: "skip",
+	warnArgs: () => ["deleteDatabase blocked (DB still in use): keyval-store"],
+}
+const VERIFIED_ERASE: BlockedDeletePolicy = {
+	onBlocked: "wait",
+	timeoutMs: 5_000,
+	warnArgs: (name) => ["deleteDatabase blocked (waiting for close):", name],
+}
+
+/** Shared across every profile's legacy PXE DBs, so it may go only once none remains. */
+const KEYVAL_STORE = "keyval-store"
+const isLegacyPxeDb = (x: IDBDatabaseInfo) => x.name?.startsWith(PXE_DATA_DIR_ROOT)
+const findKeyvalStore = (dbs: IDBDatabaseInfo[]) => dbs.find((x) => x.name === KEYVAL_STORE)
+
 /**
  * Minimal structural shape of profile-service surface this service uses.
  * Extension's `ProfileServiceClient` satisfies this via structural
@@ -234,7 +261,7 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 	private async sweepOrphanStores(): Promise<void> {
 		const opfsDirs = await listChainStoreDirs()
 		const dbs = await indexedDB.databases()
-		const pxes = dbs.filter((x) => x.name?.startsWith(PXE_DATA_DIR_ROOT))
+		const pxes = dbs.filter(isLegacyPxeDb)
 		if (opfsDirs.length) {
 			const profiles = await this.profiles.getProfiles()
 			// Remove orphans whole-profile-at-a-time: the profile is POSITIVELY absent
@@ -282,18 +309,10 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 	 *  plus the shared keyval-store once none remain. */
 	private async sweepLegacyIndexedDbs(dbs: IDBDatabaseInfo[], pxes: IDBDatabaseInfo[]): Promise<void> {
 		for (let i = pxes.length - 1; i >= 0; i--) {
-			const deleted = await new Promise<boolean>((resolve, reject) => {
-				const req = indexedDB.deleteDatabase(pxes[i].name!)
-				req.onsuccess = () => resolve(true)
-				req.onerror = () => reject(req.error)
-				req.onblocked = () => {
-					this.logWarn("deleteDatabase blocked (DB still in use):", pxes[i].name)
-					resolve(false) // Skip — don't hang the sweep forever
-				}
-			})
+			const deleted = await this.deleteDb(pxes[i].name!, LEGACY_SWEEP)
 			// Only a REAL deletion clears the entry: a blocked DB survives, and the
-			// shared keyval-store guard below must see it (review finding — the
-			// unconditional splice made the emptiness check vacuous).
+			// shared keyval-store guard below must see it — an unconditional splice
+			// makes the emptiness check vacuous.
 			if (deleted) pxes.splice(i, 1)
 		}
 		if (pxes.length) return
@@ -302,19 +321,12 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 		// clearProfileState draining the same list) would make deleting the
 		// SHARED keyval-store cross-profile corruption — same re-list
 		// clearProfileState itself performs.
-		const remaining = (await indexedDB.databases()).some((x) => x.name?.startsWith(PXE_DATA_DIR_ROOT))
+		const remaining = (await indexedDB.databases()).some(isLegacyPxeDb)
 		if (remaining) return
-		const keyval = dbs.find((x) => x.name === "keyval-store")
+		// The boot snapshot, deliberately: a store created after boot is never the sweep's to delete.
+		const keyval = findKeyvalStore(dbs)
 		if (!keyval) return
-		await new Promise<void>((resolve, reject) => {
-			const req = indexedDB.deleteDatabase(keyval.name!)
-			req.onsuccess = () => resolve()
-			req.onerror = () => reject(req.error)
-			req.onblocked = () => {
-				this.logWarn("deleteDatabase blocked (DB still in use): keyval-store")
-				resolve()
-			}
-		})
+		await this.deleteDb(keyval.name!, LEGACY_SWEEP_KEYVAL)
 	}
 
 	public async getContractInstance(
@@ -734,7 +746,7 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 				this.bumpChainPurgeEpoch(profileId, chainId)
 				await this.registry.dispose(profileId, chainId)
 				await removeChainStoreDir({ profileId, chainId })
-				await this.deleteDb(chainDataDir({ profileId, chainId }))
+				await this.deleteDb(chainDataDir({ profileId, chainId }), VERIFIED_ERASE)
 				this.bumpChainPurgeEpoch(profileId, chainId)
 			})
 		})
@@ -777,15 +789,15 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 			await removeProfileStoreDirs(profileId)
 			const dbPrefix = chainDataDirPrefix(profileId)
 			for (const db of await indexedDB.databases()) {
-				if (db.name?.startsWith(dbPrefix)) await this.deleteDb(db.name)
+				if (db.name?.startsWith(dbPrefix)) await this.deleteDb(db.name, VERIFIED_ERASE)
 			}
 			// keyval-store is SHARED across every profile's PXE DBs — deleting it
 			// unconditionally corrupts a surviving profile's PXE (finding D). Only
 			// delete it once NO PXE DB remains.
-			const remaining = (await indexedDB.databases()).some((x) => x.name?.startsWith(PXE_DATA_DIR_ROOT))
+			const remaining = (await indexedDB.databases()).some(isLegacyPxeDb)
 			if (!remaining) {
-				const keyval = (await indexedDB.databases()).find((x) => x.name === "keyval-store")
-				if (keyval?.name) await this.deleteDb(keyval.name)
+				const keyval = findKeyvalStore(await indexedDB.databases())
+				if (keyval?.name) await this.deleteDb(keyval.name, VERIFIED_ERASE)
 			}
 			// SUCCESS ONLY: drop the barrier so a re-added profile gets a fresh one. On FAILURE the
 			// entry is RETAINED (this line is skipped by the throw) so the profile stays a known
@@ -858,25 +870,25 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 	}
 
 	/**
-	 * Delete an IndexedDB database, AWAITED. `onerror` REJECTS (never
-	 * false-success — a "deleted" profile must be verifiably erased). `onblocked`
-	 * waits up to `timeoutMs` for the blocking connection to close (then
-	 * `onsuccess` fires); if still blocked at the deadline, reject rather than
-	 * hang forever or silently lie.
+	 * Delete the IndexedDB database `name`, resolving true once deleted; `policy` decides what a
+	 * `blocked` event does. Deliberately not `async`: callers' awaits must see this exact promise,
+	 * since an extra hop shifts every step after the delete.
 	 */
-	private deleteDb(name: string, timeoutMs = 5_000): Promise<void> {
-		return new Promise<void>((resolve, reject) => {
+	private deleteDb(name: string, policy: BlockedDeletePolicy): Promise<boolean> {
+		return new Promise<boolean>((resolve, reject) => {
 			const req = indexedDB.deleteDatabase(name)
 			let timer: ReturnType<typeof setTimeout> | undefined
 			const finish = (fn: () => void) => {
 				if (timer) clearTimeout(timer)
 				fn()
 			}
-			req.onsuccess = () => finish(resolve)
-			req.onerror = () => finish(() => reject(req.error ?? new Error(`deleteDatabase failed: ${name}`)))
+			req.onsuccess = () => finish(() => resolve(true))
+			req.onerror = () =>
+				finish(() => reject(policy.onBlocked === "skip" ? req.error : (req.error ?? new Error(`deleteDatabase failed: ${name}`))))
 			req.onblocked = () => {
-				this.logWarn("deleteDatabase blocked (waiting for close):", name)
-				timer = setTimeout(() => reject(new Error(`deleteDatabase blocked past timeout: ${name}`)), timeoutMs)
+				this.logWarn(...policy.warnArgs(name))
+				if (policy.onBlocked === "skip") return resolve(false)
+				timer = setTimeout(() => reject(new Error(`deleteDatabase blocked past timeout: ${name}`)), policy.timeoutMs)
 			}
 		})
 	}
