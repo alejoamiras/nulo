@@ -14,7 +14,7 @@ import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import type { Action } from "../spec"
 import type { FeeEstimate, FeeStrategy, FeeStrategyContext, FeeStrategyDeps } from "./fee-strategy"
-import { finalizeGasLimits, isInitWrapped, probedFirstSimOpts, startEstimateTask, suggestGasLimits } from "./fee-strategy"
+import { finalizeGasLimits, isInitWrapped, probedFirstSimOpts, startEstimateTask, suggestGasLimits, validatedSimOpts } from "./fee-strategy"
 
 export class FeeJuiceStrategy implements FeeStrategy {
 	public readonly kind = "fj" as const
@@ -48,12 +48,7 @@ export class FeeJuiceStrategy implements FeeStrategy {
 						task,
 					)
 					suggestGasLimits(built.txRequest, ctx.op.fee)
-					simulatedTx = await this.deps.simulateTxTask(
-						built.pxe,
-						built.txRequest,
-						{ simulatePublic: true, skipFeeEnforcement: true, scopes: [built.account.address] },
-						task,
-					)
+					simulatedTx = await this.deps.simulateTxTask(built.pxe, built.txRequest, validatedSimOpts(built), task)
 				}
 			}
 			await finalizeGasLimits(

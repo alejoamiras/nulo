@@ -89,6 +89,7 @@ import {
 	probedFirstSimOpts,
 	startEstimateTask,
 	suggestGasLimits,
+	validatedSimOpts,
 } from "./fee-strategy"
 
 /** The row as the estimate's sponsor, only when the kernel of the path's final simulation names
@@ -166,12 +167,7 @@ export class FpcStrategy implements FeeStrategy {
 					if (ctx.signal?.aborted) throw new JobCancelledSentinel("")
 					built = await this.deps.txBuilder.buildStandard(ctx.op, ctx.fence, AccountFeePaymentMethodOptions.EXTERNAL, task)
 					suggestGasLimits(built.txRequest, ctx.op.fee)
-					simulatedTx = await this.deps.simulateTxTask(
-						built.pxe,
-						built.txRequest,
-						{ simulatePublic: true, skipFeeEnforcement: true, scopes: [built.account.address] },
-						task,
-					)
+					simulatedTx = await this.deps.simulateTxTask(built.pxe, built.txRequest, validatedSimOpts(built), task)
 				}
 			}
 			const baseFees = (await predictedWorstMinFees(built.node)).mul(multiplier)
@@ -248,12 +244,7 @@ export class FpcStrategy implements FeeStrategy {
 						task,
 					)
 					suggestGasLimits(built.txRequest, ctx.op.fee)
-					simulatedTx = await this.deps.simulateTxTask(
-						built.pxe,
-						built.txRequest,
-						{ simulatePublic: true, skipFeeEnforcement: true, scopes: [built.account.address] },
-						task,
-					)
+					simulatedTx = await this.deps.simulateTxTask(built.pxe, built.txRequest, validatedSimOpts(built), task)
 				}
 			}
 			// Fetch actual fees for FPC fee payload (with priority multiplier). Same
@@ -274,12 +265,7 @@ export class FpcStrategy implements FeeStrategy {
 				baseFees,
 				built.txRequest.txContext.gasSettings.maxPriorityFeesPerGas,
 			)
-			simulatedTx = await this.deps.simulateTxTask(
-				built.pxe,
-				built.txRequest,
-				{ simulatePublic: true, skipFeeEnforcement: true, scopes: [built.account.address] },
-				task,
-			)
+			simulatedTx = await this.deps.simulateTxTask(built.pxe, built.txRequest, validatedSimOpts(built), task)
 			maxFee = simulatedTx.gasUsed.totalGas.mul(ctx.gasPadding).computeFee(baseFees)
 			ctx.op.actions.splice(
 				0,
