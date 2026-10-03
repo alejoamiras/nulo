@@ -447,11 +447,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		// to the active profile (otherwise we'd kill the active
 		// profile's scheduler for a same-address inactive account).
 		if (activeProfileId && account.profileId === activeProfileId) {
-			const key = this.schedulerKey(networkId, account.address)
-			const interval = this.schedulers.get(key)
-			if (interval) clearInterval(interval)
-			this.schedulers.delete(key)
-			this.watchedContracts.delete(key)
+			this.stopNoteScheduler(this.schedulerKey(networkId, account.address))
 		}
 
 		// Wipe records belonging to THIS account on THIS network.
@@ -693,7 +689,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		try {
 			const network = await this.networkService.getNetwork(networkId)
 			const tokens = await this.tokenService.getTokensRaw(profileId)
-			return tokens.some((t) => t.contract === contract && t.chainId === network.chainId)
+			return findToken(tokens, contract, network.chainId) !== undefined
 		} catch {
 			// On any lookup failure, fail CLOSED (return false) — refusing
 			// a trust flip is safer than honoring one on a contract whose
@@ -1038,6 +1034,14 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		})
 	}
 
+	/** Tear down the note scheduler for `key`. */
+	private stopNoteScheduler(key: string): void {
+		const interval = this.schedulers.get(key)
+		if (interval) clearInterval(interval)
+		this.schedulers.delete(key)
+		this.watchedContracts.delete(key)
+	}
+
 	/** Tear down the public-event scheduler for `(networkId, contract)`. */
 	private stopPublicScheduler(networkId: string, contract: string): void {
 		const key = this.publicSchedulerKey(networkId, contract)
@@ -1225,12 +1229,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			const contracts = this.watchedContracts.get(key)
 			if (!contracts) continue
 			contracts.delete(contract)
-			if (contracts.size === 0) {
-				const interval = this.schedulers.get(key)
-				if (interval) clearInterval(interval)
-				this.schedulers.delete(key)
-				this.watchedContracts.delete(key)
-			}
+			if (contracts.size === 0) this.stopNoteScheduler(key)
 		}
 	}
 
@@ -1390,7 +1389,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 
 		// Live re-reads INSIDE the lock.
 		const tokens = await this.tokenService.getTokensRaw(profileId)
-		const token = tokens.find((t) => t.contract === contract && t.chainId === chainId)
+		const token = findToken(tokens, contract, chainId)
 		if (!token) return // Token removed concurrently.
 
 		// Re-read tx-suppression sets live. The outer-scan-loop
@@ -1537,7 +1536,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				// snapshots predate this critical section; a concurrent
 				// onTokenDeleted may have made them stale.
 				const liveTokens = await this.tokenService.getTokensRaw(profileId)
-				const token = liveTokens.find((t) => t.contract === trust.contract && t.chainId === network.chainId)
+				const token = findToken(liveTokens, trust.contract, network.chainId)
 				if (!token) return
 				const liveTrust = await this.repo.getTrust(profileId, networkId, trust.contract)
 				if (liveTrust?.state !== "pending") return
@@ -2068,7 +2067,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		if (this.serviceEpoch !== epochAtStart) return
 		const tokens = await this.tokenService.getTokensRaw(profileId)
 		if (this.serviceEpoch !== epochAtStart) return
-		const token = tokens.find((t) => t.contract === contract && t.chainId === chainId)
+		const token = findToken(tokens, contract, chainId)
 		if (!token) return // token removed concurrently
 
 		const id = publicRecordId(profileId, networkId, ev.txHash, ev.logIndexWithinTx)
@@ -2398,6 +2397,10 @@ export function orphanedByReconciliation(
 	const aboveCheckpoint = record.l2BlockNumber > marker.upperBound
 	if (!aboveCheckpoint && canonicalByHeight.get(record.l2BlockNumber) === record.blockHash) return false
 	return true
+}
+
+function findToken(tokens: Token[], contract: string, chainId: number): Token | undefined {
+	return tokens.find((t) => t.contract === contract && t.chainId === chainId)
 }
 
 /** The first-receive prompt. Fields are listed, never spread: a scan context carries functions. */
