@@ -157,6 +157,7 @@ Read on `harden-dedupe` at `7450928c`. The file is byte-identical to recon's rea
   - Callers serialize access (the facade lock).
 - The two hand-added-TTL comments (`:229-231`, `:2758-2759`) collapse to one sentence on `take`.
 - The two fields keep their names and become `ExpiringStash` instances whose `wipe` zeroizes exactly today's pair, in today's order.
+- `PENDING_RESTORE_TTL_MS`, with its doc, moves above the two fields that now read it in their initializers. TypeScript refuses a static read before its declaration (TS2729). Statics initialize before any instance either way, so the value is unchanged.
 - `sweepStalePendingRestore` stays as a two-line method, so its six callers and its lock doc stay.
 - `dropPendingRestoreSecret` and `dropPendingDekRewrap` are deleted, and their four callers call `drop`.
 - Consume keeps its own sweep call first, then `take(profileId, now)`, and still returns `{ sourceDek, destinationDek }`.
@@ -312,22 +313,27 @@ All new cases go in one new `describe` block in `apps/extension/src/wallet/servi
 
 **Mutation check.** Each mutant is applied by hand after Phase 2 and then reverted; the table names the red each one must produce.
 
-| mutant | expected red |
-|---|---|
-| builder MACs the backup id instead of the loop's id | P3 vector and oracle |
-| builder MACs `sourceDek` | P3 vector, oracle, T3 healthy twin |
-| P4 MACs the old `dekSealed` | P4 vector and oracle |
-| master and DEK swapped in `envelopeMacFor` | every password vector, oracle, every healthy twin |
-| two slots swapped in `macEnvelopeV3` | every password vector, healthy twins, bearer restore |
-| one literal key reordered | that path's vector |
-| a tail returns without `await` | T2/T3/T4 healthy twins (zeroed DEK) |
-| the tail emits before the open, drops the emit, or inverts `!dek` | the tail table |
-| `take` placed before finalize's type refusal | the type-refusal pin |
-| `sweep` ignores `exceptId` | the type-refusal pin |
-| `>` for `>=` in `take` | `:1320-1351` |
-| `>` for `>=` in `sweep` | the sweep-boundary pin |
-| the wrong buffer pair in a `wipe` strategy | `:1380-1406` and the consume pin |
-| the bearer restore's envelope projection drifts | `:2705-2714` (or its added pin) |
+The "observed" column records the run at the Phase 2 head: every mutant went red.
+
+| mutant | expected red | observed (failing tests) |
+|---|---|---|
+| builder MACs the backup id instead of the loop's id | P3 vector and oracle | 1: the P3 vector case |
+| builder MACs `sourceDek` | P3 vector, oracle, T3 healthy twin | 6, including the P3 vector and the T3 healthy twin |
+| P4 MACs the old `dekSealed` | P4 vector and oracle | 2, including the P4 vector |
+| master and DEK swapped in `envelopeMacFor` | every password vector, oracle, every healthy twin | 25 |
+| two slots swapped in `macEnvelopeV3` | every password vector | 4: the four password vectors. Compute and verify share the projection, so only the literal vectors see a consistent swap |
+| one passkey literal key reordered | the passkey vectors | 4: the four passkey vectors |
+| a tail returns without `await` (T2, T3, T4 separately) | that tail's healthy twin (zeroed DEK) | 1, 4 and 2, each including its healthy twin |
+| the tail emits before the open | the tail table | 7 |
+| the tail drops the emit | the tail table | 12 |
+| the tail inverts `!dek` | the tail table | 17 |
+| `take` placed before finalize's type refusal | the type-refusal pin | 1: the pin |
+| `sweep` ignores `exceptId` | the type-refusal pin | 1: the pin |
+| `>` for `>=` in `take` | `:1320-1351` | 2: that test and the expired-consume pin |
+| `>` for `>=` in `sweep` | the sweep-boundary pin | 1: the pin |
+| the restore-secret `wipe` misses the DEK | `:1380-1406`, the sweep-boundary pin | 3 |
+| the rewrap `wipe` misses the destination DEK | `:1380-1406`, the expired-consume pin | 2 |
+| the bearer restore's envelope projection drifts | `:2705-2714` | 7, including `:2705-2714` |
 
 ### Phase 2: the refactor, test file untouched
 
